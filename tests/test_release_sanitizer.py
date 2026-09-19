@@ -187,6 +187,34 @@ def test_safe_tar_extraction_exists_and_is_consistent():
             f"多出来的是绕过安全解压的调用点")
 
 
+def test_scaffold_notes_survive_gitignore():
+    """落点说明必须**真的能进仓库**，不能只躺在 zip 里。
+
+    git 规则：**父目录被排除时，`!` 无法再包含其中的文件**。
+    `.gitignore` 里原来写着 `voice_cache/` + `!voice_cache/摆放说明.txt`——
+    那条否定是**惰性的**。2026-09-19 实测：voice_cache / share_images / SnowLuma
+    三个落点说明**从来没进过仓库**（`git check-ignore` 证实），只有 zip 里有。
+    clone 的人照 README 找落点指引，一个都找不到。
+    修法是排除「目录内容」（`voice_cache/*`）而不是目录本身。
+    """
+    import subprocess
+
+    snap = BASE.parent / "小糖糖-发布"
+    if not snap.is_dir():
+        pytest.skip("快照不存在——先跑 python tools/准备发布.py")
+    notes = sorted(snap.rglob("摆放说明.txt"))
+    assert notes, "快照里一个落点说明都没有？"
+    ignored = []
+    for p in notes:
+        r = subprocess.run(["git", "check-ignore", "-q", p.as_posix()],
+                           cwd=snap, capture_output=True)
+        if r.returncode == 0:          # 0 = 被忽略
+            ignored.append(p.relative_to(snap).as_posix())
+    assert not ignored, (
+        f"这些落点说明被 .gitignore 吃掉了，不会进仓库：{ignored}\n"
+        f"  多半是写了 `目录/` —— 改成 `目录/*` 才能让 `!目录/文件` 生效")
+
+
 def test_scrub_cfg_scrubs_the_real_config_key():
     """脱敏分支必须认 config.yaml 里**真实的**键名，不能绑死在字面量上。
 

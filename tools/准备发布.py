@@ -508,14 +508,19 @@ def main() -> None:
         "# 密钥与隐私——绝不提交\n"
         ".env\nconfig.yaml\n*.db\n*.db-shm\n*.db-wal\n"
         "memory_sync/\nQQ数据备份-*/\n\n"
-        "# 运行时产物\n__pycache__/\n*.pyc\n.pytest_cache/\nvoice_cache/\n"
+        # ⚠ 排除「目录内容」而不是目录本身（`voice_cache/*` 而非 `voice_cache/`）：
+        #   git 的规则是**父目录被排除时，`!` 无法再包含其中的文件**。
+        #   原来三个落点目录都写成 `xxx/` + `!xxx/摆放说明.txt`，那条否定是**惰性的**——
+        #   实测 voice_cache / share_images / SnowLuma 的摆放说明从来没进过仓库，
+        #   只在 zip 里有。clone 的人照 README 想找落点指引，一个都找不到。
+        "# 运行时产物\n__pycache__/\n*.pyc\n.pytest_cache/\nvoice_cache/*\n"
         # 生成物索引：2026-09-19 事故——knowledge/.knowledge_index.sqlite3 里存着
         # knowledge/*.md 的切块副本，源文件清了本机路径它还在，随包发了出去。
         "# 生成物（派生数据不该进仓库）\n*.sqlite3\n*.sqlite3-shm\n*.sqlite3-wal\n"
-        "share_images/\ngenerated_images/\ntemp_files/\n*.log\n*.json\n"
+        "share_images/*\ngenerated_images/\ntemp_files/\n*.log\n*.json\n"
         # SnowLuma 是第三方程序，不能进仓库；但落点目录的摆放说明要留
         # （没有它用户不知道该往哪解压——2026-09-19 补）
-        "SnowLuma/\n!SnowLuma/摆放说明.txt\n"
+        "SnowLuma/*\n!SnowLuma/摆放说明.txt\n"
         # 贴图情绪索引不是运行时产物——原来被上面的 *.json 一刀切挡在仓库外，
         # 于是 clone 到的仓库比版本 zip 少一个文件（贴图只能退回按文件名猜情绪）。
         # 2026-09-18 核实：内容是贴图描述，无隐私字段。

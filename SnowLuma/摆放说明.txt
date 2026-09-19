@@ -1,0 +1,19 @@
+🐱 SnowLuma —— QQ 协议端（需要你手动放一次）
+
+糖糖靠它连上 QQ，但它不属于本项目：SnowLuma 的许可协议不允许随本包分发，
+也不允许由安装程序代下。所以这一步只能你自己来，一次即可。
+
+怎么放：
+  1. 打开 https://github.com/SnowLuma/SnowLuma/releases
+  2. 下载 Windows x64 版（文件名形如 SnowLuma-v1.14.9-win-x64.zip）
+  3. 解压到本目录下——解压完应该是这样的层级：
+         SnowLuma/                        ← 就是本目录
+           └─ SnowLuma-v1.14.9-win-x64/   ← 解压出来的文件夹
+                └─ SnowLuma.exe
+
+装好后：控制台「启动 SnowLuma」按钮就能用了。安装程序也会在开头检查并提示。
+
+也可以换用任意其他 OneBot 11 反向 WebSocket 实现，糖糖不绑定 SnowLuma。
+
+⚠️ 注意别和项目根目录的 onebot/ 搞混：那个是糖糖**自己**的 OneBot 适配层代码，
+   是程序的一部分；本目录放的是**第三方**的 SnowLuma 程序本体。
