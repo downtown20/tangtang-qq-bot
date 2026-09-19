@@ -154,6 +154,43 @@ def test_claimed_numbers_match_reality():
         f"README 写 {facts['歌曲数'][0]} 首歌，按曲库口径实际 {len(audio)}"
 
 
+def _packer_tag() -> str:
+    packer = (BASE / "tools" / "打包发布版本.py").read_text(encoding="utf-8")
+    m = re.search(r'^TAG = "([^"]+)"', packer, re.M)
+    assert m, "打包脚本里找不到 TAG"
+    return m.group(1)
+
+
+def test_release_tag_is_three_part():
+    """版本号必须三段式 `vX.YY.ZZ`（2026-09-20 主人定）。
+
+    v1.0~v1.5 用的两位式已弃用——那样很快就数到 2.x，而糖糖还在早期。
+    新规则主号保持 0：`v0.01.00` → `v0.02.00` → …
+
+    例外：`v1.5` 是切换前已发布的最后一条，允许留着；下一版起必须三段式。
+    """
+    tag = _packer_tag()
+    if tag == "v1.5":
+        return                                    # 切换前的终点，别再往上加
+    assert re.fullmatch(r"v\d+\.\d{2}\.\d{2}", tag), (
+        f"版本号格式不对：{tag!r}——应为三段式 v0.MM.PP（如 v0.01.00）。\n"
+        f"  两位式（v1.6 / v2.0）已弃用，见 tools/打包发布版本.py 里 TAG 上方的规则")
+
+
+def test_changelog_newest_version_matches_tag():
+    """更新日志里最新那条必须就是当前 TAG——改版本号就得同步写更新日志。
+
+    这条闸门管的是「发完版忘了写更新日志」这件小事，它每年都会发生。
+    """
+    log = BASE / "docs" / "发布" / "更新日志.md"
+    assert log.is_file(), "找不到 docs/发布/更新日志.md"
+    versions = re.findall(r"^## (v[\d.]+)", log.read_text(encoding="utf-8"), re.M)
+    assert versions, "更新日志里没解析到版本小节（格式：`## vX.Y.Z（日期）`）"
+    assert versions[0] == _packer_tag(), (
+        f"更新日志最新一条是 {versions[0]}，而打包脚本的 TAG 是 {_packer_tag()}——"
+        f"两者必须一致（发版时要往更新日志顶部加一节）")
+
+
 def test_anti_pattern_count_matches_claude_md():
     """README 说「N 条错误模式」，CLAUDE.md 的反模式表就得真有 N 行。
 

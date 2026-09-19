@@ -39,7 +39,16 @@ SNAPSHOT = BASE.parent / "小糖糖-发布"
 OUT = BASE.parent / "小糖糖-发布版"
 ATTACH = OUT / "附件"
 
-TAG = "v1.5"   # ← 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读
+# 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读。
+#
+# [!] 编号规则（2026-09-20 主人定）：**三段式 `v0.MM.PP`**。
+#   v1.0~v1.5 那个两位式已经弃用——按那种数法很快就爬到 2.x 去了，
+#   而糖糖还在早期。主号保持 0，中号两位递增（0.01.00 → 0.02.00 → …），
+#   末位留给同一版本的补丁。由 test_release_tag_is_three_part 钉住格式，
+#   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
+#
+# 下一版（v1.5 之后）应为 v0.01.00。
+TAG = "v1.5"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
