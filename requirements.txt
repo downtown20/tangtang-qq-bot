@@ -7,7 +7,16 @@ httpx>=0.27.0
 pyyaml>=6.0
 python-dotenv>=1.0
 jinja2>=3.0            # system prompt 模板（context_builder.py 顶层导入，缺了直接崩）
-numpy>=1.24
+# ⚠ numpy **必须钉上界**（2026-09-19 实测，别改回去）：
+#   RVC 那条依赖链是 NumPy 1.x 编译的——`pyworld` 报 "numpy.dtype size changed"、
+#   `numba 0.56` 直接要求 numpy<1.24。装到 2.x 就是
+#   `from infer.modules.vc.modules import VC` 一路 ImportError，歌唱工作室起不来。
+#   1.23.5 是实测能同时满足 numba(<1.24) 与 pyworld(1.x) 的版本，
+#   且糖糖全套测试在它上面 2002 通过。
+numpy>=1.23.5,<1.24
+# RVC 索引读取。1.9+ 的 wheel 只认 NumPy 2（报 No module named 'numpy._core'），
+# 与上面的 numpy<1.24 直接冲突——所以钉在 1.7.4。
+faiss-cpu==1.7.4
 
 # ── L1 高质量记忆（强烈建议——缺了记忆降级为关键词匹配）──
 jieba>=0.42            # 中文分词——知识库+插话+话题追踪（纯 Python，无编译前置）

@@ -117,6 +117,52 @@ _PIPELINE_DOWNLOADS = {
     "人声分离脚本": ("tools/separate_vocals.py", "", "pkg"),
 }
 
+# 「打开目录」失败时的解释表。
+#
+# 2026-09-19 主人实机反馈后加：原来只弹「找不到目录：<路径>」——用户拿到一个路径，
+# 不知道**为什么会缺**、也不知道下一步做什么。他当时的原话是「我选的模式是基础的文字
+# 对话，是基础的文字对话没有这个功能嘛？确认清楚，如果是就给足提示」。
+#
+# 口径：每个按钮都要能回答「这个目录属于哪个功能、怎么才能有」。
+# 键用页面上看得懂的功能名，不用内部代号。查询走 _missing_dir_message（纯函数，可测）。
+_MISSING_DIR_HINT = {
+    "voice": (
+        "语音模型还没装",
+        "这个目录属于「语音」功能（让糖糖开口说话）。\n\n"
+        "安装时如果没勾「发语音+听懂语音消息」，就不会有它——模型约 6.5G，"
+        "是可选下载项，没有随包附带。\n\n"
+        "补装：重跑 安装糖糖.bat，勾上那一项，装完这里就有了。",
+    ),
+    "rvc": (
+        "翻唱制作组件不在发布包里",
+        "这个目录属于「歌唱工作室」——把一首歌换成糖糖声线的**制作工具**，"
+        "和点歌播放不是一回事。\n\n"
+        "它需要 RVC 运行环境 + HuTao 模型，体积很大，没有随发布包附带。\n"
+        "想听糖糖唱歌**不需要**它：41 首预录成品已经随包自带，点歌即播。",
+    ),
+}
+
+
+def _missing_dir_message(path, feature=None) -> tuple[str, str]:
+    """目录缺失时该说什么。纯函数——**弹窗里显示什么，测试就断言什么**。
+
+    刻意不放进方法里：放进 GUI 就得把窗口开起来才能测，那条测试迟早被跳过。
+    """
+    return _MISSING_DIR_HINT.get(feature, ("目录不存在", "本机没有这个目录。"))
+
+
+# RVC 索引必须用**相对路径**传给 infer_cli.py，且 cwd 必须是 RVC 目录。
+#
+# 2026-09-19 实测（faiss 1.7.4 + 中文 Windows）：faiss 的 C++ 端用窄字符 fopen 打开索引，
+# 绝对路径里的中文（项目装在中文名目录下时必然如此）会被按 ANSI 代码页解释成乱码：
+#
+#     绝对路径（含中文）   RuntimeError: FileIOReader ... could not open
+#     相对路径（纯 ASCII） ntotal=95555   ← 正常
+#
+# 而且 RVC 对索引加载失败是**静默降级**的——照样出音频，只是音色相似度更低，
+# 界面上一个错都不报。开发机上因此一直跑在无索引模式，没人发现。
+RVC_INDEX_REL = "assets/weights/hutao.index"
+
 PROJECT_GITHUB_URL = "https://github.com/downtown20/tangtang-qq-bot" # Star 引导跳转（2026-09-05）
 # SnowLuma 官方发布页：糖糖连 QQ 必需，但它是第三方协议端，EULA 5.4 禁止
 # 「并入第三方安装包」与「通过自动化脚本部署」——本项目不能随包发、也不能代下，
@@ -3371,7 +3417,8 @@ class TangTangQtConsole(QMainWindow):
         finetune_btn._lucide_name = "folder-open"
         finetune_btn.setToolTip("角色微调模型：gpt-sovits/models/michele/")
         finetune_btn.clicked.connect(
-            lambda _checked=False: self._open_dir(BASE / "gpt-sovits" / "models" / "michele")
+            lambda _checked=False: self._open_dir(
+                BASE / "gpt-sovits" / "models" / "michele", feature="voice")
         )
         folder_row.addWidget(finetune_btn)
         base_btn = QPushButton("底模（V4 等）")
@@ -3380,14 +3427,15 @@ class TangTangQtConsole(QMainWindow):
         base_btn.setToolTip("GPT-SoVITS 官方底模：gpt-sovits/GPT_SoVITS/pretrained_models/")
         base_btn.clicked.connect(
             lambda _checked=False: self._open_dir(
-                BASE / "gpt-sovits" / "GPT_SoVITS" / "pretrained_models")
+                BASE / "gpt-sovits" / "GPT_SoVITS" / "pretrained_models", feature="voice")
         )
         folder_row.addWidget(base_btn)
         speaker_btn = QPushButton("参考音频")
         speaker_btn.setIconSize(QSize(15, 15))
         speaker_btn._lucide_name = "folder-open"
         speaker_btn.clicked.connect(
-            lambda _checked=False: self._open_dir(BASE / "gpt-sovits" / "speakers")
+            lambda _checked=False: self._open_dir(
+                BASE / "gpt-sovits" / "speakers", feature="voice")
         )
         folder_row.addWidget(speaker_btn)
         folder_row.addStretch()
@@ -3482,6 +3530,29 @@ class TangTangQtConsole(QMainWindow):
         name = preset_names.get(key, "自定义")
         self._log(f"✅ 情绪预设「{name}」已应用并保存")
 
+    def _studio_availability_hint(self) -> QLabel:
+        """歌唱工作室顶部状态：组件齐不齐、缺的是什么、要不要管。
+
+        判据直接用 `_PIPELINE_DOWNLOADS`——**「一键全流程」判断缺什么用的就是这张表**，
+        这里再抄一份必然漂移。单一真相源。
+        """
+        missing = [label for label, (rel, _url, _kind) in _PIPELINE_DOWNLOADS.items()
+                   if not (BASE / rel).exists()]
+        if not missing:
+            # 只说「文件在位」——这里查的就是文件。写「可以转换」就越界了：
+            # 2026-09-19 实测开发机文件全在、RVC 却因 faiss 与 NumPy 2 的 ABI 冲突
+            # 根本 import 不了。一句过头的绿字比不写更坏。
+            text = "✅ 翻唱组件文件已就位（RVC 推理脚本、HuTao 模型、人声分离环境）。"
+        else:
+            text = ("⚠ 这里是把歌**做成**糖糖声线的制作工具，需要额外组件，"
+                    f"当前缺 {len(missing)} 项：{'、'.join(missing)}。\n"
+                    "　▸ 只是想听糖糖唱歌？**不需要**这里——41 首预录成品已随包自带，"
+                    "群里点歌即播。")
+        lbl = QLabel(text)
+        lbl.setObjectName("muted")
+        lbl.setWordWrap(True)
+        return lbl
+
     def _build_singing_panel(self):
         """歌唱工作室（保留）"""
         songs_container = self._settings_sections.get("songs")
@@ -3492,6 +3563,11 @@ class TangTangQtConsole(QMainWindow):
         self._studio_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._attach_overlay_bar(self._studio_list)
         layout.addWidget(QLabel("🎙 歌唱工作室", objectName="heading"))
+        # 先把「这块能不能用、缺什么」说在前面，别等用户点了才弹错误。
+        # 2026-09-19 主人实机反馈：他点了「模型」只拿到一句「找不到目录」，
+        # 只能反过来问「是基础文字对话没有这个功能吗」——说明缺的从来不是那个弹窗文案，
+        # 而是**事前就没告诉他这里需要额外组件**。
+        layout.addWidget(self._studio_availability_hint())
         layout.addWidget(self._studio_list)
         self._studio_add_btn = QPushButton("添加翻唱")
         self._studio_add_btn.setIconSize(QSize(15, 15))
@@ -3520,7 +3596,8 @@ class TangTangQtConsole(QMainWindow):
             "（HuTao 模型/索引）所在；缺失时可从发布附件「歌唱模型包」获取")
         self._studio_model_btn.clicked.connect(
             lambda _checked=False: self._open_dir(
-                BASE / "Retrieval-based-Voice-Conversion-WebUI" / "assets" / "weights"))
+                BASE / "Retrieval-based-Voice-Conversion-WebUI" / "assets" / "weights",
+                feature="rvc"))
         flow_row.addWidget(self._studio_model_btn)
         flow_row.addStretch()
         layout.addLayout(flow_row)
@@ -3528,10 +3605,20 @@ class TangTangQtConsole(QMainWindow):
         layout.addWidget(self._studio_status)
         self._studio_refresh()
 
-    def _open_dir(self, path):
-        """安全打开目录"""
+    def _open_dir(self, path, feature=None):
+        """安全打开目录。目录不存在时，说明它属于哪个功能、怎么才能有。
+
+        `feature` 取 `_MISSING_DIR_HINT` 的键；不传则退化成只报路径
+        （文案里明说「这是个内部目录」，免得又变成一句没有出路的提示）。
+        """
         if not path.is_dir():
-            QMessageBox.warning(self, "目录不存在", f"找不到目录：\n{path}")
+            title, why = _missing_dir_message(path, feature)
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle(title)
+            box.setText(why)
+            box.setInformativeText(f"要找的位置：\n{path}")
+            box.exec()
             return
         try:
             os.startfile(str(path))
@@ -3737,7 +3824,7 @@ class TangTangQtConsole(QMainWindow):
         audio_dir.mkdir(parents=True, exist_ok=True)
         rvc_dir = str(BASE / "Retrieval-based-Voice-Conversion-WebUI")
         infer_script = str(BASE / "Retrieval-based-Voice-Conversion-WebUI" / "tools" / "infer_cli.py")
-        index_path = str(BASE / "Retrieval-based-Voice-Conversion-WebUI" / "assets" / "weights" / "hutao.index")
+        index_path = RVC_INDEX_REL          # 相对路径——原因见 RVC_INDEX_REL 的注释
 
         names = []
         tasks = []
@@ -4046,7 +4133,8 @@ class TangTangQtConsole(QMainWindow):
         audio_dir.mkdir(parents=True, exist_ok=True)
         rvc_dir = BASE / "Retrieval-based-Voice-Conversion-WebUI"
         infer_script = rvc_dir / "tools" / "infer_cli.py"
-        index_path = rvc_dir / "assets" / "weights" / "hutao.index"
+        # 相对路径（cwd 是 rvc_dir）——同 RVC_INDEX_REL 的注释，绝对路径带中文会让 faiss 打不开
+        index_path = RVC_INDEX_REL
         sep_script = BASE / "tools" / "separate_vocals.py"
         venv_python = BASE / "venv_demucs" / "Scripts" / "python.exe"
 
@@ -4416,7 +4504,14 @@ class TangTangQtConsole(QMainWindow):
 
         secrets = [
             ("llm_key", f"LLM API Key（当前: {provider}）", key_name, key_hint),
-            ("QWEN_KEY", "千问 VL API Key", "用于识图，从阿里云 DashScope 获取"),
+            # 标签按**用户想做的事**命名，不按厂商命名（2026-09-19 主人实机反馈）。
+            # 原来叫「千问 VL API Key」会误导：识图有两种方式，选「本地 MiniCPM-V」
+            # 根本不需要这个 Key——可那个名字看起来像「用识图就得先弄个千问的号」。
+            # 厂商信息移进说明里，它仍然有用（去哪儿申请），但不该占据标题。
+            # ⚠ 环境变量名 `QWEN_KEY` 不能改——用户的 .env 里就是这个键，改了会失效。
+            ("QWEN_KEY", "识图 API Key",
+             "识图选「云端千问 VL」时才需要，从阿里云 DashScope 获取；"
+             "选「本地 MiniCPM-V」不需要填"),
             ("SNOWLUMA_TOKEN", "SnowLuma Token", "SnowLuma QQ 的访问令牌，在 SnowLuma WebUI 查看"),
         ]
         for item in secrets:

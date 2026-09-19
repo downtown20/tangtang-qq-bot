@@ -17,7 +17,7 @@
     python tools/打包发布版本.py --no-voice   # 只出主包（补发小版本时用）
 
 产出（默认放在项目同级目录「小糖糖-发布版/」）：
-    tangtang-v1.4.zip            约 1.1G（单文件，GitHub 上限 2G）
+    tangtang-v1.5.zip            约 1.1G（单文件，GitHub 上限 2G）
     附件/tangtang-voice-1ofN.zip  语音推理集分卷（仅勾了语音的用户下载）
 
 `--no-voice`：语音分卷只从 `gpt-sovits/` 取内容（第三方引擎 + 模型），
@@ -39,7 +39,7 @@ SNAPSHOT = BASE.parent / "小糖糖-发布"
 OUT = BASE.parent / "小糖糖-发布版"
 ATTACH = OUT / "附件"
 
-TAG = "v1.4"   # ← 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读
+TAG = "v1.5"   # ← 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
