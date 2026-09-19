@@ -12,10 +12,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 voice_cache/*
-# 生成物（派生数据不该进仓库）
-*.sqlite3
+# 生成物
 *.sqlite3-shm
 *.sqlite3-wal
+!knowledge/.knowledge_index.sqlite3
 share_images/*
 generated_images/
 temp_files/

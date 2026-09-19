@@ -279,25 +279,80 @@ def test_release_snapshot_is_clean():
         f"快照里有 {len(hits)} 处敏感命中，不能发布：\n  " + "\n  ".join(hits[:10]))
 
 
-def test_snapshot_carries_no_derived_index_files():
-    """快照里不许有任何 sqlite 派生文件——包括 -wal / -shm 两个边车。
+def test_snapshot_has_no_sqlite_sidecar_files():
+    """快照里只该有那一个 `.sqlite3`,不许有 `-wal` / `-shm` 边车。
 
-    2026-09-19 实测：主库 `.knowledge_index.sqlite3` 已经剔掉了，但它的两个边车
-    没进 `KNOWLEDGE_IGNORE`，照样被 copytree 搬进了快照。它们当时**没发出去**，
-    但那是因为另外两道独立的规则各挡了一下（发布时生成的 .gitignore 里有
-    `*.sqlite3-wal`，打包器的后缀黑名单里也有）——**一个东西要靠三道各自独立的
-    规则才拦得住，说明哪一道都不是真正管着它**。哪天有人顺手改掉其中一条，
-    剩下的照样沉默放行。
-
-    口径收在源头：这类文件本来就不该进快照。
+    2026-09-19 实测：主库剔掉之后，它的两个边车没进 `KNOWLEDGE_IGNORE`,照样被
+    copytree 搬进了快照。它们当时**没发出去**，但那是靠另外两道独立的规则各挡了
+    一下（生成的 .gitignore + 打包器的后缀黑名单）——**一个东西要靠三道各自独立的
+    规则才拦得住,说明哪一道都不是真正管着它**。哪天有人顺手改掉其中一条,剩下的
+    照样沉默放行。现在由 `_build_knowledge_index` 末尾的 checkpoint 负责,这条钉住。
     """
     snap = BASE.parent / "小糖糖-发布"
     if not snap.is_dir():
         pytest.skip("快照不存在——先跑 python tools/准备发布.py")
-    derived = sorted(
+    sidecars = sorted(
         p.relative_to(snap).as_posix()
         for p in snap.rglob("*")
-        if p.is_file() and (p.name.endswith((".sqlite3", "-wal", "-shm", ".sqlite3-journal"))))
-    assert not derived, (
-        f"快照里有 sqlite 派生文件（索引/边车），它们是生成时点的内容副本：{derived}\n"
-        f"  —— 把后缀加进 tools/准备发布.py 的 KNOWLEDGE_IGNORE / ZIP_EXCLUDE_SUFFIX")
+        if p.is_file() and p.name.endswith(("-wal", "-shm", "-journal")))
+    assert not sidecars, (
+        f"快照里有 sqlite 边车文件：{sidecars}\n"
+        f"  —— 见 tools/准备发布.py 的 _build_knowledge_index 末尾")
+
+
+def test_shipped_index_matches_snapshot_sources_exactly():
+    """随包的索引必须与快照里那些源文件**同源**——这条就是当初泄漏的探测器。
+
+    ## 这条闸门是为一次真实泄漏建的
+
+    索引里存着 `knowledge/*.md` 的**切块正文副本**。当年的顺序是：先把源文件里的
+    本机路径清干净，索引才生成——不对，是反过来：**先建了索引，之后才去清源文件**。
+    于是源文件干净了、索引里还留着清理前的旧文本（实测 60 处本机路径），
+    随 v1.0/v1.1 发了出去。
+
+    光看「索引里有没有敏感串」是堵不住的——那取决于扫描器认不认得那个串。
+    这里换个**结构性**判据：索引里记的每篇文档 sha256，必须等于快照里那份文件
+    此刻的 sha256；文档集合也必须一一对应。源文件改过而索引没重建 → 立刻红。
+    """
+    import hashlib
+    import sqlite3
+    import sys
+
+    snap = BASE.parent / "小糖糖-发布"
+    if not snap.is_dir():
+        pytest.skip("快照不存在——先跑 python tools/准备发布.py")
+    idx = snap / "knowledge" / ".knowledge_index.sqlite3"
+    assert idx.is_file(), (
+        "快照里没有知识库索引——它现在是**要随包**的（省用户首启 6.2 秒向量计算）。\n"
+        "  没生成的话：跑 python tools/准备发布.py，看 _build_knowledge_index 的报错")
+
+    sys.path.insert(0, str(BASE))
+    from agent.knowledge import discover_document_files
+
+    kn = snap / "knowledge"
+    on_disk = {}
+    for f in discover_document_files(kn):
+        content = f.read_text(encoding="utf-8").strip()
+        if not content:
+            continue
+        rel = str(f.relative_to(kn)).replace("\\", "/")
+        on_disk[rel] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    con = sqlite3.connect(f"file:{idx}?mode=ro", uri=True)
+    in_index = {p: s for p, s in con.execute("SELECT relative_path, sha256 FROM documents")}
+
+    missing = sorted(set(on_disk) - set(in_index))
+    extra = sorted(set(in_index) - set(on_disk))
+    stale = sorted(p for p in set(on_disk) & set(in_index) if on_disk[p] != in_index[p])
+    assert not (missing or extra or stale), (
+        "随包的索引与快照源文件对不上——索引是旧的：\n"
+        f"  索引里没有：{missing}\n"
+        f"  索引里多出（源文件已删）：{extra}\n"
+        f"  内容已变但索引未重建：{stale}\n"
+        "  —— 索引存的是正文副本，不同源就等于把发布时点的旧文本一起发了出去")
+
+    models = {m for (m,) in con.execute("SELECT DISTINCT model_name FROM embeddings")}
+    junk = sorted(m for m in models if m != "BAAI/bge-small-zh-v1.5")
+    assert not junk, (
+        f"索引里混进了非发布模型的向量：{junk}\n"
+        f"  —— 多半是拷了开发机那份（它带着 benchmark 跑的 bench-v1 向量，纯属垃圾）")

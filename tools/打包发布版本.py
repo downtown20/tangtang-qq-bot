@@ -17,7 +17,7 @@
     python tools/打包发布版本.py --no-voice   # 只出主包（补发小版本时用）
 
 产出（默认放在项目同级目录「小糖糖-发布版/」）：
-    tangtang-v1.3.zip            约 1.1G（单文件，GitHub 上限 2G）
+    tangtang-v1.4.zip            约 1.1G（单文件，GitHub 上限 2G）
     附件/tangtang-voice-1ofN.zip  语音推理集分卷（仅勾了语音的用户下载）
 
 `--no-voice`：语音分卷只从 `gpt-sovits/` 取内容（第三方引擎 + 模型），
@@ -39,7 +39,7 @@ SNAPSHOT = BASE.parent / "小糖糖-发布"
 OUT = BASE.parent / "小糖糖-发布版"
 ATTACH = OUT / "附件"
 
-TAG = "v1.3"   # ← 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读
+TAG = "v1.4"   # ← 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -47,8 +47,13 @@ PKG_NAME = f"tangtang-{TAG}.zip"
 
 # 打进包的排除项（快照里的 .git 是发布仓库的，不能进用户包）
 ZIP_EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files", "_原声mp3缓存"}
-# .sqlite3：生成物索引（派生数据不进包；2026-09-19 它在源文件清干净之后仍带着旧路径）
-ZIP_EXCLUDE_SUFFIX = (".pyc", ".log", ".part", ".sqlite3", ".sqlite3-shm", ".sqlite3-wal")
+# ⚠ .sqlite3 **不能一刀切**（2026-09-19 在这上面反复过一次）：
+#   knowledge/.knowledge_index.sqlite3 是**要随包**的——它带 BGE 向量，
+#   用户首启省 6.2 秒。当初因为它带着旧文本而把它整个排除，砍掉的是用户的等待时间。
+#   正确的做法是在清理过的快照上**现场重建**（tools/准备发布.py 的 _build_knowledge_index）,
+#   由 test_shipped_index_matches_snapshot_sources_exactly 保证它与源文件同源。
+#   只排除边车：它们没有内容，且会让「一个 .sqlite3」变成三个文件。
+ZIP_EXCLUDE_SUFFIX = (".pyc", ".log", ".part", ".sqlite3-shm", ".sqlite3-wal")
 
 # 分卷上限——GitHub Release 单文件硬上限 2GB，留出安全余量
 PART_LIMIT = int(1.8 * 1024 ** 3)

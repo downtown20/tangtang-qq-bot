@@ -14,7 +14,9 @@ v1（同学离线整包）已归档 tools/_归档/准备发布_v1_classic.py。
 """
 import re
 import shutil
+import sqlite3
 import sys
+import time
 from pathlib import Path
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -37,20 +39,93 @@ COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg",
 # 色色参考只发软色情 2 篇（丛雨对话范例/恋爱感氛围），BDSM/官能技法与直露写作指南不进公开；
 # learned_ 自动学习残留不进。
 #
-# ⚠ .knowledge_index.sqlite3 原先是随包的（主人指定，避免首启重建等待），2026-09-19 改为剔除：
-#   它是**由 knowledge/*.md 生成的派生索引**，里面存着切块后的正文副本。清掉源文件里的本地路径后，
-#   索引里仍留着清理前的旧文本——实测 5 个 chunk 带 19 处本机绝对路径，而按后缀过滤的扫描器
-#   完全看不到它（.sqlite3 不在白名单，二进制直接跳过）。派生数据不该发布：
-#   它本来就带 sha256 校验、启动时自动重建，首启那几十秒不值得换一次泄漏。
+# ⚠ .knowledge_index.sqlite3 不拷**开发机那份**，改为在快照上现场重建（见 _build_knowledge_index）。
+#
+# 2026-09-19 这一天在这件事上反复了两次，两次都错，教训记全：
+#
+#   ① 原来随的是开发机那份索引，而它存着 knowledge/*.md 的**切块正文副本**。
+#      源文件里的本机路径清掉之后，索引里还留着清理前的旧文本——实测 60 处，
+#      随 v1.0/v1.1 发了出去（而当时的扫描器按后缀白名单跳过 .sqlite3，完全看不见）。
+#   ② 处置时一刀切成「派生数据不进发布物」。**这一刀砍错了**：它砍掉的是用户要等的时间，
+#      而主人当初指定随包正是为了省这个。
+#
+# 量过才知道错在哪：索引重建本身只要 0.1 秒，但 **BGE 向量重算要 6.2 秒**
+# （156 chunk + 114 segment；另有 15.8 秒模型加载，那部分省不掉）。
+# 取舍其实**不存在**——泄漏来自「索引是旧的」，不是来自「发布了索引」。
+# 所以在清理干净的快照上重跑一遍建索引，两头都要得到。
+#
+# 这里仍然忽略：开发机那份是旧的，拷过来就是 ①。
 KNOWLEDGE_IGNORE = shutil.ignore_patterns(
     "技法摘录_中文百合BDSM.md", "技法摘录_日系官能.md", "色色_写作指南.md",
     "learned_*", "_order.json",
-    # 末尾带 `*`：sqlite 的 WAL 模式会额外生成 -wal / -shm 两个边车，它们同样是
-    # **派生数据**（页面快照/页号索引），和主库一个性质。只写 `.knowledge_index.sqlite3`
-    # 挡不住它们——2026-09-19 实测快照里就有这两个文件，当时靠生成的 .gitignore
-    # 和打包器的后缀黑名单**各挡了一道**才没发出去。一个东西要三道独立规则才拦得住，
-    # 说明哪一道都不是真正管着它。口径收在源头：快照本身就不该有。
+    # 末尾带 `*`：一并挡住 WAL 模式的 -wal / -shm 边车——现场重建后也会再清一次
+    # （见 _build_knowledge_index 末尾），双保险。
     ".knowledge_index.sqlite3*")
+
+
+def _build_knowledge_index(target_knowledge: Path) -> None:
+    """在快照的 knowledge/ 上**现场重建**索引，让用户首启省掉 6.2 秒向量计算。
+
+    为什么是「重建」而不是「拷开发机那份」：索引里存着切块正文的副本，
+    拷旧的就是把发布时点的文本连同它的历史一起发出去（2026-09-19 事故）。
+    重建则保证索引内容与快照里那些**清理过的**源文件同源。
+
+    BGE 不可用时降级为「只建文本索引、不算向量」——发布不能被模型缺失阻断，
+    用户首启会自己补算（只是没有省下那 6.2 秒）。
+    """
+    sys.path.insert(0, str(BASE))
+    try:
+        from agent.knowledge import KnowledgeBase
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  ⚠ knowledge/ 索引未重建（导入失败）：{e}")
+        return
+
+    engine = None
+    try:
+        from agent.embeddings import EmbeddingEngine
+        _eng = EmbeddingEngine()
+        _eng.load()
+        if getattr(_eng, "_ready", False):
+            engine = _eng
+        else:
+            print("  ⚠ 没找到 BGE 模型——索引只建文本，用户首启会自己补算向量")
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  ⚠ BGE 不可用（{e}）——索引只建文本")
+
+    t0 = time.perf_counter()
+    try:
+        kb = KnowledgeBase(str(target_knowledge))     # 构造即建库（含 FTS 全文索引）
+        if engine is not None:
+            kb.warm_embeddings(engine)                # 算向量并写回索引
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  ⚠ knowledge/ 索引重建失败：{e}")
+        return
+    dt = time.perf_counter() - t0
+
+    # 落回单文件：WAL 模式会留下 -wal/-shm，而快照/仓库/包里只该有那一个 .sqlite3。
+    # 用 checkpoint(TRUNCATE) 把 WAL 内容并回主库再切回 DELETE 模式，比事后删文件稳。
+    idx = target_knowledge / ".knowledge_index.sqlite3"
+    try:
+        con = sqlite3.connect(str(idx))
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.execute("PRAGMA journal_mode = DELETE")
+        con.close()
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  ⚠ 索引 checkpoint 失败（不影响内容）：{e}")
+    for side in (idx.with_name(idx.name + "-wal"), idx.with_name(idx.name + "-shm")):
+        if side.exists():
+            side.unlink()
+
+    n_doc = n_chunk = 0
+    try:
+        con = sqlite3.connect(f"file:{idx}?mode=ro", uri=True)
+        n_doc = con.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        n_chunk = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        con.close()
+    except Exception:                                        # noqa: BLE001
+        pass
+    print(f"  ✅ knowledge/ 索引现场重建（{dt:.1f} 秒，{n_doc} 篇 {n_chunk} 块，"
+          f"{'含' if engine else '不含'}向量，{idx.stat().st_size // 1024} KB）")
 
 COPY_FILES = [
     # 入口与核心脚本
@@ -434,6 +509,10 @@ def main() -> None:
             shutil.copytree(src, OUT / d, ignore=ign)
             print(f"  ✅ {d}/")
 
+    # 1b. 知识库索引：在**清理过的**快照上现场重建（不是拷开发机那份——见函数注释）
+    if (OUT / "knowledge").is_dir():
+        _build_knowledge_index(OUT / "knowledge")
+
     # 2. 根文件
     for f in COPY_FILES:
         s = BASE / f
@@ -520,9 +599,12 @@ def main() -> None:
         #   实测 voice_cache / share_images / SnowLuma 的摆放说明从来没进过仓库，
         #   只在 zip 里有。clone 的人照 README 想找落点指引，一个都找不到。
         "# 运行时产物\n__pycache__/\n*.pyc\n.pytest_cache/\nvoice_cache/*\n"
-        # 生成物索引：2026-09-19 事故——knowledge/.knowledge_index.sqlite3 里存着
-        # knowledge/*.md 的切块副本，源文件清了本机路径它还在，随包发了出去。
-        "# 生成物（派生数据不该进仓库）\n*.sqlite3\n*.sqlite3-shm\n*.sqlite3-wal\n"
+        # 知识库索引**要进仓库**（它带 BGE 向量，clone 的人首启省 6.2 秒）。
+        # 2026-09-19 事故的教训不是「派生数据不能发」，而是「**旧的**派生数据不能发」——
+        # 泄漏来自索引是发布前建的、源文件是之后清理的。现在每次生成快照都现场重建
+        # （见 _build_knowledge_index），并由 test_shipped_index_matches_snapshot_sources_exactly
+        # 逐篇比对 sha256 钉住同源。边车仍然排除。
+        "# 生成物\n*.sqlite3-shm\n*.sqlite3-wal\n!knowledge/.knowledge_index.sqlite3\n"
         "share_images/*\ngenerated_images/\ntemp_files/\n*.log\n*.json\n"
         # SnowLuma 是第三方程序，不能进仓库；但落点目录的摆放说明要留
         # （没有它用户不知道该往哪解压——2026-09-19 补）
