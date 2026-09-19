@@ -260,7 +260,7 @@ def test_package_name_is_ascii_and_matches_readme():
     packer = (BASE / "tools" / "打包发布版本.py").read_text(encoding="utf-8")
     m = re.search(r'PKG_NAME = f"([^"]+)"', packer)
     assert m, "打包脚本里找不到 PKG_NAME"
-    expect = m.group(1).replace("{TAG}", "v1.0")
+    expect = m.group(1).replace("{TAG}", "v1.1")
     assert expect in named, \
         f"打包产物是 {expect}，README 里却写 {named} —— 用户会找不到文件"
 

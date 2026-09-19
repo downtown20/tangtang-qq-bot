@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""小糖糖 安装/维护工具 🍬（统一入口）
+"""小糖糖 安装/维护工具（统一入口）
 
 用法：
     python tools/安装糖糖.py                  # 菜单选择
@@ -22,6 +22,20 @@ import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
+
+# 强制 UTF-8 输出（与 同步记忆.py / 体检.py 同一守卫）：
+# stdout 被重定向或走管道时 Python 退回 GBK，print 里的符号抛 UnicodeEncodeError
+# （同步记忆.py 真出过这个事故：退出码 1 但快照已生成 →「显示失败实际成功」）。
+#
+# 本文件此前是**被顺带保护**的：模块加载时会 exec 同步记忆.py，而那个模块顶层的
+# 守卫改的正是同一个 sys.stdout 对象。那是巧合不是设计——导入顺序一变、或那个模块
+# 改成懒加载，保护就无声消失。这里显式兜住，不再依赖别人的副作用。
+for _s in (sys.stdout, sys.stderr):
+    if _s and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -138,7 +152,7 @@ def install_groups(groups: list[str], dry_run: bool = False) -> bool:
         return False
     plan = _plan(groups)
     soft = [p for g in groups for p in GROUPS[g].get("soft", [])]
-    print(f"\n📦 将安装 {len(groups)} 组、{sum(len(p) for p, _ in plan)} 个包"
+    print(f"\n[·] 将安装 {len(groups)} 组、{sum(len(p) for p, _ in plan)} 个包"
           + (f" + {len(soft)} 个加速可选包" if soft else "") + "：")
     for pkgs, _ in plan:
         print(f"  - {' '.join(pkgs)}")
@@ -151,12 +165,12 @@ def install_groups(groups: list[str], dry_run: bool = False) -> bool:
     for pkgs, kw in plan:
         if not _install(pkgs, kw):
             ok = False
-            print(f"  ⚠️ 安装失败: {pkgs}——请手动重试")
+            print(f"  [!] 安装失败: {pkgs}——请手动重试")
     for pkgs in soft:
         if not _install(pkgs, {}):
-            print("  ℹ️ jieba-fast 未装成功——如需加速请先装 VS2022 Build Tools（C++ 桌面开发）后重试；"
+            print("  [i] jieba-fast 未装成功——如需加速请先装 VS2022 Build Tools（C++ 桌面开发）后重试；"
                   "不装也能用（语音自动回退纯 Python jieba，见 gpt-sovits/start_api_patched.py）")
-    print("\n✅ 依赖安装完成" if ok else "\n⚠️ 部分安装失败，请检查上方输出")
+    print("\n[√] 依赖安装完成" if ok else "\n[!] 部分安装失败，请检查上方输出")
     return ok
 
 
@@ -168,12 +182,12 @@ def check_environment() -> None:
     print("━━━ 环境检测 ━━━")
     v = sys.version_info
     py_ok = v[:2] == (3, 10)
-    print(f"  Python: {v.major}.{v.minor}.{v.micro}{' ✅ 符合建议（3.10）' if py_ok else '（建议 3.10，其他版本可能缺依赖兼容性）'}")
+    print(f"  Python: {v.major}.{v.minor}.{v.micro}{' [√] 符合建议（3.10）' if py_ok else '（建议 3.10，其他版本可能缺依赖兼容性）'}")
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg:
-        print(f"  FFmpeg: ✅ {ffmpeg}")
+        print(f"  FFmpeg: [√] {ffmpeg}")
     else:
-        print("  FFmpeg: ❌ 未找到——请先运行: winget install ffmpeg，重开终端后重试")
+        print("  FFmpeg: [×] 未找到——请先运行: winget install ffmpeg，重开终端后重试")
     # MSVC cl.exe（jieba-fast 源码编译前置；2026-09-05 M1d——普通终端 cl 不进 PATH，按固定路径扫描）
     cl_paths = sorted(
         p for root in ("C:/Program Files/Microsoft Visual Studio/2022",
@@ -181,15 +195,15 @@ def check_environment() -> None:
         for p in (Path(root) if Path(root).exists() else Path()).glob(
             "*/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe"))
     if cl_paths:
-        print(f"  MSVC cl.exe: ✅ {cl_paths[0]}")
+        print(f"  MSVC cl.exe: [√] {cl_paths[0]}")
     else:
-        print("  MSVC cl.exe: ⚠️ 未找到 VS2022 C++ 工具链——jieba-fast 无预编译 wheel，需源码编译。")
+        print("  MSVC cl.exe: [!] 未找到 VS2022 C++ 工具链——jieba-fast 无预编译 wheel，需源码编译。")
         print("     影响：GPT-SoVITS 语音的分词加速包装不上；可用纯 Python jieba 回退（语音仍可启动，较慢）。")
         print("     如需加速：安装 VS2022 Build Tools → 勾选「使用 C++ 的桌面开发」（含 Windows SDK），然后重开终端再装 jieba-fast。")
     free_gb = shutil.disk_usage(BASE).free / 1e9
     print(f"  磁盘剩余: {free_gb:.1f} GB")
     if free_gb < 10:
-        print("  ⚠️ 磁盘空间紧张（<10GB），安装语音/唱歌可能失败")
+        print("  [!] 磁盘空间紧张（<10GB），安装语音/唱歌可能失败")
 
 
 def check_prerequisites() -> None:
@@ -202,9 +216,9 @@ def check_prerequisites() -> None:
     print("\n━━━ 必装前置 ━━━")
     installed = sorted((BASE / "SnowLuma").glob("SnowLuma-v*"))
     if installed:
-        print(f"  ✅ SnowLuma: {installed[-1].name}")
+        print(f"  [√] SnowLuma: {installed[-1].name}")
     else:
-        print("  ❌ SnowLuma（QQ 协议端）——糖糖靠它连上 QQ，本机还没有")
+        print("  [×] SnowLuma（QQ 协议端）——糖糖靠它连上 QQ，本机还没有")
         print("     它不属于本项目，许可协议也不允许随包分发或由安装器代下，")
         print("     需要你手动下载一次（一次性，约 100MB）：")
         print("       1. 打开 https://github.com/SnowLuma/SnowLuma/releases")
@@ -212,17 +226,17 @@ def check_prerequisites() -> None:
         print(f"       3. 解压到：{BASE / 'SnowLuma'}")
         print("          （解压后应出现 SnowLuma-vX.Y.Z-win-x64/ 文件夹）")
         print("     也可以用任意其他 OneBot 11 反向 WebSocket 实现替代。")
-        print("     💡 现在就可以去下——下面装依赖/下模型要等一会儿，正好并行。")
+        print("     [i] 现在就可以去下——下面装依赖/下模型要等一会儿，正好并行。")
 
 
 def choose_features(default: list[int] | None = None) -> list[int]:
     """default：发布版本的推荐组合（回车即采用，用户可另行输入覆盖）"""
     print("\n━━━ 功能选择（可多选）━━━")
     for i, (name, desc, _) in enumerate(FEATURES, 1):
-        mark = " ★" if default and (i - 1) in default else ""
+        mark = " *" if default and (i - 1) in default else ""
         print(f"    {i}. {name} —— {desc}{mark}")
     print("    0. 全部安装")
-    hint = "回车=采用 ★ 推荐" if default else "回车=跳过"
+    hint = "回车=采用 * 推荐" if default else "回车=跳过"
     try:
         raw = input(f"  输入编号（逗号分隔，如 1,5,6；{hint}）> ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -235,7 +249,7 @@ def choose_features(default: list[int] | None = None) -> list[int]:
         sel = [int(x) for x in raw.replace("，", ",").split(",") if x.strip()]
         return [i - 1 for i in sel if 1 <= i <= len(FEATURES)]
     except ValueError:
-        print("  ⚠️ 输入无效，按跳过处理")
+        print("  [!] 输入无效，按跳过处理")
         return []
 
 
@@ -245,16 +259,16 @@ def check_directories(choices: list[int]) -> None:
     for i in choices:
         for name, path in DIR_CHECKS.get(i, []):
             if path.exists():
-                print(f"  ✅ {name}")
+                print(f"  [√] {name}")
             else:
-                print(f"  ⚠ {name}——尚未就位（上一步下载可能中断，重跑本工具可续传）")
+                print(f"  [!] {name}——尚未就位（上一步下载可能中断，重跑本工具可续传）")
     if 2 in choices:  # 识图 → 检查 Ollama
         import urllib.request
         try:
             with urllib.request.urlopen("http://127.0.0.1:11434", timeout=2):
-                print("  ✅ Ollama 服务（11434 端口）")
+                print("  [√] Ollama 服务（11434 端口）")
         except Exception:
-            print("  ❌ Ollama 未运行——本地识图不可用；云端 qwen-vl 会兜底（无需处理）")
+            print("  [×] Ollama 未运行——本地识图不可用；云端 qwen-vl 会兜底（无需处理）")
 # ─────────────────────────────────────────
 # 模型获取（自动下载 + 自动落位）
 # ─────────────────────────────────────────
@@ -274,7 +288,7 @@ RELEASE_API = f"https://api.github.com/repos/{RELEASE_REPO}/releases?per_page=50
 DEFAULT_FEATURES = [0, 3, 5]
 
 # 语音识别模型（听懂别人的语音消息）。
-# ⚠ 与 agent/asr.py 的 _SENSE_VOICE_MODEL / _SENSE_VOICE_URL 必须一致——
+# [!] 与 agent/asr.py 的 _SENSE_VOICE_MODEL / _SENSE_VOICE_URL 必须一致——
 #   由 tests/test_installer_wiring.py 的契约断言机械保证，改一处会红。
 # 为什么要预取：代码里是「首次遇到语音消息才懒加载下载」，可那一刻用户正在
 # 对话中被卡住等 233M 下载。安装时先拿掉，才叫「下载的功能直接能用」。
@@ -344,7 +358,7 @@ def _download_file(url: str, dest: Path, label: str) -> bool:
             if done and getattr(resp, "status", 200) != 206:
                 done = 0          # 服务端不支持断点——从头来
             total = done + int(resp.headers.get("Content-Length") or 0)
-            print(f"    ⬇ {label}" + (f"（{_sizeof(total)}）" if total else ""))
+            print(f"    [↓] {label}" + (f"（{_sizeof(total)}）" if total else ""))
             with open(part, "wb" if done == 0 else "ab") as f:
                 while True:
                     chunk = resp.read(1 << 20)
@@ -357,7 +371,7 @@ def _download_file(url: str, dest: Path, label: str) -> bool:
                               end="", flush=True)
             print()
     except Exception as e:
-        print(f"\n    ⚠ 下载中断（重跑本工具会自动续传）: {e}")
+        print(f"\n    [!] 下载中断（重跑本工具会自动续传）: {e}")
         return False
     if dest.exists():
         dest.unlink()
@@ -368,9 +382,9 @@ def _download_file(url: str, dest: Path, label: str) -> bool:
 def _fetch_modelscope(repo: str, target: Path, label: str) -> bool:
     """modelscope 下载。cache_dir 的 <命名空间>/<模型名> 布局天然就是代码期望的落点，无需搬运。"""
     if (target / "config.json").exists():
-        print(f"    ✅ 已就绪，跳过：{label}")
+        print(f"    [√] 已就绪，跳过：{label}")
         return True
-    print(f"    ⬇ {label}（modelscope）")
+    print(f"    [↓] {label}（modelscope）")
     proc = subprocess.run(
         [sys.executable, "-c", _MODELSCOPE_SNIPPET, repo, str(BASE / "models")],
         cwd=str(BASE))
@@ -378,11 +392,11 @@ def _fetch_modelscope(repo: str, target: Path, label: str) -> bool:
         # modelscope 某些版本把点号转义成 ___，embeddings.py 两种都认
         alt = target.with_name(target.name.replace(".", "___"))
         if (alt / "config.json").exists():
-            print(f"    ✅ 已就绪：{alt.relative_to(BASE)}")
+            print(f"    [√] 已就绪：{alt.relative_to(BASE)}")
             return True
-        print("    ⚠ 下载未完成——请检查网络后重跑；也可稍后手动补装")
+        print("    [!] 下载未完成——请检查网络后重跑；也可稍后手动补装")
         return False
-    print(f"    ✅ 已放置：{target.relative_to(BASE)}")
+    print(f"    [√] 已放置：{target.relative_to(BASE)}")
     return True
 
 
@@ -394,7 +408,7 @@ def _release_assets() -> dict:
         with urllib.request.urlopen(RELEASE_API, timeout=20) as r:
             releases = json.load(r)
     except Exception as e:
-        print(f"    ⚠ 读取 Release 附件列表失败: {e}")
+        print(f"    [!] 读取 Release 附件列表失败: {e}")
         return {}
     out = {}
     for rel in releases if isinstance(releases, list) else []:
@@ -412,16 +426,16 @@ def _fetch_release_asset(asset: str, target: Path, label: str) -> bool:
     assets = _release_assets()
     url = assets.get(asset)
     if not url:
-        print(f"    ⚠ Release 里找不到附件 {asset}")
+        print(f"    [!] Release 里找不到附件 {asset}")
         return False
     tmp = BASE / "temp_files" / asset
     if not _download_file(url, tmp, f"{label}（{asset}）"):
         return False
-    print("    ⏳ 解压…")
+    print("    [~] 解压…")
     target.mkdir(parents=True, exist_ok=True)
     _unzip_into(tmp, target)
     tmp.unlink(missing_ok=True)
-    print(f"    ✅ 已放置：{target.relative_to(BASE)}")
+    print(f"    [√] 已放置：{target.relative_to(BASE)}")
     return True
 
 
@@ -430,19 +444,19 @@ def _fetch_release_parts(prefix: str, target: Path, label: str) -> bool:
     assets = _release_assets()
     parts = sorted(n for n in assets if n.startswith(prefix))
     if not parts:
-        print(f"    ⚠ Release 里找不到 {prefix}* 分卷")
+        print(f"    [!] Release 里找不到 {prefix}* 分卷")
         return False
-    print(f"    ℹ 共 {len(parts)} 卷，逐卷下载解压（断点续传，中断可重跑）")
+    print(f"    [i] 共 {len(parts)} 卷，逐卷下载解压（断点续传，中断可重跑）")
     tmpdir = BASE / "temp_files" / "parts"
     for name in parts:
         tmp = tmpdir / name
         if not _download_file(assets[name], tmp, f"{label} {name}"):
             return False
-        print("    ⏳ 解压…")
+        print("    [~] 解压…")
         target.mkdir(parents=True, exist_ok=True)
         _unzip_into(tmp, target)
         tmp.unlink(missing_ok=True)
-    print(f"    ✅ 已放置：{target.relative_to(BASE)}")
+    print(f"    [√] 已放置：{target.relative_to(BASE)}")
     return True
 
 
@@ -453,42 +467,42 @@ def _fetch_tarbz2(url: str, target: Path, expect: str, label: str) -> bool:
     让它落到 target/<expect>/ 下。
     """
     if (target / expect).is_dir():
-        print(f"    ✅ 已就绪，跳过：{label}")
+        print(f"    [√] 已就绪，跳过：{label}")
         return True
     tmp = BASE / "temp_files" / f"{expect}.tar.bz2"
     if not _download_file(url, tmp, label):
         return False
-    print("    ⏳ 解压…")
+    print("    [~] 解压…")
     target.mkdir(parents=True, exist_ok=True)
     try:
         import tarfile
         with tarfile.open(tmp, "r:bz2") as tar:
             tar.extractall(target)
     except Exception as e:
-        print(f"    ⚠ 解压失败: {e}")
+        print(f"    [!] 解压失败: {e}")
         tmp.unlink(missing_ok=True)
         return False
     tmp.unlink(missing_ok=True)
     if not (target / expect).is_dir():
-        print(f"    ⚠ 解压完成但没找到 {expect}/——请检查压缩包结构")
+        print(f"    [!] 解压完成但没找到 {expect}/——请检查压缩包结构")
         return False
-    print(f"    ✅ 已放置：{target.relative_to(BASE)}/{expect}")
+    print(f"    [√] 已放置：{target.relative_to(BASE)}/{expect}")
     return True
 
 
 def _fetch_ollama(model: str, label: str) -> bool:
     if not shutil.which("ollama"):
-        print("    ⚠ 未检测到 Ollama——本地识图靠它跑，装不了就跳过这一步")
+        print("    [!] 未检测到 Ollama——本地识图靠它跑，装不了就跳过这一步")
         print("      识图有两条路，任选一条即可用：")
         print("        · 云端：控制台把「识图方式」选云端，填阿里云千问 API Key（零下载，推荐先这么用）")
         print("        · 本地：装 Ollama（https://ollama.com/download）后重跑本工具，")
         print("                它会自动 pull 识图模型")
         return False
-    print(f"    ⬇ {label}（ollama pull {model}）")
+    print(f"    [↓] {label}（ollama pull {model}）")
     if subprocess.run(["ollama", "pull", model]).returncode != 0:
-        print("    ⚠ Ollama 拉取失败——稍后可手动执行 ollama pull " + model)
+        print("    [!] Ollama 拉取失败——稍后可手动执行 ollama pull " + model)
         return False
-    print("    ✅ 本地识图模型就绪")
+    print("    [√] 本地识图模型就绪")
     return True
 
 
@@ -500,7 +514,7 @@ def _ask_optional(specs: list) -> set[str]:
     asks = [s for s in specs if s[5] == "ask"]
     if not asks:
         return set()
-    print("\n  ⚖ 以下模型体积较大，但缺了只影响质量、不影响能不能用：")
+    print("\n  [!] 以下模型体积较大，但缺了只影响质量、不影响能不能用：")
     for name, _t, _k, _p, size, _m in asks:
         print(f"      · {name}  [{size}]")
     try:
@@ -524,7 +538,7 @@ def fetch_models(choices: list[int], dry_run: bool = False) -> list[str]:
     missing = []
     for name, target_rel, kind, params, size, _mode in specs:
         if name in skip:
-            print(f"\n  · {name}  [{size}]  ⏭ 已跳过")
+            print(f"\n  · {name}  [{size}]  [>] 已跳过")
             continue
         print(f"\n  · {name}  [{size}]")
         if dry_run:
@@ -563,10 +577,10 @@ def bootstrap_config(dry_run: bool) -> bool:
         return True
     try:
         shutil.copy2(example, cfg)
-        print("  ✅ 已生成 config.yaml")
+        print("  [√] 已生成 config.yaml")
         return True
     except OSError as e:
-        print(f"  ⚠ 自动生成失败: {e}——请手动复制 config.example.yaml 为 config.yaml")
+        print(f"  [!] 自动生成失败: {e}——请手动复制 config.example.yaml 为 config.yaml")
         return False
 
 
@@ -576,7 +590,7 @@ def bootstrap_config(dry_run: bool) -> bool:
 #   voice.provider    决定启动不启动本地 TTS 服务（agent/handler.py: _is_full_mode）
 #   llm.vision.enabled 识图总开关
 #
-# ⚠ 这张表是「勾了就一定能用」的实现。历史上安装器只会把功能**关掉**、从不会打开，
+# [!] 这张表是「勾了就一定能用」的实现。历史上安装器只会把功能**关掉**、从不会打开，
 #   导致用户勾了语音、6G 模型下完、启动后糖糖一声不吭。
 VOICE_FEATURE = 1
 VISION_FEATURE = 2
@@ -622,7 +636,7 @@ def wire_config(choices: list[int], fresh: bool, dry_run: bool) -> None:
     try:
         import yaml
     except ImportError:
-        print("  ⚠ 缺少 pyyaml，跳过接线——请自行确认 config.yaml 里的功能开关")
+        print("  [!] 缺少 pyyaml，跳过接线——请自行确认 config.yaml 里的功能开关")
         return
     want = _config_switches(choices)
     data = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
@@ -634,7 +648,7 @@ def wire_config(choices: list[int], fresh: bool, dry_run: bool) -> None:
             changes.append((".".join(path), node.get(field), value))
             node[field] = value
     if not changes:
-        print("  ✅ 开关已与本次选择一致，无需调整")
+        print("  [√] 开关已与本次选择一致，无需调整")
         return
     print("  将修改：")
     for key, old, new in changes:
@@ -648,13 +662,13 @@ def wire_config(choices: list[int], fresh: bool, dry_run: bool) -> None:
         except (EOFError, KeyboardInterrupt):
             ans = ""
         if ans not in ("y", "yes"):
-            print("  ⏭ 已跳过——配置保持原样（对应功能可能仍不可用）")
+            print("  [>] 已跳过——配置保持原样（对应功能可能仍不可用）")
             return
     bak = cfg.with_name(f"config.yaml.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     shutil.copy2(cfg, bak)
     cfg.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
                    encoding="utf-8")
-    print(f"  ✅ 已写入（原配置备份为 {bak.name}）")
+    print(f"  [√] 已写入（原配置备份为 {bak.name}）")
 
 
 def _song_count() -> int:
@@ -673,14 +687,14 @@ def report_ready(choices: list[int]) -> None:
     """装完告诉用户「现在能做什么、还差什么」——避免装完一脸茫然"""
     print("\n━━━ 本次装好的功能 ━━━")
     has_voice, has_vision = VOICE_FEATURE in choices, VISION_FEATURE in choices
-    print(f"  ✅ 聊天 + 记忆{'（含语义检索）' if 0 in choices else ''}")
+    print(f"  [√] 聊天 + 记忆{'（含语义检索）' if 0 in choices else ''}")
     if 3 in choices:
-        print(f"  ✅ 唱歌（曲库 {_song_count()} 首，点歌即播）")
+        print(f"  [√] 唱歌（曲库 {_song_count()} 首，点歌即播）")
     if 5 in choices:
-        print("  ✅ 图形控制台")
-    print(f"  {'✅' if has_voice else '⬜'} 语音：听懂语音消息 + 糖糖发语音条"
+        print("  [√] 图形控制台")
+    print(f"  {'[√]' if has_voice else '[ ]'} 语音：听懂语音消息 + 糖糖发语音条"
           + ("" if has_voice else "（未勾选）"))
-    print(f"  {'✅' if has_vision else '⬜'} 识图" + ("" if has_vision else "（未勾选）"))
+    print(f"  {'[√]' if has_vision else '[ ]'} 识图" + ("" if has_vision else "（未勾选）"))
     todo = []
     if not any((BASE / "SnowLuma").glob("SnowLuma-v*")):
         todo.append("SnowLuma 还没装（见开头的「必装前置」）——"
@@ -726,7 +740,7 @@ def cmd_install(dry_run: bool) -> int:
     check_directories(choices)
     wire_config(choices, fresh, dry_run)
     if missing:
-        print("\n⚠️  以下模型未能就位，对应功能会降级或不可用：")
+        print("\n[!]  以下模型未能就位，对应功能会降级或不可用：")
         for m in missing:
             print(f"    · {m}")
         print("   重跑本工具可自动续传（已下好的不会重复下载）")
@@ -808,10 +822,10 @@ def cmd_package() -> int:
         raw = input(f"\n  包含记忆快照 {snaps[0].name}（{snaps[0].stat().st_size / 1e6:.0f}MB）？[Y/n] ").strip().lower()
         if raw not in ("n", "no"):
             snap = snaps[0]
-            print("  ✅ 将包含记忆快照")
+            print("  [√] 将包含记忆快照")
 
     roots = _collect_include_roots(choices)
-    print(f"\n  📦 收集 {len(roots)} 个根项：")
+    print(f"\n  [·] 收集 {len(roots)} 个根项：")
     for r in roots:
         size = sum(p.stat().st_size for p in r.rglob("*") if p.is_file()) / 1e9 if r.is_dir() \
             else r.stat().st_size / 1e9
@@ -819,7 +833,7 @@ def cmd_package() -> int:
     print("  （已排除: __pycache__/日志/冲突文件/运行时产物/voice_cache 等）")
 
     out = BASE.parent / f"小糖糖部署包-{datetime.now().strftime('%Y%m%d-%H%M')}.zip"
-    print(f"\n  ⏳ 正在生成 {out.name}（大目录可能需要几分钟）…")
+    print(f"\n  [~] 正在生成 {out.name}（大目录可能需要几分钟）…")
     count = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
         for src in roots:
@@ -829,7 +843,7 @@ def cmd_package() -> int:
             zf.write(snap, f"memory_sync/{snap.name}")
 
     size_gb = out.stat().st_size / 1e9
-    print(f"  ✅ 部署包已生成: {out}")
+    print(f"  [√] 部署包已生成: {out}")
     print(f"     大小 {size_gb:.1f} GB，{count} 个根项")
     print()
     print("  目标机器解压后：")
@@ -837,7 +851,7 @@ def cmd_package() -> int:
     if snap:
         print("    2. 菜单 3 解包记忆（应用记忆快照）")
     print("    3. 启动控制台 → SnowLuma 扫码 → 启动糖糖")
-    print("  ⚠️ 部署包含 .env（API 密钥），请勿外传")
+    print("  [!] 部署包含 .env（API 密钥），请勿外传")
     return 0
 
 
@@ -849,9 +863,9 @@ def cmd_release() -> int:
     """发布项目——清理个人数据，生成分享文件夹（tools/准备发布.py）"""
     script = BASE / "tools" / "准备发布.py"
     if not script.exists():
-        print("  ❌ 未找到 tools/准备发布.py")
+        print("  [×] 未找到 tools/准备发布.py")
         return 1
-    print("  📦 准备发布包（清理个人数据，输出到 项目上级目录/小糖糖-发布/）…")
+    print("  [·] 准备发布包（清理个人数据，输出到 项目上级目录/小糖糖-发布/）…")
     return subprocess.run([sys.executable, str(script)], cwd=str(BASE)).returncode
 
 
@@ -870,12 +884,12 @@ def cmd_check() -> int:
 
 
 def cmd_health() -> int:
-    """体检——换机功能对比（❌=缺失 ⚠=留意；两台机器各跑一遍逐行对照）"""
+    """体检——换机功能对比（[×]=缺失 [!]=留意；两台机器各跑一遍逐行对照）"""
     script = BASE / "tools" / "体检.py"
     if not script.exists():
-        print(f"  ❌ 未找到 {script}")
+        print(f"  [×] 未找到 {script}")
         return 1
-    print("  🩺 运行体检…")
+    print("  [·] 运行体检…")
     return subprocess.run([sys.executable, str(script)], cwd=str(BASE)).returncode
 
 
@@ -886,7 +900,7 @@ def main() -> int:
 
     if not args:
         while True:
-            print("🍬 小糖糖 安装/维护工具")
+            print("小糖糖 安装/维护工具")
             print("   第一次用 → 选 1「安装依赖」：勾需要的功能，模型会自动下载并放到正确位置")
             print("   已经装过 → 直接双击 启动控制台.bat")
             print()
@@ -896,7 +910,7 @@ def main() -> int:
             print("  4. 打包项目 — 生成部署 zip（给自己笔记本用，按功能瘦身）")
             print("  5. 发布项目 — 清理个人数据后生成分享文件夹（发给别人）")
             print("  6. 检查状态 — 环境 + 快照总览")
-            print("  7. 体检 — 换机功能对比（❌=缺失 ⚠=留意，两台机器各跑一遍对照）")
+            print("  7. 体检 — 换机功能对比（[×]=缺失 [!]=留意，两台机器各跑一遍对照）")
             print("  0. 退出")
             try:
                 raw = input("\n  选择 > ").strip()

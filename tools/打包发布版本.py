@@ -14,10 +14,15 @@
 用法：
     python tools/准备发布.py          # 先刷新快照（白名单 + 脱敏扫描）
     python tools/打包发布版本.py       # 再打包 + 语音分卷附件
+    python tools/打包发布版本.py --no-voice   # 只出主包（补发小版本时用）
 
 产出（默认放在项目同级目录「小糖糖-发布版/」）：
-    tangtang-v1.0.zip            约 1.0G（单文件，GitHub 上限 2G）
+    tangtang-v1.1.zip            约 1.0G（单文件，GitHub 上限 2G）
     附件/tangtang-voice-1ofN.zip  语音推理集分卷（仅勾了语音的用户下载）
+
+`--no-voice`：语音分卷只从 `gpt-sovits/` 取内容（第三方引擎 + 模型），
+改代码 / 文档 / 安装器都不会影响它。补发小版本时加这个旗标，省掉
+重复压缩 6 GB 的十分钟（分卷本身可跨版本复用，见 打包发布版本.py 的 _voice_files）。
 """
 from __future__ import annotations
 
@@ -33,7 +38,7 @@ SNAPSHOT = BASE.parent / "小糖糖-发布"
 OUT = BASE.parent / "小糖糖-发布版"
 ATTACH = OUT / "附件"
 
-TAG = "v1.0"
+TAG = "v1.1"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -256,14 +261,27 @@ def main() -> int:
 
     pkg = build_package()
 
-    print(f"\n{'─' * 50}")
-    parts = build_voice_parts()
+    skip_voice = "--no-voice" in sys.argv
+    if skip_voice:
+        # 复用上一版的分卷：它们只装 gpt-sovits/（第三方引擎+模型），
+        # 与代码/文档改动无关。补发小版本时不必重新压 6 GB。
+        parts = sorted(ATTACH.glob("tangtang-voice-*of*.zip"))
+        print(f"\n{'─' * 50}")
+        if parts:
+            print(f"[>] --no-voice：沿用现有分卷 {len(parts)} 卷，不重新打包")
+        else:
+            print("[!] --no-voice 但没找到现成分卷——上一版的分卷在哪？")
+    else:
+        print(f"\n{'─' * 50}")
+        parts = build_voice_parts()
 
     print(f"\n{'─' * 50}")
     print("✅ 全部产物")
     print(f"   安装包   {pkg.name}  {pkg.stat().st_size / 2**20:.0f} MB")
     for p in parts:
         print(f"   语音分卷 {p.name}  {p.stat().st_size / 2**30:.2f} GB")
+    if skip_voice:
+        print("\n   ⚠ 分卷未重新生成——上传时可直接复用上一版的附件")
     return 0
 
 

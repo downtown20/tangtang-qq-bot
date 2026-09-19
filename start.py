@@ -12,6 +12,16 @@ import runpy
 import sys
 from pathlib import Path
 
+# 强制 UTF-8 输出（见 tools/安装糖糖.py 同款守卫）。
+# install 那条路径本就被目标脚本间接保护着；这里放在桥这一层，是为了让
+# console（图形控制台，自身没有守卫）走重定向时同样安全，两条路径一起覆盖。
+for _s in (sys.stdout, sys.stderr):
+    if _s and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 BASE = Path(__file__).resolve().parent
 TARGETS = {
     "console": BASE / "糖糖控制台_qt.py",

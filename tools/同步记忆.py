@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""小糖糖 记忆同步脚本 🧠
+"""小糖糖 记忆同步脚本 [·]
 
 用法（在项目根目录执行）：
     python tools/同步记忆.py 检查            # 查看本机与快照状态（默认）
@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 # 强制 UTF-8 输出：控制台自动打包时 stdout 被重定向（DEVNULL/管道），
-# Python 会退回 GBK 编码——print 的 emoji（✅ 等）抛 UnicodeEncodeError
+# Python 会退回 GBK 编码——print 的 emoji（[√] 等）抛 UnicodeEncodeError
 # 导致脚本退出码 1，快照却已生成 → 「显示失败但实际成功」。终端运行不受影响。
 for _s in (sys.stdout, sys.stderr):
     if _s and hasattr(_s, "reconfigure"):
@@ -47,7 +47,7 @@ SYNC_DIR = BASE / "memory_sync"
 SELF_STATE = BASE / ".tangtang_self.json"
 
 STIGNORE_HINT = """
-📌 项目根目录 .stignore 配置（Syncthing 用，需在两台机器都生效）：
+[i] 项目根目录 .stignore 配置（Syncthing 用，需在两台机器都生效）：
     // 糖糖数据库——由 tools/同步记忆.py 管理，Syncthing 不碰
     memory.db
     memory.db-wal
@@ -111,7 +111,7 @@ def _vacuum_into(src: Path, dst: Path) -> bool:
         tmp.replace(dst)  # 原子替换——旧快照保留到新快照写成功
         return True
     except Exception as e:
-        print(f"  ❌ 数据库备份失败: {e}")
+        print(f"  [×] 数据库备份失败: {e}")
         print("     如果糖糖正在运行且锁表，请先停止糖糖后重试")
         try:
             if tmp.exists():
@@ -205,7 +205,7 @@ def count_local_missing(local_db: Path, snap_db: Path, window: int = 300) -> int
 
 def cmd_check() -> int:
     print(f"  机器: {_machine()}")
-    print(f"  糖糖进程: {'🟢 运行中' if sugar_running() else '⚪ 未运行'}")
+    print(f"  糖糖进程: {'[√] 运行中' if sugar_running() else '[ ] 未运行'}")
     if DB.exists():
         st = DB.stat()
         print(f"  本机 memory.db: {st.st_size / 1e6:.1f} MB（{_ts(st.st_mtime)}）")
@@ -233,35 +233,35 @@ def cmd_pack(if_newer: bool = False, force: bool = False) -> int:
         # --if-newer：数据没变化就跳过（自动打包场景，避免反复打包白费流量）
         # 注意用 _db_modified：WAL 模式下写入更新 -wal 文件，主文件 mtime 可能不变
         if if_newer and not force and snap.exists() and _db_modified(DB) <= snap.stat().st_mtime:
-            print(f"  ⏭️ 数据未变化（memory.db 不新于现有快照），跳过打包")
+            print(f"  [>] 数据未变化（memory.db 不新于现有快照），跳过打包")
             print(f"     如果确定有变化，请用: python tools/同步记忆.py 打包 --force")
             return 0
         if not _vacuum_into(DB, snap):
             return 1
-        print(f"  ✅ 记忆快照: {snap.name}（{snap.stat().st_size / 1e6:.1f} MB，{_ts(snap.stat().st_mtime)}）")
+        print(f"  [√] 记忆快照: {snap.name}（{snap.stat().st_size / 1e6:.1f} MB，{_ts(snap.stat().st_mtime)}）")
     else:
-        print("  ⚠️ 本机没有 memory.db，跳过")
+        print("  [!] 本机没有 memory.db，跳过")
 
     if SELF_STATE.exists():
         dst = SYNC_DIR / f"tangtang_self-{name}.json"
         shutil.copy2(SELF_STATE, dst)
-        print(f"  ✅ 自我状态快照: {dst.name}")
+        print(f"  [√] 自我状态快照: {dst.name}")
     else:
-        print("  ⚠️ 本机没有 .tangtang_self.json（首次运行糖糖后才会生成）")
+        print("  [!] 本机没有 .tangtang_self.json（首次运行糖糖后才会生成）")
 
-    print("\n  ➡ 等 Syncthing 同步完成后，在另一台机器执行:")
+    print("\n  -> 等 Syncthing 同步完成后，在另一台机器执行:")
     print("     python tools/同步记忆.py 解包")
     return 0
 
 
 def cmd_unpack(machine: str | None) -> int:
     if sugar_running():
-        print("  ❌ 糖糖正在运行——请先停止糖糖再解包（运行中覆盖数据库会损坏）")
+        print("  [×] 糖糖正在运行——请先停止糖糖再解包（运行中覆盖数据库会损坏）")
         return 1
 
     snaps = sorted(SYNC_DIR.glob("memory-*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not snaps:
-        print("  ❌ memory_sync/ 下没有快照")
+        print("  [×] memory_sync/ 下没有快照")
         print("     先在「最后运行糖糖的那台机器」执行: python tools/同步记忆.py 打包")
         print("     等 Syncthing 同步完成后，再回到本机执行解包")
         return 1
@@ -270,7 +270,7 @@ def cmd_unpack(machine: str | None) -> int:
     if machine:
         chosen = next((p for p in snaps if machine.lower() in p.name.lower()), None)
         if chosen is None:
-            print(f"  ❌ 找不到 {machine} 的快照，可用的：{', '.join(p.name for p in snaps)}")
+            print(f"  [×] 找不到 {machine} 的快照，可用的：{', '.join(p.name for p in snaps)}")
             return 1
     else:
         # 默认选「最新且非本机」的快照——本机快照是本机库的拷贝，解包它无意义
@@ -279,10 +279,10 @@ def cmd_unpack(machine: str | None) -> int:
         if others:
             chosen = others[0]
             if len(others) < len(snaps):
-                print(f"  ℹ 已排除本机快照（解包本机快照=覆盖自己，无意义），选: {chosen.name}")
+                print(f"  [i] 已排除本机快照（解包本机快照=覆盖自己，无意义），选: {chosen.name}")
         else:
             chosen = snaps[0]  # 只有本机快照——提示并继续（可能是误删库想恢复）
-            print(f"  ⚠️ 只有本机快照可用（{chosen.name}）——解包它等于覆盖自己")
+            print(f"  [!] 只有本机快照可用（{chosen.name}）——解包它等于覆盖自己")
 
     # 覆盖方向检查：本机数据更新时提醒（防止旧数据覆盖新数据）
     # mtime 比较（WAL 下可能滞后）+ 精确方向守卫（本机最新记录是否都在快照里）双保险
@@ -290,7 +290,7 @@ def cmd_unpack(machine: str | None) -> int:
         local_missing = count_local_missing(DB, chosen)
         local_newer = DB.stat().st_mtime > chosen.stat().st_mtime
         if local_newer:
-            print(f"  ⚠️ 本机 memory.db（{_ts(DB.stat().st_mtime)}）比快照（{_ts(chosen.stat().st_mtime)}）更新")
+            print(f"  [!] 本机 memory.db（{_ts(DB.stat().st_mtime)}）比快照（{_ts(chosen.stat().st_mtime)}）更新")
             print(f"     覆盖会用旧数据替换新数据。请确认本机糖糖已停止、且已执行过「打包」。")
             ans = input("     仍然继续覆盖? [y/N] ").strip().lower()
             if ans != "y":
@@ -298,7 +298,7 @@ def cmd_unpack(machine: str | None) -> int:
                 return 1
         elif local_missing > 0:
             # 快照时间戳更新、但本机有快照没有的记录 = 本机是旁支流（最后时刻没打包）
-            print(f"  ⚠️ 本机 memory.db 有 {local_missing} 条快照未包含的新记录")
+            print(f"  [!] 本机 memory.db 有 {local_missing} 条快照未包含的新记录")
             print(f"     （通常是本机最后时刻的对话没来得及打包）——覆盖会丢失它们。")
             print(f"     建议：先在本机执行「打包记忆」，等快照同步后再解包。")
             ans = input("     仍然继续覆盖? [y/N] ").strip().lower()
@@ -310,7 +310,7 @@ def cmd_unpack(machine: str | None) -> int:
         # 正常换机（快照=本机旧版本）差异为 0；分叉时覆盖会静默丢失一方数据。
         diff = count_fork_diff(DB, chosen)
         if diff > 0:
-            print(f"  ⚠️⚠️ 检测到记忆分叉：两库有 {diff} 条同一序号但内容不同的记录——")
+            print(f"  [!][!] 检测到记忆分叉：两库有 {diff} 条同一序号但内容不同的记录——")
             print(f"     说明两台设备同时运行过糖糖（各自写入同一序号），覆盖会丢失其中一方的数据。")
             print(f"     建议：先在 tools/_归档/记忆冲突存档 中比对，或手动导出差异后再决定。")
             ans = input("     仍要覆盖? [y/N] ").strip().lower()
@@ -322,7 +322,7 @@ def cmd_unpack(machine: str | None) -> int:
     if DB.exists():
         prev = DB.with_name("memory.db.previous")
         shutil.copy2(DB, prev)
-        print(f"  💾 本地备份: {prev.name}")
+        print(f"  [·] 本地备份: {prev.name}")
 
     # 删掉旧的 WAL/SHM——防止残留日志污染新库
     for suf in ("-wal", "-shm"):
@@ -332,19 +332,19 @@ def cmd_unpack(machine: str | None) -> int:
 
     shutil.copy2(chosen, DB)
     if not _quick_check(DB):
-        print("  ❌ 快照完整性检查失败——请勿启动糖糖，检查 memory_sync/ 下的快照文件")
+        print("  [×] 快照完整性检查失败——请勿启动糖糖，检查 memory_sync/ 下的快照文件")
         return 1
-    print(f"  ✅ 已应用快照 {chosen.name} → memory.db（完整性 OK）")
+    print(f"  [√] 已应用快照 {chosen.name} → memory.db（完整性 OK）")
 
     # 自我状态（关系场/自我叙事）
     self_snaps = sorted(SYNC_DIR.glob("tangtang_self-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if self_snaps:
         shutil.copy2(self_snaps[0], SELF_STATE)
-        print(f"  ✅ 已应用自我状态 {self_snaps[0].name} → .tangtang_self.json")
+        print(f"  [√] 已应用自我状态 {self_snaps[0].name} → .tangtang_self.json")
     else:
-        print("  ⚠️ memory_sync/ 下没有自我状态快照（不影响启动，糖糖会重新积累）")
+        print("  [!] memory_sync/ 下没有自我状态快照（不影响启动，糖糖会重新积累）")
 
-    print("\n  ✅ 解包完成——现在可以启动糖糖了")
+    print("\n  [√] 解包完成——现在可以启动糖糖了")
     return 0
 
 
