@@ -277,3 +277,27 @@ def test_release_snapshot_is_clean():
     hits = _prep.scan_sensitive(snap)
     assert not hits, (
         f"快照里有 {len(hits)} 处敏感命中，不能发布：\n  " + "\n  ".join(hits[:10]))
+
+
+def test_snapshot_carries_no_derived_index_files():
+    """快照里不许有任何 sqlite 派生文件——包括 -wal / -shm 两个边车。
+
+    2026-09-19 实测：主库 `.knowledge_index.sqlite3` 已经剔掉了，但它的两个边车
+    没进 `KNOWLEDGE_IGNORE`，照样被 copytree 搬进了快照。它们当时**没发出去**，
+    但那是因为另外两道独立的规则各挡了一下（发布时生成的 .gitignore 里有
+    `*.sqlite3-wal`，打包器的后缀黑名单里也有）——**一个东西要靠三道各自独立的
+    规则才拦得住，说明哪一道都不是真正管着它**。哪天有人顺手改掉其中一条，
+    剩下的照样沉默放行。
+
+    口径收在源头：这类文件本来就不该进快照。
+    """
+    snap = BASE.parent / "小糖糖-发布"
+    if not snap.is_dir():
+        pytest.skip("快照不存在——先跑 python tools/准备发布.py")
+    derived = sorted(
+        p.relative_to(snap).as_posix()
+        for p in snap.rglob("*")
+        if p.is_file() and (p.name.endswith((".sqlite3", "-wal", "-shm", ".sqlite3-journal"))))
+    assert not derived, (
+        f"快照里有 sqlite 派生文件（索引/边车），它们是生成时点的内容副本：{derived}\n"
+        f"  —— 把后缀加进 tools/准备发布.py 的 KNOWLEDGE_IGNORE / ZIP_EXCLUDE_SUFFIX")

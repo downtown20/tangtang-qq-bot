@@ -44,7 +44,13 @@ COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg",
 #   它本来就带 sha256 校验、启动时自动重建，首启那几十秒不值得换一次泄漏。
 KNOWLEDGE_IGNORE = shutil.ignore_patterns(
     "技法摘录_中文百合BDSM.md", "技法摘录_日系官能.md", "色色_写作指南.md",
-    "learned_*", "_order.json", ".knowledge_index.sqlite3")
+    "learned_*", "_order.json",
+    # 末尾带 `*`：sqlite 的 WAL 模式会额外生成 -wal / -shm 两个边车，它们同样是
+    # **派生数据**（页面快照/页号索引），和主库一个性质。只写 `.knowledge_index.sqlite3`
+    # 挡不住它们——2026-09-19 实测快照里就有这两个文件，当时靠生成的 .gitignore
+    # 和打包器的后缀黑名单**各挡了一道**才没发出去。一个东西要三道独立规则才拦得住，
+    # 说明哪一道都不是真正管着它。口径收在源头：快照本身就不该有。
+    ".knowledge_index.sqlite3*")
 
 COPY_FILES = [
     # 入口与核心脚本

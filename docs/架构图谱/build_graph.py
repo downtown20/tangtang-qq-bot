@@ -76,7 +76,7 @@ def resolve_module(src_file: str, module: str | None, level: int) -> str | None:
     if level >= 2:
         return None                     # 本项目无 .. 级导入
     if level == 1:
-        pkg = src_file.split("/")[0]    # agent / napcat（root 文件无同级模块）
+        pkg = src_file.split("/")[0]    # agent / onebot（root 文件无同级模块）
         if pkg not in ("agent", "onebot"):
             return None
         chain = [pkg] + module.split(".")

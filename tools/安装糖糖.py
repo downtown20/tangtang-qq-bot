@@ -796,7 +796,7 @@ def _collect_include_roots(choices: list[int]) -> list[Path]:
     """按功能选择计算要打包的根级项"""
     roots = ["agent", "main.py", "config.yaml", ".env",
              "role_card.md", "role_card_murasame.md", "role_card_michele.md",
-             "scenarios", "knowledge", "SnowLuma", "napcat",
+             "scenarios", "knowledge", "SnowLuma", "onebot",
              "stickers", "stickers_cg", "stickers_murasame", "stickers_michele",
              "tools", "安装糖糖.bat", "启动控制台.bat", "requirements.txt", ".stignore"]
     opt_roots = {

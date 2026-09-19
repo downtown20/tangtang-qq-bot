@@ -150,3 +150,66 @@ def test_wire_config_writes_backup_for_existing_config(tmp_path, monkeypatch):
     mod.wire_config([FEAT_MEMORY, FEAT_VOICE, FEAT_CONSOLE], fresh=False, dry_run=False)
     assert list(tmp_path.glob("config.yaml.bak-*")), "改已有配置前应留备份"
     assert _read_cfg(tmp_path)["voice"]["enabled"] is True
+
+
+# ═══════════════════════════════════════════════════════
+# 换机部署包的根项清单（「打包项目」菜单）
+# ═══════════════════════════════════════════════════════
+
+# 发布包里没有、首次安装时才由模板生成的两个文件。维护者机器上它们存在，
+# clone 仓库的人却没有——不能因为这条闸门让 clone 的人无缘无故变红。
+_INSTALL_TIME_GENERATED = {".env", "config.yaml"}
+
+
+def _local_packages() -> set[str]:
+    """从**真实 import 语句**推导「必须随包走的本地顶层包」。
+
+    刻意不写死包名：写死的清单一定会以同样的方式腐烂——改名时改了目录、
+    忘了清单。这里让清单跟着代码走，代码改到哪它跟到哪。
+    """
+    import re
+    files = [BASE / "main.py", BASE / "start.py", BASE / "糖糖控制台_qt.py"]
+    files += sorted((BASE / "agent").glob("*.py"))
+    found = set()
+    for f in files:
+        if not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_]\w*)", text, re.M):
+            name = m.group(1)
+            if (BASE / name).is_dir() and list((BASE / name).glob("*.py")):
+                found.add(name)
+    return found
+
+
+def test_pack_roots_cover_every_local_package():
+    """「打包项目」生成的换机部署包，必须带上所有本地 Python 包。
+
+    2026-09-19 实证：`napcat/` 改名 `onebot/` 时，`_collect_include_roots` 里那个
+    **不带斜杠**的列表项 `"napcat"` 被漏掉了（改名脚本只认 `napcat/` 这种带斜杠
+    的形态）。后果不是报错——`_add_path` 对不存在的路径**静默跳过**：部署包里
+    没有协议层，生成时照样打印「N 个根项」一切正常，搬到新电脑上 `main.py`
+    一 import 就炸，而且炸在别人机器上。
+
+    「名字改了、清单没改」这类错，只有把清单和**磁盘现实**对起来才拦得住。
+    """
+    mod = _load(Path(BASE))          # 真实项目根，不做 tmp_path 重定向
+    declared = {p.name for p in mod._collect_include_roots([])}
+
+    missing = sorted(_local_packages() - declared)
+    assert not missing, (
+        f"这些本地包被代码 import、却没进部署包清单：{missing}\n"
+        f"  —— 多半是目录改名后漏改了 tools/安装糖糖.py 的 _collect_include_roots")
+
+
+def test_pack_roots_all_exist_on_disk():
+    """清单里不许留不存在的路径——那正是上面那个 bug 的形态。
+
+    一个不存在的根项不会报错、不会警告，只是让部署包悄悄少一块。
+    """
+    mod = _load(Path(BASE))
+    ghosts = sorted(p.name for p in mod._collect_include_roots([])
+                    if not p.exists() and p.name not in _INSTALL_TIME_GENERATED)
+    assert not ghosts, (
+        f"部署包清单里有不存在的路径：{ghosts}\n"
+        f"  —— _add_path 会静默跳过它们，你只会看到「N 个根项」一切正常")

@@ -341,6 +341,85 @@ def test_shipped_user_docs_have_no_dead_links():
 
 
 # ═══════════════════════════════════════════════════════
+# 3c. 目录结构：落点目录一个不能少；两个「OneBot」必须写明身份
+# ═══════════════════════════════════════════════════════
+
+def _readme_dir_block(text: str) -> str:
+    """取 README 「## 目录结构」下的那个 ```text 代码块"""
+    m = re.search(r"## 目录结构\s*\n+```text\n(.*?)```", text, re.S)
+    assert m, "README 里找不到「## 目录结构」下的 ```text 代码块——章节标题或围栏改了？"
+    return m.group(1)
+
+
+def test_readme_directory_tree_lists_every_landing_dir():
+    """每个「要用户自己往里放东西」的目录，都必须在 README 的目录结构里露脸。
+
+    判据从快照推导、不写死目录名：**带 `摆放说明.txt` 的目录 = 落点目录**。
+
+    2026-09-19 实证：七个落点目录里，`SnowLuma/` / `share_images/` / `voice_cache/`
+    三个都没进目录结构——其中 SnowLuma 偏偏是唯一一个**必须**用户手动放的。
+    读者在「上手」里看到「解压到 `SnowLuma/` 下」，翻到「目录结构」却没有这一行，
+    只能自己猜它该放哪、和旁边的 `onebot/` 是什么关系。
+    """
+    snap = BASE.parent / "小糖糖-发布"
+    if not snap.is_dir():
+        pytest.skip("快照不存在——先跑 python tools/准备发布.py")
+    landing = sorted(p.parent.name for p in snap.glob("*/摆放说明.txt"))
+    assert landing, "快照里一个落点说明都没有？——判据失效了，先确认 摆放说明.txt 还在生成"
+
+    readme, _ = _readme()
+    tree = _readme_dir_block(readme.read_text(encoding="utf-8"))
+    listed = {ln.split("/")[0].strip() for ln in tree.splitlines() if "/" in ln}
+    missing = [d for d in landing if d not in listed]
+    assert not missing, (
+        f"这些落点目录有摆放说明、却没进 README 的目录结构：{missing}\n"
+        f"  （落点目录 = 用户得自己往里放东西的目录，读者要在这里才找得到它）")
+
+
+def _directory_listing(path: Path) -> tuple[list[str], str]:
+    """取该文档里「目录清单」那些行——歧义正是发生在这里。
+
+    README 是「## 目录结构」的代码块；使用说明.md 是以 ``| `名字/` `` 开头的表格行。
+    刻意**只认清单内部**：身份说明写在正文别处不算数——读者是在对着这份清单
+    找「SnowLuma 该放哪」的，说明就得在他眼睛所在的那一行。
+    """
+    text = path.read_text(encoding="utf-8")
+    if path.name == "README.md":
+        return _readme_dir_block(text).splitlines(), "目录结构代码块"
+    lines = [ln for ln in text.splitlines() if re.match(r"\|\s*`[^`]+/`", ln)]
+    return lines, "目录表"
+
+
+def test_two_onebots_are_told_apart_in_user_docs():
+    """`onebot/` 和 `SnowLuma/` 必须在**目录清单里**各自写明身份。
+
+    两个名字都含「OneBot」，一边是糖糖**自己**的代码（随包自带、用户不用管），
+    一边是**第三方**程序（要用户去下载解压）——不写清楚，读者完全可能以为
+    SnowLuma 该解压进 `onebot/`。这正是 2026-09-19 主人当场问出来的那个歧义：
+    「目录结构里没有 SnowLuma，换成了 onebot，那 SnowLuma 到底要解压到 onebot 嘛？」
+
+    闸门只认事实（谁是自己的 / 谁是第三方的），不锁具体措辞——
+    换一种说法写清楚照样过，写不清楚就红。
+    """
+    docs = [(DEV_README if DEV_README.is_file() else ROOT_README, "README"),
+            (BASE / "docs" / "用户手册" / "使用说明.md", "使用说明.md")]
+    bad = []
+    for path, label in docs:
+        if not path.is_file():
+            bad.append(f"{label}（文件不在，路径变了？）")
+            continue
+        lines, where = _directory_listing(path)
+        assert lines, f"{label} 的{where}里一行都没取到——清单格式变了？"
+        if not [ln for ln in lines if "onebot/" in ln and ("自己" in ln or "本项目" in ln)]:
+            bad.append(f"{label} 的{where}里，没有一行说明 `onebot/` 是糖糖自己的代码"
+                       f"——读者会以为它是放第三方 OneBot 实现（SnowLuma）的地方")
+        if not [ln for ln in lines if "SnowLuma/" in ln and "第三方" in ln]:
+            bad.append(f"{label} 的{where}里，没有一行说明 `SnowLuma/` 是第三方程序"
+                       f"——读者会以为它随包自带、或该放进 onebot/")
+    assert not bad, "两个「OneBot」的身份没说清：\n  " + "\n  ".join(bad)
+
+
+# ═══════════════════════════════════════════════════════
 # 4. Mermaid 图必须能被 GitHub 渲染
 # ═══════════════════════════════════════════════════════
 
