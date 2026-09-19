@@ -1679,7 +1679,7 @@ undefined=0、compileall=0。`_execute_tool` 超大方法的 GitNexus 影响暂�
 
 ## 2026-08-30 历史无锚点事实迁移工具（默认 dry-run）
 
-- 新增 [tools/migrate_unanchored_cluster_facts.py](D:/qq-小糖糖/tools/migrate_unanchored_cluster_facts.py)。
+- 新增 `tools/migrate_unanchored_cluster_facts.py`。
   默认使用 SQLite `mode=ro` 只读审计；只有显式 `--apply` 才会先生成 backup，再在单事务内把
   active 且无 `evidence_ids` 的原子行标为 `retracted`、清空受影响簇摘要并重算 `fact_count`。
   原子行、聊天记录和有证据事实均保留，不调用 LLM、不猜测来源。

@@ -357,7 +357,7 @@ class VoiceEngine:
 
     # GPT-SoVITS 情绪 → 米雪儿中文参考音频。
     GPT_SOVITS_URL = "http://127.0.0.1:9880"
-    # 2026-08-15：从硬编码 d:/qq-小糖糖 改为相对项目根（与 service_manager.GPT_SOVITS_DIR 同规则）
+    # 2026-08-15：从硬编码的本机绝对路径改为相对项目根（与 service_manager.GPT_SOVITS_DIR 同规则）
     GPT_SPEAKER_DIR = Path(__file__).resolve().parent.parent / "gpt-sovits" / "speakers"
 
     async def switch_model(self, profile: str, *, voice_lang: str | None = None,

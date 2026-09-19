@@ -155,10 +155,10 @@
 cd Retrieval-based-Voice-Conversion-WebUI
 
 # 组合 D（确认最优）
-py -3.10 tools/infer_cli.py --input_path "D:/qq-小糖糖/songs/covers/htdemucs/PLANET/vocals.wav" \
+py -3.10 tools/infer_cli.py --input_path "songs/covers/htdemucs/PLANET/vocals.wav" \
   --model_name "tangtang_v2" \
-  --index_path "D:/qq-小糖糖/Retrieval-based-Voice-Conversion-WebUI/logs/tangtang_v2/added_IVF100_Flat_nprobe_1_tangtang_v2_v2.index" \
-  --opt_path "D:/qq-小糖糖/songs/audio/_test_D.wav" \
+  --index_path "Retrieval-based-Voice-Conversion-WebUI/logs/tangtang_v2/added_IVF100_Flat_nprobe_1_tangtang_v2_v2.index" \
+  --opt_path "songs/audio/_test_D.wav" \
   --f0method "fcpe" --index_rate 0.0 --protect 0.5
 ```
 

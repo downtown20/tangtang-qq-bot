@@ -18,7 +18,7 @@ def memory(store):
 
 class TestExtractTextAtSegment:
     def _extract(self, segments):
-        from napcat.ws_client import NapCatClient
+        from onebot.ws_client import NapCatClient
         return NapCatClient._extract_text(object(), segments)
 
     def test_at_with_name_kept(self):

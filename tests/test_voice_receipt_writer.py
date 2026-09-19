@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 from agent.action_contract import ActionEnvelope, ConversationRef, derive_action_id
 from agent.handler import MessageHandler
-from napcat.ws_client import NapCatClient, SendResult
+from onebot.ws_client import NapCatClient, SendResult
 
 
 def _envelope(scope_id: str = "g1", channel: str = "group") -> ActionEnvelope:

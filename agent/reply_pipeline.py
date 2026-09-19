@@ -10,7 +10,7 @@ import logging
 import random
 import re
 
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 from .async_io import run_bounded_blocking, run_bounded_store_io
 from .sticker import get_face_for_text

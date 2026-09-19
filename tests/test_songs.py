@@ -1,6 +1,10 @@
 """
 测试曲库声音版本解析（2026-08-14）
-每首歌有两种声音：rvc=糖糖声线（songs/audio/）/ original=原声（covers/separated/*_FINAL.wav）
+每首歌有两种声音：rvc=糖糖声线（songs/audio/）/ original=原声（covers/separated/*_FINAL.{wav,mp3}）
+
+.wav 是开发机上的无损源；.mp3 是发布包里的转码形态（2026-09-19 起）——
+唱歌走 CQ:record，QQ 侧本来就会转成 SILK 低码率语音编码，存无损是白背 1.5G。
+两种后缀都要认，否则用户下完包会发现 40 首歌的「原声」不存在。
 """
 
 import pytest
@@ -59,6 +63,46 @@ class TestSongVersions:
         for version in ("rvc", "original"):
             path = song_lib.get_section_audio("小鸟", "完整", version)
             assert Path(path).name == "小鸟_FINAL.wav"
+
+
+class TestOriginalMp3:
+    """原声的 .mp3 形态（2026-09-19）。
+
+    发布包里原声是转码后的 mp3，不是 wav。只认 .wav 的话，用户下完包会发现
+    40 首歌的原声"不存在"——而 sing 工具还在对 LLM 承诺「说原声就放原唱」，
+    用户点了只会静默降级放糖糖声线（agent/handler.py:10239 的降级分支）。
+    """
+
+    @pytest.fixture
+    def mp3_lib(self, tmp_path):
+        """模拟发布包：audio/ 有 RVC 糖糖声线，separated/ 只有 mp3 原声"""
+        songs_dir = tmp_path / "songs"
+        (songs_dir / "audio").mkdir(parents=True)
+        (songs_dir / "covers" / "separated").mkdir(parents=True)
+        (songs_dir / "audio" / "勇气.wav").write_bytes(b"RVC")
+        (songs_dir / "covers" / "separated" / "勇气_FINAL.mp3").write_bytes(b"MP3")
+        (songs_dir / "covers" / "separated" / "小鸟_FINAL.mp3").write_bytes(b"MP3")
+        (songs_dir / "勇气.txt").write_text(
+            "梁静茹\n[副歌]\n我们都需要勇气\n", encoding="utf-8")
+        return SongLibrary(str(songs_dir))
+
+    def test_mp3_original_resolves(self, mp3_lib):
+        path = mp3_lib.get_section_audio("勇气", "副歌", "original")
+        assert Path(path).name == "勇气_FINAL.mp3"
+
+    def test_mp3_only_song_is_discovered_and_playable(self, mp3_lib):
+        assert "小鸟" in mp3_lib.list_songs()
+        assert mp3_lib.has_any_audio("小鸟")
+        for version in ("rvc", "original"):
+            path = mp3_lib.get_section_audio("小鸟", "完整", version)
+            assert Path(path).name == "小鸟_FINAL.mp3"
+
+    def test_wav_wins_when_both_present(self, song_lib):
+        """开发机上 wav 与 mp3 同时存在时取无损那份（顺序不能反）"""
+        sep = song_lib.songs_dir / "covers" / "separated"
+        (sep / "勇气_FINAL.mp3").write_bytes(b"MP3")
+        path = song_lib.get_section_audio("勇气", "副歌", "original")
+        assert Path(path).name == "勇气_FINAL.wav"
 
 
 # ═══════════════════════════════════════════════════════

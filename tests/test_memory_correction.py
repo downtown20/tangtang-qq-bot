@@ -5,12 +5,16 @@
 批 2：status 列 + correct_memory/forget_memory 工具 + 权限 + 自忆门控 + 纠正契约。
 """
 import asyncio
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from agent import protocols
 from agent.memory import MemorySystem
+
+# 源码闸门按 __file__ 定位项目文件，不硬编码本机路径（clone 到别处/换机都能跑）
+BASE = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -148,7 +152,7 @@ class TestCorrectionContract:
     def test_tools_registered(self):
         """correct_memory/forget_memory 工具定义存在（source 闸门）"""
         import re
-        src = open(r"d:/qq-小糖糖/agent/handler.py", encoding="utf-8").read()
+        src = (BASE / "agent" / "handler.py").read_text(encoding="utf-8")
         assert '"name": "correct_memory"' in src
         assert '"name": "forget_memory"' in src
         # 执行分支 + 自忆门控在场（防删闸门）

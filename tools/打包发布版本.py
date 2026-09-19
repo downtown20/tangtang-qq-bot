@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -38,15 +39,16 @@ SNAPSHOT = BASE.parent / "小糖糖-发布"
 OUT = BASE.parent / "小糖糖-发布版"
 ATTACH = OUT / "附件"
 
-TAG = "v1.1"
+TAG = "v1.2"   # ← 版本号单一来源：发布前检查.py 与 README 契约测试都从这里读
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
 PKG_NAME = f"tangtang-{TAG}.zip"
 
 # 打进包的排除项（快照里的 .git 是发布仓库的，不能进用户包）
-ZIP_EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files"}
-ZIP_EXCLUDE_SUFFIX = (".pyc", ".log", ".part")
+ZIP_EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files", "_原声mp3缓存"}
+# .sqlite3：生成物索引（派生数据不进包；2026-09-19 它在源文件清干净之后仍带着旧路径）
+ZIP_EXCLUDE_SUFFIX = (".pyc", ".log", ".part", ".sqlite3", ".sqlite3-shm", ".sqlite3-wal")
 
 # 分卷上限——GitHub Release 单文件硬上限 2GB，留出安全余量
 PART_LIMIT = int(1.8 * 1024 ** 3)
@@ -105,6 +107,27 @@ def _add_tree(zf: zipfile.ZipFile, root: Path, extra: dict[str, str] | None = No
 BUNDLED_STICKER_DIRS = ["stickers_michele", "stickers_murasame"]
 
 
+# 原声转码缓存：重复打包不重转（41 首约 70 秒，没必要每次付）。放在 OUT 下，
+# 不进快照也不进 zip——zip 的输入只有 SNAPSHOT 与 _add_bundled_media 显式加的东西。
+MP3_CACHE = OUT / "_原声mp3缓存"
+
+
+def _original_mp3(wav: Path) -> Path | None:
+    """把原声 wav 转成 192kbps mp3（带缓存）。ffmpeg 失败返回 None。"""
+    MP3_CACHE.mkdir(parents=True, exist_ok=True)
+    out = MP3_CACHE / f"{wav.stem}.mp3"
+    if out.exists() and out.stat().st_mtime >= wav.stat().st_mtime:
+        return out
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(wav),
+         "-vn", "-c:a", "libmp3lame", "-b:a", "192k", str(out)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0 or not out.exists():
+        print(f"      ffmpeg 返回 {r.returncode}：{r.stderr[:200]}")
+        return None
+    return out
+
+
 def _add_bundled_media(zf: zipfile.ZipFile) -> int:
     """歌曲（audio/*.wav + 歌词 + separated 补差）+ 角色贴图，路径与最终布局一致"""
     n = 0
@@ -114,14 +137,23 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
         for p in sorted(audio.glob("*.wav")):
             zf.write(p, f"songs/audio/{p.name}")
             n += 1
-        # 曲库还从 covers/separated/*_FINAL.wav 发现歌（agent/songs.py 两处来源），
-        # 只把它当补差收——同一首已在 audio/ 的不重复打包，否则白涨 4.8G
-        stems = {p.stem for p in audio.glob("*.wav")}
+        # 原声版：**41 首全部进包**，且转码成 mp3。
+        # 2026-09-19 修正两处——
+        #   ① 原逻辑把"已在 audio/ 里的"当重复文件跳过了。可 audio/ 是**糖糖声线**、
+        #      这里是**原声**，同一首歌的两个版本不是重复。结果 41 首里 40 首没有原声，
+        #      而 sing 工具还在对 LLM 承诺"对方说「原声」「原唱」时 voice 传「原声」"
+        #      （agent/handler.py:5323）→ 用户点了原声只会静默降级放糖糖声线。
+        #   ② 无损 WAV 存着没意义：唱歌走 `[CQ:record,...]`，QQ 侧本来就会转成 SILK
+        #      这类低码率语音编码。192kbps mp3 已远超 SILK 能保留的信息量，
+        #      而 1.78G → 242M 让整包留在 GitHub Releases 的 2G 单附件上限内。
         sep = songs / "covers" / "separated"
         for p in sorted(sep.glob("*_FINAL.wav")):
-            if p.stem.removesuffix("_FINAL") in stems:
+            mp3 = _original_mp3(p)
+            if mp3 is None:
+                print(f"   [!] 原声转码失败，跳过：{p.name}")
                 continue
-            zf.write(p, f"songs/covers/separated/{p.name}")
+            # 注意用 p.stem 而不是 p.stem+"_FINAL"：p.stem 本身已经是 "歌名_FINAL"
+            zf.write(mp3, f"songs/covers/separated/{p.stem}.mp3")
             n += 1
         for p in sorted(songs.glob("*.txt")):        # 歌词
             zf.write(p, f"songs/{p.name}")
@@ -154,7 +186,7 @@ def build_package() -> Path:
 # 语音推理集 = 引擎代码 + 权重，一并走 Release 分卷（完整版才下载）。
 # 代码不进主仓的原因（2026-09-18 实测后改）：它是第三方项目 RVC-Boss/GPT-SoVITS
 # 的 vendored 副本，进主仓会让敏感扫描被上游自带内容永久污染（贡献者 QQ、
-# webui.py 里上游默认的 D:\GPT-SoVITS\ 路径、代码注释里的长数字串），
+# webui.py 里上游默认的本机绝对路径、代码注释里的长数字串），
 # 而且安装包会白背 70M 用不上的代码。
 GPT_MODEL_PREFIXES = (
     "GPT_SoVITS/pretrained_models/",

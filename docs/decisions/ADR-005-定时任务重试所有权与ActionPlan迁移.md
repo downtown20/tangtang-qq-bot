@@ -44,10 +44,10 @@ text-only 与 typed text；贴图、语音、图片和唱歌沿用 ADR-004 规�
 ### NapCat 已经拥有另一位重试所有者
 
 * `NapCatClient._enqueue_retryable_send()` 遇到 `SendResult.retryable` 会写入
-  `send_outbox`（`napcat/ws_client.py:288-305`）。群/私聊公开 sender 在网络调用
-  返回后都会走该路径（`napcat/ws_client.py:1266-1285`、`1413-1434`）。
+  `send_outbox`（`onebot/ws_client.py:288-305`）。群/私聊公开 sender 在网络调用
+  返回后都会走该路径（`onebot/ws_client.py:1266-1285`、`1413-1434`）。
 * outbox worker 只重放 `pending`，发送结果进入 `confirmed/uncertain/dead`；
-  `uncertain/dead` 不盲重放（`napcat/ws_client.py:391-483`）。outbox 的终局会按
+  `uncertain/dead` 不盲重放（`onebot/ws_client.py:391-483`）。outbox 的终局会按
   receipt 模板写回执，v2 confirmed 还会提交永久事实（`agent/store.py:2198-2352`）。
 * outbox 的已有字段包括 `receipt_template`、`domain_action_id` 和确认快照，但没有
   `task_id/plan_id/attempt_generation`（`agent/store.py:808-849`）。因此只能知道

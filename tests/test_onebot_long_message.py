@@ -2,8 +2,8 @@
 
 import asyncio
 
-from napcat import ws_client
-from napcat.ws_client import NapCatClient, _split_message_chunks
+from onebot import ws_client
+from onebot.ws_client import NapCatClient, _split_message_chunks
 
 
 def test_split_long_message_preserves_text_and_cq_code():

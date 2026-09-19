@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def _slow_write_probe():
@@ -98,7 +98,7 @@ def test_download_file_base64_write_does_not_block_event_loop(tmp_path):
 
 
 def test_restart_signal_write_does_not_block_event_loop(tmp_path, monkeypatch):
-    import napcat.ws_client as ws_mod
+    import onebot.ws_client as ws_mod
 
     (tmp_path / "napcat").mkdir()
     monkeypatch.setattr(ws_mod, "__file__", str(tmp_path / "napcat" / "ws_client.py"))

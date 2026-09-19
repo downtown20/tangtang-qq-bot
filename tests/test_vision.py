@@ -7,6 +7,9 @@ import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# 源码闸门按 __file__ 定位项目文件，不硬编码本机路径（clone 到别处/换机都能跑）
+BASE = Path(__file__).resolve().parent.parent
+
 
 def _make_handler(monkeypatch, api_result):
     from agent.handler import MessageHandler
@@ -121,6 +124,6 @@ class TestVisionPromptGuards:
 
     def test_emoji_branch_in_vision_call(self):
         """_call_vision 的表情包分流在场（防删闸门——事故修复点）"""
-        src = open(r"d:/qq-小糖糖/agent/handler.py", encoding="utf-8").read()
+        src = (BASE / "agent" / "handler.py").read_text(encoding="utf-8")
         assert "EMOJI_PROMPT" in src
         assert '"Emoji" in (img_path or "")' in src

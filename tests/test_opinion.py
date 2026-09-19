@@ -11,7 +11,7 @@ import pytest
 
 from agent.opinion import OpinionManager
 from agent.store import Store
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 @pytest.fixture

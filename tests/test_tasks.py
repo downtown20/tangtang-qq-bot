@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.tasks import TaskManager
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 class TestGroupReminder:

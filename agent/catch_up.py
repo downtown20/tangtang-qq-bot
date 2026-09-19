@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
-from napcat.ws_client import is_send_confirmed, send_delivery_state
+from onebot.ws_client import is_send_confirmed, send_delivery_state
 
 from .async_io import run_bounded_store_io
 

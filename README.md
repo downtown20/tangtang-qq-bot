@@ -96,7 +96,7 @@ python -m pytest $(grep -l 'read_text(\|ast.parse' tests/*.py \
 | **判定单一来源** | 第二处判定点悄悄长出来 | 某个判定只允许来自唯一的决策函数；出现第三处赋值即红灯。这条上线当天就抓出两处遗漏 |
 | **函数体禁词** | 旧的分支逻辑复活 | 某些函数体内不得出现被禁的判定方式，机器禁止——不是写在文档里靠自觉 |
 
-这些闸门不是设计出来的，是**踩出来的**：项目记录着 29 条错误模式（拆东墙补西墙、用关键词代替语义判断、缩进吞掉整段代码……），每一条都从"记住别再犯"变成了"机器不让你犯"。
+这些闸门不是设计出来的，是**踩出来的**：项目记录着 35 条错误模式（拆东墙补西墙、用关键词代替语义判断、缩进吞掉整段代码、安全检查写了却从没生效……），每一条都从"记住别再犯"变成了"机器不让你犯"。
 
 ```bash
 python -m pytest tests/ -q
@@ -116,11 +116,11 @@ python -m pytest tests/ -q
 | **记得** | 从对话里提取事实、合成画像、维护关系；被纠正时能改，也能撤销 |
 | **工具** | 联网搜索 · 天气 · 计算 · 翻译 · 识图 · 画图 · 知识库检索 · 文档解析 · 记忆查询 · 唱歌 · 发语音 · 定时提醒（原生 Tool Calling，她自主决定用不用） |
 | **说话** | GPT-SoVITS 自己的声线，含 7 种情绪参考音频；唱歌是 41 首预录成品，点歌即播 |
-| **角色** | 糖糖 / 米雪儿 / 丛雨，`/角色` 切换，人格卡 + 声线 + 表情包联动 |
+| **角色** | 糖糖 / 米雪儿 / 丛雨，`/角色` 切换（主人/群主专属），人格卡 + 声线 + 表情包联动 |
 
 ## 上手
 
-到 [Releases](../../releases) 下载 **`tangtang-v1.1.zip`**，解压后双击 `安装糖糖.bat`：
+到 [Releases](../../releases) 下载 **`tangtang-v1.2.zip`**，解压后双击 `安装糖糖.bat`：
 
 1. **勾你要的功能** —— 默认已勾好「聊天 + 高质量记忆 / 唱歌 / 图形控制台」，够用了。想要糖糖开口说话就勾上语音（约 6.5G 模型自动下载）；想让她看懂图就勾识图（约 2.5G，也可走云端、零下载）。
 2. **等它跑完** —— 依赖、模型、配置全部自动。断网直接重跑，已下载的不会重来。
@@ -134,7 +134,7 @@ python -m pytest tests/ -q
 
 ```text
 agent/                核心对话、记忆、人格、自治与工具模块（74 个业务模块）
-napcat/               OneBot 11 协议适配（目录名沿用历史，现接 SnowLuma）
+onebot/               OneBot 11 协议适配——反向 WebSocket 服务端 + HTTP API 客户端
 knowledge/            知识库——糖糖可检索的背景知识，递归扫描 .md / .txt
 scenarios/            场景包——心理陪伴、亲密等，控制台可挂载到任何人身上
 stickers/             默认表情包（956 张）+ 情绪索引
@@ -159,7 +159,41 @@ main.py               服务启动入口
 - [docs/decisions/](docs/decisions/) —— 6 篇 ADR：动作信封、送达回执、永久事实归账、定时任务重试所有权……
 - [docs/开发规划/](docs/开发规划/) —— 19 篇技术设计与规划报告
 - [docs/用户手册/使用说明.md](docs/用户手册/使用说明.md) —— 面向使用者的详细说明
-- [CLAUDE.md](CLAUDE.md) —— 给 AI 协作者的项目准则：架构原则、29 条反模式、改动前检查清单
+- [CLAUDE.md](CLAUDE.md) —— 给 AI 协作者的项目准则：架构原则、35 条反模式、改动前检查清单
+
+## 她站在谁的肩膀上
+
+糖糖能跑起来，靠的是一整条开源栈；她的架构决策也不是拍脑袋想出来的。
+
+**运行时依赖**
+
+| 项目 | 用在哪 |
+|---|---|
+| [SnowLuma](https://github.com/SnowLuma/SnowLuma) | QQ 协议端（OneBot 11 反向 WebSocket） |
+| [OneBot](https://github.com/botuniverse/onebot) | 协议标准本身 |
+| [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) | 语音合成引擎与底模 |
+| [FlagEmbedding](https://github.com/FlagOpen/FlagEmbedding)（BGE） | 记忆与知识库的向量检索、重排序 |
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | 语音识别 |
+| [jieba](https://github.com/fxsjy/jieba) | 中文分词 |
+| [PySide6](https://github.com/qtproject/pyside-pyside-setup) | 图形控制台 |
+
+**架构上调研并借鉴过的**
+
+读过源码、挨个写下「可借鉴什么 / 什么不照搬」再决定，记录在 [docs/开发规划/开源架构参考_20260828.md](docs/开发规划/开源架构参考_20260828.md)：
+
+| 项目 | 借鉴了什么 |
+|---|---|
+| [Nekro Agent](https://github.com/KroMiose/nekro-agent) | 工具语义分层、系统事件触发 Agent、历史漫游先定位再取原文 |
+| [Mem0](https://github.com/mem0ai/mem0) | 用户 / 会话 / 代理作用域、实体关联、增量记忆 |
+| [Letta](https://github.com/letta-ai/letta) | core / recall / archival 分层、持久 agent state |
+| [Graphiti](https://github.com/getzep/graphiti) | Episode、事件时间、关系随时间演化 |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | checkpoint、interrupt、恢复后继续 |
+| [Temporal](https://github.com/temporalio/temporal) · [Celery](https://github.com/celery/celery) | durable execution、幂等键、重试与死信 |
+| [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-python) | correlation id、低基数指标、症状型告警 |
+
+上下文组装另有几处来源：「无标签 = 对方说的」这个来源标记原则取自 wuhu-core；World Info 的蓝绿灯与背景块预算仿 [SillyTavern](https://github.com/SillyTavern/SillyTavern)；工具注入的形态参考了 [AstrBot](https://github.com/AstrBotDevs/AstrBot)。
+
+> 别人的坑别人踩过了。最优解很少是自己拍脑袋想出来的——这也是这个项目把「先调研再判断」写进协作准则的原因。上面每一个项目也都写着「什么**不**照搬」：**读别人的代码是为了想清楚自己该是什么样，不是为了变成别人。**
 
 ## 许可与合规
 

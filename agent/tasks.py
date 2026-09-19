@@ -17,7 +17,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from napcat.ws_client import send_delivery_state
+from onebot.ws_client import send_delivery_state
 
 from .async_io import run_bounded_store_io
 

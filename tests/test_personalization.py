@@ -13,7 +13,7 @@ from agent.personalization import (
     create_birthday_greeter,
     create_preference_tracker,
 )
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 class FakeStore:

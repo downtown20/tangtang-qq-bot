@@ -43,7 +43,7 @@ import socket
 import yaml
 from dotenv import load_dotenv
 
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 from agent.handler import MessageHandler
 from agent.telemetry import build_log_handlers
 

@@ -482,7 +482,7 @@ class TestMemoryToolAccessIntegration:
 
 
 def test_napcat_get_msg_preserves_group_scope():
-    from napcat.ws_client import NapCatClient
+    from onebot.ws_client import NapCatClient
 
     client = object.__new__(NapCatClient)
     client._call_api = AsyncMock(return_value={

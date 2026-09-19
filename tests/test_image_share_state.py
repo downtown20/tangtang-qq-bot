@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 from agent.image_share import ImageShareScheduler, _contains_skip_text, _load_seq_state
 from agent.store import Store
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _run(coro):

@@ -15,6 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# 源码闸门按 __file__ 定位项目文件，不硬编码本机路径（clone 到别处/换机都能跑）
+BASE = Path(__file__).resolve().parent.parent
+
 from agent import protocols
 from agent.handler import MessageHandler
 from agent.reply_pipeline import ReplyPipeline
@@ -314,13 +317,13 @@ class TestSeductiveModeStateMachine:
     def test_persistence_restore_line_present(self):
         """持久化闸门形态：state:sed_active 在 __init__ 有绑定形态恢复行"""
         import re as _re_gate
-        src = open(r"d:/qq-小糖糖/agent/handler.py", encoding="utf-8").read()
+        src = (BASE / "agent" / "handler.py").read_text(encoding="utf-8")
         assert _re_gate.search(
             r'_sed_raw\s*=\s*self\._load_state_kv\("state:sed_active"', src)
 
     def test_seductive_yaml_documents_exit_protocol(self):
         """场景文件写明退出协议——LLM 只有看到协议才会输出标记（防删闸门）"""
-        y = open(r"d:/qq-小糖糖/scenarios/seductive.yaml", encoding="utf-8").read()
+        y = (BASE / "scenarios" / "seductive.yaml").read_text(encoding="utf-8")
         assert "[退出色色]" in y and "[进入色色]" in y
         assert "不会发给对方" in y
 

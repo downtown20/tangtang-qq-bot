@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def _run(coro):
@@ -375,7 +375,7 @@ def test_executing_event_becomes_uncertain_after_restart(store):
 def test_global_limit_rejection_does_not_create_idle_worker(monkeypatch):
     async def scenario():
         client = NapCatClient(testing_mode=True)
-        monkeypatch.setattr("napcat.ws_client.EVENT_TOTAL_INFLIGHT_MAX", 1)
+        monkeypatch.setattr("onebot.ws_client.EVENT_TOTAL_INFLIGHT_MAX", 1)
         client._event_inflight = 1
 
         await client._dispatch(_group_event(1, "300"))
@@ -390,7 +390,7 @@ def test_global_limit_rejection_does_not_create_idle_worker(monkeypatch):
 def test_active_scope_count_is_bounded(monkeypatch):
     async def scenario():
         client = NapCatClient(testing_mode=True)
-        monkeypatch.setattr("napcat.ws_client.EVENT_ACTIVE_SCOPE_MAX", 2)
+        monkeypatch.setattr("onebot.ws_client.EVENT_ACTIVE_SCOPE_MAX", 2)
         release = asyncio.Event()
 
         async def callback(_message):
@@ -413,7 +413,7 @@ def test_active_scope_count_is_bounded(monkeypatch):
 def test_dedup_cache_has_hard_bound(monkeypatch):
     async def scenario():
         client = NapCatClient(testing_mode=True)
-        monkeypatch.setattr("napcat.ws_client.EVENT_DEDUP_MAX", 3)
+        monkeypatch.setattr("onebot.ws_client.EVENT_DEDUP_MAX", 3)
         done = asyncio.Event()
         count = 0
 

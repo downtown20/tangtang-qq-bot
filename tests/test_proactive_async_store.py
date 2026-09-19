@@ -8,7 +8,7 @@ import types
 from agent.handler_autonomy import AutonomyMixin
 from agent.interaction_contract import ProactiveEvent
 from agent.scheduler import CronScheduler
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _event():

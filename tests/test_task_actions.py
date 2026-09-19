@@ -18,7 +18,7 @@ import pytest
 
 from agent.handler import MessageHandler
 from agent.tasks import TaskManager
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _run(coro):

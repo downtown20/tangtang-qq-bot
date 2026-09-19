@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.reply_pipeline import ReplyPipeline
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def _pipeline(napcat):

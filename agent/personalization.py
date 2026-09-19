@@ -13,7 +13,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 
-from napcat.ws_client import send_delivery_state
+from onebot.ws_client import send_delivery_state
 
 from .async_io import run_bounded_store_io
 from .interaction_contract import build_proactive_event

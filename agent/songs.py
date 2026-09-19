@@ -51,8 +51,11 @@ class SongLibrary:
                 logger.warning(f"加载歌曲失败 {f.name}: {e}", exc_info=True)
 
         # 2. 发现有音频但无歌词的翻唱
-        #    音频来源两处：songs/audio/（RVC 糖糖声线成品）+ covers/separated/*_FINAL.wav（原声人声成品——
+        #    音频来源两处：songs/audio/（RVC 糖糖声线成品）+ covers/separated/*_FINAL.*（原声人声成品——
         #    分离完还没拷贝到 audio/ 的歌也必须进曲库，否则"有几首歌"永远数不全）
+        #    原声同时接受 .wav 与 .mp3：开发机上放无损 wav，发布包里是转码后的 mp3
+        #    （见 打包发布版本.py 的 _original_mp3——唱歌走 CQ:record，QQ 侧本来就会转成
+        #     SILK 低码率语音编码，存无损是白背体积；1.78G → 242M）
         audio_dir = self.songs_dir / "audio"
         final_dir = self.songs_dir / "covers" / "separated"
         no_lyrics_count = 0
@@ -60,8 +63,16 @@ class SongLibrary:
         if audio_dir.exists():
             candidates.extend((w, w.stem) for w in sorted(audio_dir.glob("*.wav")))
         if final_dir.exists():
-            candidates.extend((w, w.stem.removesuffix("_FINAL"))
-                              for w in sorted(final_dir.glob("*_FINAL.wav")))
+            by_name: dict[str, Path] = {}
+            for w in sorted(final_dir.glob("*_FINAL.*")):
+                if w.suffix.lower() not in (".wav", ".mp3"):
+                    continue
+                name = w.stem.removesuffix("_FINAL")
+                prev = by_name.get(name)
+                # 两个版本同时在（开发机）时优先无损 wav
+                if prev is None or (prev.suffix.lower() == ".mp3" and w.suffix.lower() == ".wav"):
+                    by_name[name] = w
+            candidates.extend((w, n) for n, w in sorted(by_name.items()))
         for wav, name in candidates:
             if name not in self.songs:
                 # 无歌词：创建占位条目，只有完整音频
@@ -169,10 +180,11 @@ class SongLibrary:
         if not audio_path.exists() and legacy_audio.exists() and len(lines) > 0:
             audio_path = legacy_audio
 
-        # 原声兜底：covers/separated/歌名_FINAL.wav（分离好的原唱人声，未拷贝到 audio/ 的歌）
-        final_audio = self.songs_dir / "covers" / "separated" / f"{title}_FINAL.wav"
-        if not audio_path.exists() and final_audio.exists():
-            audio_path = final_audio
+        # 原声兜底：covers/separated/歌名_FINAL.{wav,mp3}（分离好的原唱人声，未拷贝到 audio/ 的歌）
+        if not audio_path.exists():
+            final = self.original_audio(title)
+            if final:
+                audio_path = Path(final)
 
         return {
             "name": name,
@@ -328,16 +340,29 @@ class SongLibrary:
 
         return None
 
+    def original_audio(self, title: str) -> str:
+        """原声（原唱干净人声）路径，没有则空串。
+
+        接 .wav 与 .mp3 两种：开发机上存的是分离出来的无损 wav；发布包里是
+        ffmpeg 转码后的 mp3（同目录、同名、只换后缀），因为唱歌走 CQ:record、
+        QQ 侧本来就会把它转成 SILK 低码率语音编码——存无损是白背 1.5G。
+        """
+        d = self.songs_dir / "covers" / "separated"
+        for suf in (".wav", ".mp3"):
+            p = d / f"{title}_FINAL{suf}"
+            if p.exists():
+                return str(p)
+        return ""
+
     def get_section_audio(self, title: str, section_name: str, version: str = "rvc") -> str:
         """获取段落音频文件的路径。没有则返回空字符串。
 
         version:
           "rvc"（默认）= 糖糖声线——songs/audio/ 下的 RVC 转换成品
-          "original" = 原声——covers/separated/{title}_FINAL.wav（原唱干净人声）
+          "original" = 原声——covers/separated/{title}_FINAL.{wav,mp3}
         """
         if version == "original":
-            final_audio = self.songs_dir / "covers" / "separated" / f"{title}_FINAL.wav"
-            return str(final_audio) if final_audio.exists() else ""
+            return self.original_audio(title)
 
         # rvc：段落音频 → 旧单文件 wav → 旧单文件 mp3 → 原声 FINAL 兜底
         sec = self.get_section(title, section_name)
@@ -349,10 +374,7 @@ class SongLibrary:
         legacy_mp3 = self.songs_dir / "audio" / f"{title}.mp3"
         if legacy_mp3.exists():
             return str(legacy_mp3)
-        final_audio = self.songs_dir / "covers" / "separated" / f"{title}_FINAL.wav"
-        if final_audio.exists():
-            return str(final_audio)
-        return ""
+        return self.original_audio(title)
 
     def has_any_audio(self, title: str) -> bool:
         """判断某首歌是否有任何音频（RVC 糖糖声线、原声或旧格式）。"""
@@ -360,12 +382,12 @@ class SongLibrary:
         if not song:
             # 曲库里没有但可能 audio/（RVC）或 covers/separated（原声）下有文件
             return (self.songs_dir / "audio" / f"{title}.wav").exists() or \
-                   (self.songs_dir / "covers" / "separated" / f"{title}_FINAL.wav").exists()
+                   bool(self.original_audio(title))
         for sec in song["sections"].values():
             if sec.get("audio"):
                 return True
         return (self.songs_dir / "audio" / f"{title}.wav").exists() or \
-               (self.songs_dir / "covers" / "separated" / f"{title}_FINAL.wav").exists()
+               bool(self.original_audio(title))
 
     def list_songs_with_audio(self) -> list[str]:
         """返回有音频（真能播放）的歌名列表——不截断，LLM 数歌名就得到真实数量。"""

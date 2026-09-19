@@ -10,7 +10,7 @@ import pytest
 
 from agent.action_contract import ActionEnvelope, build_action_receipt_template
 from agent.store import Store
-from napcat.ws_client import NapCatClient, SendResult, send_delivery_state
+from onebot.ws_client import NapCatClient, SendResult, send_delivery_state
 
 
 def test_outbox_store_reads_do_not_block_event_loop():
@@ -434,7 +434,7 @@ def test_outbox_loop_replays_pending_jobs_while_online():
             client._running = False
 
         from unittest.mock import patch
-        with patch("napcat.ws_client.asyncio.sleep", new=stop_after_first):
+        with patch("onebot.ws_client.asyncio.sleep", new=stop_after_first):
             await client._outbox_loop()
 
         assert sleeps == 1

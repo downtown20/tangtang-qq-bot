@@ -12,7 +12,7 @@ from agent.telemetry import (
     correlation_scope,
     current_correlation_id,
 )
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def test_log_handlers_rotate_daily_and_inject_bounded_context(tmp_path):

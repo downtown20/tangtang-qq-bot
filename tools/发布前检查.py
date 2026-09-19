@@ -30,11 +30,28 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 
 BASE = Path(__file__).resolve().parent.parent
 OUT = BASE.parent / "小糖糖-发布版"
-PKG = OUT / "tangtang-v1.1.zip"
+
+
+def _release_tag() -> str:
+    """版本号从打包脚本读——单一来源。
+
+    以前这里和 打包发布版本.py 各写一份字面量，改版本要同时改两处；
+    漏一处就会去找一个不存在的包，报出来的错却像是「包没打出来」。
+    """
+    src = (BASE / "tools" / "打包发布版本.py").read_text(encoding="utf-8")
+    m = re.search(r'^TAG = "([^"]+)"', src, re.M)
+    if not m:
+        raise RuntimeError("tools/打包发布版本.py 里找不到 TAG——版本号单一来源断了")
+    return m.group(1)
+
+
+PKG = OUT / f"tangtang-{_release_tag()}.zip"
 
 QQ_RE = re.compile(r"\b[1-9]\d{8,10}\b")
 KEY_RE = re.compile(r"sk-[A-Za-z0-9]{16,}|api[_-]?key\s*[:=]\s*['\"]?[A-Za-z0-9]{16,}")
-WIN_RE = re.compile(r"[Dd]:\\\\[^\s\"'，。、]+")
+# 同 tools/准备发布.py——原写法 r"[Dd]:\\\\..." 在正则里要求「两个」反斜杠，
+# 而真实路径只有一个，所以从来没匹配过。2026-09-19 修。
+WIN_RE = re.compile(r"[Dd]:[\\/][^\s\"'，。、]+")
 DANGER_HTML = [r"<script", r"javascript:", r"onerror\s*=", r"onload\s*=",
                r"<iframe", r"<object", r"<embed", r"data:text/html"]
 # 已知常量：int32 边界、崩溃码、测试夹具里的时间戳（与 准备发布.py 同口径）
@@ -67,10 +84,20 @@ def gate_functional() -> None:
     names = set(z.namelist())
     read = lambda p: z.read(p).decode("utf-8")  # noqa: E731
 
-    audio = {n.split("/")[-1][:-4] for n in names
-             if n.startswith("songs/audio/") and n.endswith(".wav")}
-    audio |= {n.split("/")[-1][:-len("_FINAL.wav")] for n in names
-              if n.startswith("songs/covers/separated/") and n.endswith("_FINAL.wav")}
+    rvc = {n.split("/")[-1][:-4] for n in names
+           if n.startswith("songs/audio/") and n.endswith(".wav")}
+    # 包里的原声是转码后的 .mp3（见 打包发布版本.py 的 _original_mp3），不是 .wav
+    orig = {n.split("/")[-1].removesuffix("_FINAL.mp3") for n in names
+            if n.startswith("songs/covers/separated/") and n.endswith("_FINAL.mp3")}
+    audio = rvc | orig
+
+    # ⚠ 这里不能只数个数。2026-09-19 实测踩过：zip 内路径写成 `{p.stem}_FINAL.mp3`
+    # 而 p.stem 已经是「歌名_FINAL」→ 打出「歌名_FINAL_FINAL.mp3」，41 个文件一个都对不上，
+    # 而「原声 41 个」的计数检查全绿。要比的是**两版对不对得上**。
+    # 41 首里只有 1 首（いきものがかり - SAKURA）天生只有原声版。
+    both = rvc & orig
+    check(G, "原声与糖糖声线两版对得上（不是只数个数）", len(both) >= len(rvc) - 1,
+          f"糖糖声线 {len(rvc)} 首、原声 {len(orig)} 首，能对上 {len(both)} 首")
     stick = [n for n in names if n.startswith("stickers/")
              and n.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))]
     mods = [n for n in names if re.fullmatch(r"agent/[^/]+\.py", n)
@@ -99,6 +126,14 @@ def gate_functional() -> None:
             ("SnowLuma 前置提示 + 官方链接",
              "check_prerequisites" in inst and "github.com/SnowLuma/SnowLuma/releases" in inst, "")):
         check(G, label, ok, detail)
+
+    # 每个「要用户自己放东西」的目录都得有落点说明。
+    # 2026-09-19 主人指出：包里 6 个骨架目录都带摆放说明，唯独 SnowLuma 连目录都没有——
+    # 而它偏偏是**唯一一个必须用户手动放**的组件（第三方，不能随包发）。
+    for rel in ("SnowLuma/摆放说明.txt", "gpt-sovits/摆放说明.txt", "songs/摆放说明.txt",
+                "share_images/摆放说明.txt", "voice_cache/摆放说明.txt",
+                "stickers_michele/摆放说明.txt", "stickers_murasame/摆放说明.txt"):
+        check(G, f"落点说明「{rel}」在包内", rel in names)
 
     for rel, label in (("docs/模块地图.md", "模块地图"),
                        ("docs/架构图谱/糖糖架构图谱.html", "架构图谱"),

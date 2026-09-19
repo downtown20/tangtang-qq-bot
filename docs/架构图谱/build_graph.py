@@ -3,7 +3,7 @@
 
 数据源：
   1. IMPORTS 边 —— 对自研核心 74 个文件做 AST 全量扫描（含函数内懒加载 import），
-     绝对/相对路径解析到 agent/、napcat/ 内目标文件。
+     绝对/相对路径解析到 agent/、onebot/ 内目标文件。
      （GitNexus 图谱的 Python IMPORTS 边严重缺失——agent/ 仅 87 条、handler.py 0 条，
       故不用；本 AST 提取 100% 覆盖、确定性。）
   2. CALLS 热度 —— GitNexus serve 导出的 full_graph.json 中两端可解析到自研范围的
@@ -24,7 +24,7 @@ BASE = Path(__file__).resolve().parent.parent.parent
 SRC = BASE / "artifacts" / "图谱" / "full_graph.json"
 OUT = BASE / "artifacts" / "图谱" / "糖糖架构图谱.html"
 
-ROOT_FILES = ["main.py", "napcat/ws_client.py", "糖糖控制台_qt.py"]
+ROOT_FILES = ["main.py", "onebot/ws_client.py", "糖糖控制台_qt.py"]
 SCOPE_FILES = sorted(
     [str(p.relative_to(BASE)).replace("\\", "/") for p in (BASE / "agent").glob("*.py")]
     + ROOT_FILES)
@@ -67,7 +67,7 @@ SCOPE_SET = set(SCOPE_FILES)
 def resolve_module(src_file: str, module: str | None, level: int) -> str | None:
     """把一个模块名解析回自研范围文件路径；范围外返回 None。
 
-    - level==0 绝对：module='agent.telemetry' / 'napcat.ws_client' → 对应 .py
+    - level==0 绝对：module='agent.telemetry' / 'onebot.ws_client' → 对应 .py
     - level==1 相对：module='async_io'（from .async_io import）→ src 所在包内同名 .py
     - level==1 + module=None（from . import protocols）：由调用方逐个 names 解析
     """
@@ -77,16 +77,16 @@ def resolve_module(src_file: str, module: str | None, level: int) -> str | None:
         return None                     # 本项目无 .. 级导入
     if level == 1:
         pkg = src_file.split("/")[0]    # agent / napcat（root 文件无同级模块）
-        if pkg not in ("agent", "napcat"):
+        if pkg not in ("agent", "onebot"):
             return None
         chain = [pkg] + module.split(".")
     else:
         parts = module.split(".")
-        if parts[0] not in ("agent", "napcat"):
+        if parts[0] not in ("agent", "onebot"):
             return None
         chain = parts                   # 自研包根开始
     p = Path(BASE) / "/".join(chain[:-1]) / f"{chain[-1]}.py"
-    if not p.is_file():                 # 包级 import（如 napcat/__init__）不存在则放弃
+    if not p.is_file():                 # 包级 import（如 onebot/__init__）不存在则放弃
         return None
     rel = str(p.relative_to(BASE)).replace("\\", "/")
     return rel if rel in SCOPE_SET else None

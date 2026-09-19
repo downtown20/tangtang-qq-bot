@@ -387,7 +387,7 @@ def test_scheduler_claims_and_finishes_persisted_event_before_delivery(tmp_path)
 
     from agent.scheduler import CronScheduler
     from agent.store import Store
-    from napcat.ws_client import SendResult
+    from onebot.ws_client import SendResult
 
     store = Store(str(tmp_path / "proactive.db"))
     sent = []
@@ -433,7 +433,7 @@ def test_scheduler_reentry_does_not_replay_terminal_event(tmp_path):
 
     from agent.scheduler import CronScheduler
     from agent.store import Store
-    from napcat.ws_client import SendResult
+    from onebot.ws_client import SendResult
 
     store = Store(str(tmp_path / "proactive.db"))
     sent = []

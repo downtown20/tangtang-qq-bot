@@ -16,7 +16,7 @@ import json
 import logging
 
 from .action_contract import ActionReceipt, derive_action_id
-from napcat.ws_client import send_delivery_state
+from onebot.ws_client import send_delivery_state
 
 logger = logging.getLogger("糖糖.SendActions")
 

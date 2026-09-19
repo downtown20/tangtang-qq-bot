@@ -5,7 +5,7 @@ import threading
 import time
 
 from agent.personalization import BirthdayGreeter
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def test_birthday_store_reads_and_writes_do_not_block_event_loop():

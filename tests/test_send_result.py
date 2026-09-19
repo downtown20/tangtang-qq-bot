@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
-from napcat.ws_client import (
+from onebot.ws_client import (
     NapCatClient,
     SendResult,
     _classify_send_error,
@@ -233,7 +233,7 @@ def test_long_group_send_requires_every_chunk_to_be_confirmed():
             {"status": "ok", "data": {"message_id": 0}},
             {"status": "ok", "data": {"message_id": 123}},
         ])
-        with patch("napcat.ws_client.asyncio.sleep", new=AsyncMock()):
+        with patch("onebot.ws_client.asyncio.sleep", new=AsyncMock()):
             result = await client.send_group_message("100", "x" * 2001)
         assert result.ok is True
         assert result.delivered is False
@@ -251,7 +251,7 @@ def test_long_group_partial_delivery_is_uncertain_not_replayable_failure():
             {"status": "ok", "data": {"message_id": 123}},
             {"status": "failed", "retcode": 1400, "msg": "bad params"},
         ])
-        with patch("napcat.ws_client.asyncio.sleep", new=AsyncMock()):
+        with patch("onebot.ws_client.asyncio.sleep", new=AsyncMock()):
             result = await client.send_group_message("100", "x" * 2001)
 
         assert result.ok is False
@@ -270,7 +270,7 @@ def test_long_group_second_chunk_exception_preserves_partial_uncertainty():
             {"status": "ok", "data": {"message_id": 123}},
             RuntimeError("response lost after POST"),
         ])
-        with patch("napcat.ws_client.asyncio.sleep", new=AsyncMock()):
+        with patch("onebot.ws_client.asyncio.sleep", new=AsyncMock()):
             result = await client.send_group_message("100", "x" * 2001)
         assert result.ok is False
         assert result.delivered is False
@@ -306,7 +306,7 @@ def test_websocket_connection_does_not_mark_qq_online_by_itself():
 
 def test_send_lock_tables_reclaim_idle_targets_in_testing_mode():
     import asyncio
-    from napcat.ws_client import NapCatClient
+    from onebot.ws_client import NapCatClient
 
     client = NapCatClient(testing_mode=True)
     client._qq_online = True

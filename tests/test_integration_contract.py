@@ -26,11 +26,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 BASE = Path(__file__).parent.parent
 
-# 生产调用方范围：agent/ napcat/ tools/ + 根目录 main.py 与控制台。
+# 生产调用方范围：agent/ onebot/ tools/ + 根目录 main.py 与控制台。
 # tests/ 不算——测试调用不构成生产接线（test-only 函数 = 生产死代码）。
 PROD_FILES = sorted(
     [BASE / "main.py", BASE / "糖糖控制台_qt.py"]
-    + [p for d in ("agent", "napcat", "tools") for p in (BASE / d).rglob("*.py")]
+    + [p for d in ("agent", "onebot", "tools") for p in (BASE / d).rglob("*.py")]
 )
 
 

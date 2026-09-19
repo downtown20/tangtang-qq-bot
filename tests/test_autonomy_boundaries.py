@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from agent.conversation_tracker import ConversationTracker, FADE_PERIOD, GRACE_PERIOD
 from agent.handler_autonomy import AutonomyMixin
 from agent.self_state import TangTangSelf
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def test_autonomy_releases_claim_when_executing_transition_fails():

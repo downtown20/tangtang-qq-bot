@@ -12,11 +12,17 @@ __pycache__/
 *.pyc
 .pytest_cache/
 voice_cache/
+# 生成物（派生数据不该进仓库）
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 share_images/
 generated_images/
 temp_files/
 *.log
 *.json
+SnowLuma/
+!SnowLuma/摆放说明.txt
 !stickers/metadata.json
 !stickers_cg/metadata.json
 !voice_cache/摆放说明.txt

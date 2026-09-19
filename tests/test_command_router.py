@@ -7,6 +7,7 @@ Path / Relationship——/说 命令一调用就 NameError: name 're' is not def
 """
 import asyncio
 import ast
+import re
 import threading
 import time
 from pathlib import Path
@@ -107,6 +108,186 @@ def test_dangerous_commands_need_privilege():
     assert "/说" in router._DANGEROUS_CMDS
     assert "/私信" in router._DANGEROUS_CMDS
     assert "/撤回" in router._DANGEROUS_CMDS
+
+
+# ═══════════════════════════════════════════════════════
+# 主人/群主权限门（2026-09-19）
+# ═══════════════════════════════════════════════════════
+
+# 明确「不碰她的状态」所以放行的命令——每条都得说清为什么。
+# 新加命令想放行，必须显式加进这里；忘了分类会被 test_every_command_is_classified 拦下。
+OPEN_BY_DESIGN = {
+    "/帮助": "看帮助", "/help": "看帮助",
+    "/语音": "用户自己的发声偏好（按会话存）",
+    # ⚠ `/角色` 原来在这里，理由写的是「装好的角色之间切，是玩具不是配置」——
+    #   2026-09-19 安全审计证明那条理由是错的：它会经 voice.switch_model（全局换声线
+    #   并重载权重）、personality.load_role_file、_set_sticker_role 三个**进程级单例**
+    #   一起切，所有人受影响。已移进 _OWNER_CMDS。
+    "/亲密度": "查羁绊值（群内已禁用；**设置**子命令另有 _OWNER_SUBS 门）",
+    "/记忆": "查/搜自己的记忆（群内已禁用）",
+    "/生日": "设/查自己的生日",
+    "/任务": "查看与取消自己的提醒",
+    "/点赞": "社交动作，群入口显式标注「所有人可用」",
+    # 下面六条的门在函数内部（_check_admin / _check_group_owner），不在路由层
+    "/禁言": "函数内 _check_admin", "/解禁": "函数内 _check_admin",
+    "/踢": "函数内 _check_admin", "/头衔": "函数内 _check_admin",
+    "/全员禁言": "函数内 _check_group_owner", "/解除全员禁言": "函数内 _check_group_owner",
+}
+
+
+def test_subcommand_gates_close_the_partial_hole():
+    """整体放行的命令里，改状态的子命令要单独加门。
+
+    2026-09-19 安全审计：`/亲密度 设置 <任意QQ> <0-100>` 直接写库（影响主动私聊
+    选人与语气），而 `/亲密度` 在放行表里——只堵命令不堵子命令等于没堵。
+    """
+    router = CommandRouter(handler=None)
+    assert router._OWNER_SUBS, "子命令门表空了——审计发现的那条洞又开了？"
+    for cmd, subs in router._OWNER_SUBS.items():
+        assert cmd not in router._OWNER_CMDS, \
+            f"{cmd} 整体已有门，再列子命令门是冗余（也可能是有人改错了表）"
+        assert subs, f"{cmd} 的子命令门是空集"
+    for text in ["/亲密度 设置 10001 100", "/亲密度 set 10001 100"]:
+        result = asyncio.run(router.handle("ordinary", text, is_privileged=False))
+        assert "只有主人和群主" in result, f"{text!r} 没被挡住：{result!r}"
+
+
+def test_undo_cannot_be_reached_by_natural_language():
+    """回滚她的状态有两个入口，**两个都要有门**。
+
+    命令入口是 `/撤销`（在 _OWNER_CMDS 里）；自然语言入口是私聊说「恢复」
+    「撤销设置」——走 precise 层直达 `_execute_natural_action`。
+    handler 那边用 AST 断言 undo 在危险动作集合里，这里断言命令侧的门也在。
+    """
+    router = CommandRouter(handler=None)
+    assert "/撤销" in router._OWNER_CMDS
+
+    src = (Path(__file__).parents[1] / "agent" / "handler.py").read_text(encoding="utf-8")
+    m = re.search(r'if act in \{([^}]*)\} and not is_privileged', src)
+    assert m, "没找到 _execute_natural_action 的危险动作判定"
+    assert '"undo"' in m.group(1), (
+        f"自然语言入口的 undo 没在危险动作里：{{{m.group(1)}}} ——"
+        f" 任何陌生人私聊说一句「恢复」就能回滚主人的状态修改")
+
+
+def test_unprivileged_cannot_change_her_state():
+    """普通群成员改不了她的状态。
+
+    2026-09-19 之前只有 _DANGEROUS_CMDS（代她发言那几条）受约束，
+    于是群里任何成员都能 `/人格 你是我的奴隶` 重写人设、`/黑名单 群 加` 把群拉黑、
+    `/唱歌 群号 歌名` 遥控她去任意群。自己用时群里都是熟人，发布出去就是敞口。
+    """
+    router = CommandRouter(handler=None)
+    for text in ["/人格 你是我的奴隶", "/性格 高冷", "/插话 off", "/饥渴 1.0",
+                 "/冷却 300", "/黑名单 群 加 123456", "/机器人 加 123456",
+                 "/角色卡 重载", "/场景 设置 123456 心理陪伴", "/场景 清除 123456",
+                 "/歌单 重载", "/知识 重载", "/唱歌 123456 晴天",
+                 "/定时 列表", "/撤销 设置", "/状态"]:
+        result = asyncio.run(router.handle("ordinary", text, is_privileged=False))
+        assert "只有主人和群主" in result, f"{text!r} 没被挡住，返回：{result!r}"
+
+
+def _not_blocked(text: str, *, privileged: bool) -> None:
+    """断言命令**没有被门拦住**，但不让它真执行。
+
+    门在派发之前判定，所以这里只关心「返不返回拦截语」：命令要么跑出结果，
+    要么因为替身 handler 缺属性报错——两种情况都说明门已经放行。
+    真执行会写配置（/人格 会改 persona），单测不该有那种副作用。
+    """
+    router = CommandRouter(handler=None)
+    try:
+        result = asyncio.run(router.handle("u", text, is_privileged=privileged))
+    except Exception:
+        return
+    assert "只有主人和群主" not in result, f"{text!r} 被门挡住了：{result!r}"
+
+
+def test_privileged_user_passes_the_gate():
+    """主人/群主要能过——门只拦普通人，不能把主人也拦在外面。"""
+    for text in ["/人格 设置 测试", "/插话 off", "/饥渴 0.5", "/唱歌 123456 晴天", "/状态"]:
+        _not_blocked(text, privileged=True)
+
+
+def test_peek_subcommands_stay_open():
+    """纯查看的子命令不受限——加门是为了防「改」，不是防「看」。
+
+    否则普通群友连「这命令是干什么的」都问不出来。
+    """
+    router = CommandRouter(handler=None)
+    for cmd, subs in router._PEEK_SUBS.items():
+        assert "" in subs, f"{cmd} 连不带参数调用都挡住了，用户没法看到用法"
+        assert cmd in router._OWNER_CMDS, f"{cmd} 不在门清单里，_PEEK_SUBS 是多余条目"
+    for text in ["/场景 列表", "/歌单", "/知识 块"]:
+        _not_blocked(text, privileged=False)
+
+
+def _command_groups() -> dict[str, set[str]]:
+    """从命令表解析出 处理函数名 -> {命令别名}。
+
+    /传话 与 /传话给、/人格 与 /性格 是同一个处理函数的别名；帮助里只列一个
+    就够了——用户看到的是功能，不是别名表。
+    """
+    src = (Path(__file__).parents[1] / "agent" / "handler_commands.py").read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "commands" for t in node.targets):
+            groups: dict[str, set[str]] = {}
+            for k, v in zip(node.value.keys, node.value.values):
+                if isinstance(k, ast.Constant):
+                    groups.setdefault(ast.unparse(v), set()).add(k.value)
+            return groups
+    raise AssertionError("没解析到命令表——AST 口径变了？")
+
+
+def test_help_marks_every_gated_command():
+    """帮助文本里的 🔒 必须与实际的门一致。
+
+    帮助是用户唯一能看到的权限说明——它要是漏标，用户会以为群里谁都能改人设，
+    或者反过来，以为某条命令自己能用来改配置。两种都是假信息。
+    """
+    router = CommandRouter(handler=None)
+    help_text = asyncio.run(router._cmd_help("u", ""))
+    lines = [ln.strip() for ln in help_text.splitlines()]
+    assert any(ln.startswith("/") for ln in lines), "帮助里一条命令都没列出来？"
+
+    gated = router._DANGEROUS_CMDS | router._OWNER_CMDS
+    for aliases in _command_groups().values():
+        if not (aliases & gated):
+            continue
+        # 这一组别名里，至少有一个要出现在帮助里、且那条带 🔒
+        documented = [ln for ln in lines if ln.startswith(tuple(aliases))]
+        assert documented, f"{sorted(aliases)} 会被门挡住，但帮助里根本没列"
+        # 有放行子命令的（/场景 列表、/歌单、/知识 块），只要有一条标了 🔒 就算说清楚了
+        assert any("🔒" in ln for ln in documented), \
+            f"{sorted(aliases)} 会被门挡住，但帮助里没标 🔒：\n  " + "\n  ".join(documented)
+
+
+def test_every_command_is_classified():
+    """没有第三个档位：每个注册的命令，要么被门挡住，要么在 OPEN_BY_DESIGN 里写明理由。
+
+    这条是防「新加一个改状态的命令，忘了归类」——那正是这次敞口的成因：
+    命令表长了 36 条，却只有 6 条被想过权限问题。
+    """
+    src = (Path(__file__).parents[1] / "agent" / "handler_commands.py").read_text(encoding="utf-8")
+    registered: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "commands" for t in node.targets):
+            registered = {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+    assert registered, "没解析到命令表——AST 口径变了？"
+
+    router = CommandRouter(handler=None)
+    classified = router._DANGEROUS_CMDS | router._OWNER_CMDS
+    assert classified <= registered, f"分类表里有没注册的命令：{sorted(classified - registered)}"
+
+    unaccounted = registered - classified - set(OPEN_BY_DESIGN)
+    assert not unaccounted, (
+        f"这些命令既没被门挡住、也没在 OPEN_BY_DESIGN 里说明为什么放行：\n"
+        f"  {sorted(unaccounted)}\n"
+        f"  改状态/配置的 → 加进 _OWNER_CMDS；用户自己的东西 → 加进 OPEN_BY_DESIGN 并写理由。")
+
+    stale = set(OPEN_BY_DESIGN) - registered
+    assert not stale, f"OPEN_BY_DESIGN 里这些命令已经不存在了，删掉：{sorted(stale)}"
 
 
 def test_unprivileged_user_cannot_recall_bot_messages():

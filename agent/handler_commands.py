@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Optional
 
 from .async_io import run_bounded_blocking, run_bounded_store_io
 from .personality import Relationship
-from napcat.ws_client import is_send_confirmed, send_delivery_state
+from onebot.ws_client import is_send_confirmed, send_delivery_state
 
 if TYPE_CHECKING:
     from .handler import MessageHandler
@@ -59,6 +59,43 @@ class CommandRouter:
     # 危险指令——代糖糖发言，只有主人和群主可用
     _DANGEROUS_CMDS = {
         "/说", "/发言", "/传话", "/传话给", "/私信", "/撤回",
+    }
+
+    # 主人/群主专属——**改她的状态或配置**的命令（2026-09-19 加门）。
+    # 在此之前只有 _DANGEROUS_CMDS 受约束，于是群里任何成员都能 `/人格 你是我的奴隶`
+    # 重写人设、`/黑名单 群 加` 把群拉黑、`/唱歌 群号 歌名` 遥控她去任意群。
+    # 自己用时群里都是熟人，无所谓；一旦对外发布，这就是一个没门的遥控面。
+    #
+    # 判据：**改她的状态/配置/代她对外发言 → 受限；查自己的、看、玩 → 放行。**
+    # 所以 /生日（设自己的生日）、/记忆、/亲密度、/点赞、/角色 不加门——
+    # 那些是用户自己的东西，把门加在那里只会让正常功能用不了。
+    _OWNER_CMDS = {
+        "/人格", "/性格",          # 重写人设
+        "/插话", "/饥渴", "/冷却",   # 改行为参数
+        "/黑名单", "/机器人",       # 谁也进不来 / 谁是机器人
+        "/角色卡", "/场景",         # 人格卡与场景配置
+        "/歌单", "/知识",           # 重载曲库与知识库
+        "/唱歌", "/定时",           # 遥控她做事
+        "/撤销", "/状态",           # 回滚配置 / 运行诊断
+        # 2026-09-19 安全审计补：`/角色` 不是"玩具"——它会经
+        # voice.switch_model（全局换声线 + 重载权重）、personality.load_role_file、
+        # _set_sticker_role 三个**进程级单例**一起切，所有人受影响。
+        # 原来的放行理由（"装好的角色之间切，是玩具不是配置"）是错的。
+        "/角色",
+    }
+
+    # 上面这些命令里，纯查看的子命令不算「改」，任何人可用
+    _PEEK_SUBS = {
+        "/场景": {"", "列表", "list", "查看"},
+        "/歌单": {"", "列表"},
+        "/知识": {"", "块", "查看"},
+    }
+
+    # 有些命令**整体放行**（用户自己的东西），但其中某个子命令是改状态的——
+    # 按子命令单独加门。2026-09-19 安全审计发现：`/亲密度 设置 <任意QQ> <数值>`
+    # 直接写库（影响主动私聊选人与语气），而 `/亲密度` 在放行表里。
+    _OWNER_SUBS = {
+        "/亲密度": {"设置", "set"},
     }
 
     async def handle(self, user_id: str, text: str, is_privileged: bool = False,
@@ -121,9 +158,18 @@ class CommandRouter:
                     cmd = registered
                     break
 
-        # 危险指令——代糖糖发言，只有主人和群主可用
-        if cmd in self._DANGEROUS_CMDS and not is_privileged:
-            return "🔒 这个命令只有主人和群主可以用哦～"
+        # 权限门（2026-09-19）：代她发言 / 改她的状态，两类都只给主人和群主
+        if not is_privileged:
+            if cmd in self._DANGEROUS_CMDS:
+                return "🔒 这个命令只有主人和群主可以用哦～"
+            if cmd in self._OWNER_CMDS:
+                sub = arg.strip().split()[0] if arg.strip() else ""
+                if sub not in self._PEEK_SUBS.get(cmd, set()):
+                    return "🔒 这个命令会改糖糖的状态，只有主人和群主可以用哦～"
+            if cmd in self._OWNER_SUBS:
+                sub = arg.strip().split()[0] if arg.strip() else ""
+                if sub in self._OWNER_SUBS[cmd]:
+                    return "🔒 这个子命令会改糖糖的状态，只有主人和群主可以用哦～"
 
         func = commands.get(cmd)
         if func:
@@ -951,27 +997,27 @@ class CommandRouter:
         return (
             f"🍬 糖糖指令\n\n"
             f"📊 状态与信息\n"
-            f"  /状态              查看运行状态\n"
+            f"  /状态              查看运行状态            🔒\n"
             f"  /歌单              查看曲库\n"
-            f"  /歌单 重载          热更新曲库\n"
-            f"  /知识 重载          热更新知识库\n"
+            f"  /歌单 重载          热更新曲库              🔒\n"
+            f"  /知识 重载          热更新知识库            🔒\n"
             f"  /知识 块            查看知识库分块\n\n"
             f"🎭 人格与角色\n"
-            f"  /人格              查看当前人设\n"
-            f"  /人格 +内容         追加/覆盖人设\n"
-            f"  /人格 重载/重设      重载角色卡或恢复默认\n"
-            f"  /角色 丛雨/米雪儿/糖糖  切换角色\n"
-            f"  /角色卡 重载/查看     热重载或查看角色卡\n"
-            f"  /场景 列表/设置/重载   管理群场景绑定\n"
+            f"  /人格              查看当前人设            🔒\n"
+            f"  /人格 +内容         追加/覆盖人设          🔒\n"
+            f"  /人格 重载/重设      重载角色卡或恢复默认    🔒\n"
+            f"  /角色 丛雨/米雪儿/糖糖  切换角色（全局，所有人受影响）  🔒\n"
+            f"  /角色卡 重载/查看     热重载或查看角色卡      🔒\n"
+            f"  /场景 列表/设置/重载   管理群场景绑定（列表随便看，改要🔒）\n"
             f"  /语音               开关语音模式（每条回复都发语音）\n"
             f"  /语音 off            关闭语音模式\n"
             f"  /语音 文本           直接合成文字为语音发送（≤100字）\n\n"
             f"💬 群聊控制\n"
-            f"  /插话 on/off        开关主动插话\n"
-            f"  /饥渴 0.0-1.0       调整插话活跃度\n"
-            f"  /冷却 秒数           调整插话间隔\n"
+            f"  /插话 on/off        开关主动插话          🔒\n"
+            f"  /饥渴 0.0-1.0       调整插话活跃度        🔒\n"
+            f"  /冷却 秒数           调整插话间隔          🔒\n"
             f"  /点赞 [more]        点赞发言的群友\n"
-            f"  /唱歌 群号 歌名      遥控到群里唱歌\n"
+            f"  /唱歌 群号 歌名      遥控到群里唱歌        🔒\n"
             f"  /说 群号 话题        AI写好后发到群里  🔒\n"
             f"  /发言 群号 内容      原文直发到群里   🔒\n\n"
             f"📨 私信与传话\n"
@@ -982,10 +1028,10 @@ class CommandRouter:
             f"  /解禁 @人            解除禁言\n"
             f"  /踢 @人              踢出群聊\n"
             f"  /头衔 @人 文字        设置群专属头衔\n"
-            f"  /全禁                全员禁言\n"
-            f"  /全解                解除全员禁言\n"
-            f"  /黑名单 加/删/列表    管理群/私聊黑名单\n"
-            f"  /机器人 加/删/列表    管理机器人账号\n\n"
+            f"  /全员禁言            全员禁言\n"
+            f"  /解除全员禁言         解除全员禁言\n"
+            f"  /黑名单 加/删/列表    管理群/私聊黑名单      🔒\n"
+            f"  /机器人 加/删/列表    管理机器人账号        🔒\n\n"
             f"📝 记忆与关系\n"
             f"  /记忆               查看糖糖记得你的事\n"
             f"  /记忆 添加 内容       手动添加记忆\n"
@@ -996,13 +1042,14 @@ class CommandRouter:
             f"  /生日                查群友生日\n\n"
             f"⏰ 任务与工具\n"
             f"  直接说「明天8点提醒我」   创建提醒（糖糖自己记）\n"
-            f"  /定时 列表              查看所有定时\n"
-            f"  /定时 删除 编号          删除定时\n"
+            f"  /定时 列表              查看所有定时        🔒\n"
+            f"  /定时 删除 编号          删除定时            🔒\n"
             f"  /任务                   查看待办提醒\n"
             f"  /任务 取消 编号           取消提醒\n"
-            f"  /撤回                   撤回上条消息\n"
-            f"  /撤销                   撤销上次设置修改\n\n"
-            f"🔒 = 仅主人和群主可用"
+            f"  /撤回                   撤回上条消息        🔒\n"
+            f"  /撤销                   撤销上次设置修改    🔒\n\n"
+            f"🔒 = 仅主人和群主可用\n"
+            f"     （看和玩不受限：/生日 /记忆 /亲密度 /点赞 /角色 /歌单 /场景 列表 随便用）"
         )
 
     async def _cmd_thirst(self, user_id: str, arg: str) -> str:

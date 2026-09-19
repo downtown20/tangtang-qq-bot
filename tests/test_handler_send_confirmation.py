@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _run(coro):
@@ -192,7 +192,7 @@ def test_voice_retryable_failure_queues_voice_without_text_fallback(
     """可重试语音已由 outbox 接管时，不能再排一条降级文字造成恢复后双发。"""
     from agent.handler import MessageHandler
     from agent.store import Store
-    from napcat.ws_client import NapCatClient
+    from onebot.ws_client import NapCatClient
 
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"audio")
@@ -586,7 +586,7 @@ def test_control_tool_send_exception_is_reported_as_uncertain_not_failed():
 
 def test_recall_is_bound_to_current_group_not_global_last_send():
     from agent.handler import MessageHandler
-    from napcat.ws_client import NapCatClient
+    from onebot.ws_client import NapCatClient
 
     async def scenario():
         client = NapCatClient(testing_mode=True)

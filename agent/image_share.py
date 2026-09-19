@@ -23,7 +23,7 @@ from typing import Optional
 
 import httpx
 
-from napcat.ws_client import SendResult, send_delivery_state
+from onebot.ws_client import SendResult, send_delivery_state
 from .action_contract import (
     ActionEnvelope,
     build_action_receipt_template,

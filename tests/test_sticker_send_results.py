@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from agent.handler import MessageHandler
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def test_sticker_batch_reports_confirmed_uncertain_and_failed_separately():

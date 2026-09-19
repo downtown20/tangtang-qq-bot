@@ -30,6 +30,25 @@ _SENSE_VOICE_URL = (
 _MODEL_DIR = Path(__file__).parent.parent / "asr_models"
 
 
+def _extract_tar_safely(tar, target: Path) -> None:
+    """安全解压：拒绝绝对路径、`..` 穿越、符号链接与设备文件。
+
+    ⚠ Python 3.10 的 `extractall()` **没有 `filter` 参数**（3.12 才加），
+    默认完全信任压缩包内容。模型是从 GitHub Releases 拉的 tar.bz2——
+    处于中间人环境或上游 Release 被替换时，一个含 `../../启动/x.bat`
+    或符号链接条目的小包就能一路写到目标目录之外。
+    2026-09-19 独立安全审计把这条列为唯一带本地代码执行潜力的面。
+    """
+    base = Path(target).resolve()
+    for member in tar.getmembers():
+        if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+            raise ValueError(f"压缩包含非法条目（链接/设备文件）：{member.name}")
+        dest = (base / member.name).resolve()
+        if base != dest and base not in dest.parents:
+            raise ValueError(f"压缩包含路径穿越条目：{member.name}")
+    tar.extractall(target)
+
+
 def _find_model_file(model_dir: Path) -> Path | None:
     """在模型目录中定位 onnx 模型文件。
 
@@ -95,7 +114,7 @@ class VoiceRecognizer:
                 tmp_file.write_bytes(resp.read())
             logger.info(f"📦 解压模型...")
             with tarfile.open(tmp_file, "r:bz2") as tar:
-                tar.extractall(_MODEL_DIR)
+                _extract_tar_safely(tar, _MODEL_DIR)
             tmp_file.unlink(missing_ok=True)
             return _find_model_file(model_path) is not None
 

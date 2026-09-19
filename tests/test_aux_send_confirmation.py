@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _run(coro):

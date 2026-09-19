@@ -15,7 +15,7 @@ import random
 from datetime import datetime, timedelta
 from typing import Callable, Awaitable
 
-from napcat.ws_client import is_send_confirmed, send_delivery_state
+from onebot.ws_client import is_send_confirmed, send_delivery_state
 from .async_io import run_bounded_blocking, run_bounded_store_io
 
 logger = logging.getLogger("糖糖.DailyReport")

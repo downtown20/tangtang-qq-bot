@@ -3,7 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, Mock
 
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def test_local_settle_exception_after_confirmed_never_becomes_uncertain_or_resends(
@@ -56,7 +56,7 @@ def test_outbox_loop_survives_one_processing_failure(monkeypatch):
             return None
 
         monkeypatch.setattr(client, "process_send_outbox", process)
-        monkeypatch.setattr("napcat.ws_client.asyncio.sleep", no_wait)
+        monkeypatch.setattr("onebot.ws_client.asyncio.sleep", no_wait)
         monkeypatch.setattr(
             type(client), "ready_to_send", property(lambda _self: True),
         )
@@ -138,7 +138,7 @@ def test_outbox_loop_survives_repair_round_failure(monkeypatch):
 
         monkeypatch.setattr(client, "process_confirmed_projection_repairs", broken_repair)
         monkeypatch.setattr(client, "process_send_outbox", process)
-        monkeypatch.setattr("napcat.ws_client.asyncio.sleep", no_wait)
+        monkeypatch.setattr("onebot.ws_client.asyncio.sleep", no_wait)
         monkeypatch.setattr(
             type(client), "ready_to_send", property(lambda _self: True),
         )

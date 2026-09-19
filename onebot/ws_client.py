@@ -2158,7 +2158,7 @@ class NapCatClient:
 
             # 2) 尝试 HTTP 下载
             if file_url:
-                # OneBot 返回的 url 可能是 http://127.../C:/Users/... 混搭格式
+                # OneBot 返回的 url 可能是「本机 HTTP 前缀 + 绝对路径」的混搭格式
                 resp = await self.http.get(file_url, timeout=60.0)
                 if resp.status_code == 200:
                     await run_bounded_blocking(
@@ -2172,7 +2172,8 @@ class NapCatClient:
                     return save_path
 
                 # HTTP 失败 → 尝试把 URL 中的本地路径提取出来直接读磁盘
-                # 格式: http://127.0.0.1:3000/C:/Users/李成展/.../xxx.docx
+                # 格式形如 http://127.0.0.1:3000/<盘符>:/<用户目录>/.../xxx.docx
+                # （不写具体用户名——这行曾经带着操作者的真名一起发布出去）
                 raw_path = file_url
                 if "/" in raw_path:
                     path_part = raw_path.split("/", 3)[-1] if raw_path.startswith("http") else raw_path

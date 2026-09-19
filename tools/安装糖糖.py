@@ -417,6 +417,28 @@ def _release_assets() -> dict:
     return out
 
 
+def _extract_tar_safely(tar, target: Path) -> None:
+    """安全解压：拒绝绝对路径、`..` 穿越、符号链接与设备文件。
+
+    [!] Python 3.10 的 `extractall()` **没有 `filter` 参数**（3.12 才加），
+    默认完全信任压缩包内容。模型是从 GitHub Releases 拉的 tar.bz2——
+    处于中间人环境或上游 Release 被替换时，一个含 `../../启动/x.bat`
+    或符号链接条目的小包就能一路写到目标目录之外。
+    2026-09-19 独立安全审计把这条列为唯一带本地代码执行潜力的面。
+
+    [!] 与 `agent/asr.py` 的同名函数**必须保持一致**——两处都是同一类压缩包，
+    闸门 tests/test_release_sanitizer.py 会比对两份实现（改一处漏一处会红）。
+    """
+    base = Path(target).resolve()
+    for member in tar.getmembers():
+        if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+            raise ValueError(f"压缩包含非法条目（链接/设备文件）：{member.name}")
+        dest = (base / member.name).resolve()
+        if base != dest and base not in dest.parents:
+            raise ValueError(f"压缩包含路径穿越条目：{member.name}")
+    tar.extractall(target)
+
+
 def _unzip_into(zip_path: Path, target: Path) -> None:
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(target)
@@ -477,7 +499,7 @@ def _fetch_tarbz2(url: str, target: Path, expect: str, label: str) -> bool:
     try:
         import tarfile
         with tarfile.open(tmp, "r:bz2") as tar:
-            tar.extractall(target)
+            _extract_tar_safely(tar, target)
     except Exception as e:
         print(f"    [!] 解压失败: {e}")
         tmp.unlink(missing_ok=True)
@@ -673,13 +695,18 @@ def wire_config(choices: list[int], fresh: bool, dry_run: bool) -> None:
 
 def _song_count() -> int:
     """曲库可识别多少首——与 agent/songs.py 的发现口径一致（两个来源），
-    只数 audio/ 会漏掉 separation 完还没拷过去的那几首。"""
+    只数 audio/ 会漏掉 separation 完还没拷过去的那几首。
+
+    原声要连 .mp3 一起认：开发机上是分离出来的无损 wav，
+    发布包里是转码后的 mp3（同目录换后缀）。只认 wav 会在用户机器上少数 40 首。
+    """
     songs = BASE / "songs"
     if not songs.is_dir():
         return 0
     stems = {p.stem for p in (songs / "audio").glob("*.wav")}
     stems |= {p.stem.removesuffix("_FINAL")
-              for p in (songs / "covers" / "separated").glob("*_FINAL.wav")}
+              for p in (songs / "covers" / "separated").glob("*_FINAL.*")
+              if p.suffix.lower() in (".wav", ".mp3")}
     return len(stems)
 
 

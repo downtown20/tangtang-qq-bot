@@ -68,7 +68,7 @@ from .action_executor import ActionExecutor
 from .async_io import run_bounded_blocking, run_bounded_store_io
 from .extraction_telemetry import record_extraction_stage
 from .telemetry import current_correlation_id, new_correlation_id
-from napcat.ws_client import SendResult, is_send_confirmed, send_delivery_state
+from onebot.ws_client import SendResult, is_send_confirmed, send_delivery_state
 
 from .handler_commands import CommandRouter
 from .handler_autonomy import AutonomyMixin
@@ -8375,8 +8375,13 @@ class MessageHandler(AutonomyMixin):
                 return await enrich_async(value, **kwargs)
             return self._enrich_reply(value, **kwargs)
 
-        # ═══ 危险动作：只有主人和群主可以代糖糖发言 ═══
-        if act in {"resend_to_group", "recall_msg"} and not is_privileged:
+        # ═══ 危险动作：代糖糖发言 / 回滚她的状态，只有主人和群主 ═══
+        # ⚠ `undo` 必须在这里，不能只在 /撤销 命令上加门（2026-09-19 安全审计）：
+        #   同一件事有两个入口——`/撤销` 走命令路由（已加门），而私聊说一句
+        #   「撤销设置」走 precise 层（handler.py 的 _parse_precise_commands）
+        #   直达本函数。只堵一个入口等于没堵：任何能给糖糖发私信的人一句
+        #   「恢复」就能把主人刚做的人格/插话/饥渴/冷却修改回滚掉。
+        if act in {"resend_to_group", "recall_msg", "undo"} and not is_privileged:
             return "🔒 这个操作只有主人和群主可以用哦～"
 
         # ═══ 撤回消息 ═══
@@ -9612,7 +9617,7 @@ class MessageHandler(AutonomyMixin):
         """任务动作的语音发送（P0-C 2026-08-28）：scope_key = group_id 或
         _private_{user_id}。语音开关/引擎与 LLM 回合同链，失败返回明确
         送达状态（不伪造成功）。"""
-        from napcat.ws_client import SendResult
+        from onebot.ws_client import SendResult
         if not (self.voice_enabled and not self._is_voice_blocked(scope_key)):
             return SendResult(False, False, error="VOICE_DISABLED", retryable=True)
         try:
@@ -10044,7 +10049,7 @@ class MessageHandler(AutonomyMixin):
                 target_id, message, group_id=group_id, **sender_kwargs,
             )
 
-        from napcat.ws_client import SendResult
+        from onebot.ws_client import SendResult
         if not self.voice_enabled or not self.voice.is_available:
             logger.warning("语音功能未启用或 TTS 不可用")
             if fallback_text:

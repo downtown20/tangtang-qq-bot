@@ -6,12 +6,16 @@
 import asyncio
 import json
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
 
 from agent.memory import MemorySystem
+
+# 源码闸门按 __file__ 定位项目文件，不硬编码本机路径（clone 到别处/换机都能跑）
+BASE = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -65,7 +69,7 @@ class TestConfidenceTiers:
 class TestExtractionPromptRules:
     def test_forbidden_rules_present(self):
         """玩笑/测试语句/引用转述/否定方向/单句标签规则在主提取与事实簇 prompt 都在场（防删闸门）"""
-        src = open(r"d:/qq-小糖糖/agent/memory.py", encoding="utf-8").read()
+        src = (BASE / "agent" / "memory.py").read_text(encoding="utf-8")
         for kw in ["玩笑/玩梗", "测试语句", "引用转述", "否定句注意方向", "无上下文单句标签"]:
             assert kw in src, kw
         # 主提取出现一次，事实簇 prompt 出现一次（共用段落）

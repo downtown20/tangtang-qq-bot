@@ -10,7 +10,7 @@ import pytest
 
 from agent.store import ConfirmedProjectionConflict, ConfirmedProjectionError
 from agent.tasks import TaskManager
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def _run(coro):

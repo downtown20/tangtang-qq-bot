@@ -148,9 +148,38 @@ def test_claimed_numbers_match_reality():
 
     audio = {p.stem for p in (BASE / "songs" / "audio").glob("*.wav")}
     audio |= {p.stem.removesuffix("_FINAL")
-              for p in (BASE / "songs" / "covers" / "separated").glob("*_FINAL.wav")}
+              for p in (BASE / "songs" / "covers" / "separated").glob("*_FINAL.*")
+              if p.suffix.lower() in (".wav", ".mp3")}
     assert facts["歌曲数"][0] == len(audio), \
         f"README 写 {facts['歌曲数'][0]} 首歌，按曲库口径实际 {len(audio)}"
+
+
+def test_anti_pattern_count_matches_claude_md():
+    """README 说「N 条错误模式」，CLAUDE.md 的反模式表就得真有 N 行。
+
+    那张表只会往上长（每踩一次坑加一条），而 README 里的数字是手写的——
+    不钉住的话，过几个月它会变成一句很体面的假话。
+    （2026-09-19 实证：写这句话时表已经从 29 长到了 35。）
+    """
+    readme, _ = _readme()
+    text = readme.read_text(encoding="utf-8")
+    claimed = _claimed(text, r"(\d+) 条错误模式")
+    if claimed is None:
+        pytest.skip("README 未声明错误模式条数")
+
+    claude = (BASE / "CLAUDE.md").read_text(encoding="utf-8")
+    actual = len(re.findall(r"^\| (\d+) \|", claude, re.M))
+    assert actual, "CLAUDE.md 里没解析到反模式表——表格格式变了？"
+    assert claimed == actual, \
+        f"README 写 {claimed} 条错误模式，CLAUDE.md 的表实际有 {actual} 条"
+
+    # 发版说明里也有同一个数字，一并钉住
+    note = BASE / "docs" / "发布" / "发版说明_v1.md"
+    if note.is_file():
+        m = re.search(r"(\d+) 条已踩过的坑", note.read_text(encoding="utf-8"))
+        if m:
+            assert int(m.group(1)) == actual, \
+                f"发版说明写 {m.group(1)} 条已踩过的坑，CLAUDE.md 实际 {actual} 条"
 
 
 def test_adr_count_matches_disk():
@@ -256,13 +285,59 @@ def test_package_name_is_ascii_and_matches_readme():
         assert name.isascii(), \
             f"安装包名含非 ASCII 字符：{name!r} —— GitHub Releases 会吞掉中文，必须用纯 ASCII"
 
-    # 与打包脚本实际产出的名字对齐（README 说的就是用户要下载的那个）
+    # 与打包脚本实际产出的名字对齐（README 说的就是用户要下载的那个）。
+    # 版本号也从打包脚本读——不在这里写死，否则每次升版都要记得改第 4 处。
     packer = (BASE / "tools" / "打包发布版本.py").read_text(encoding="utf-8")
     m = re.search(r'PKG_NAME = f"([^"]+)"', packer)
     assert m, "打包脚本里找不到 PKG_NAME"
-    expect = m.group(1).replace("{TAG}", "v1.1")
+    mt = re.search(r'^TAG = "([^"]+)"', packer, re.M)
+    assert mt, "打包脚本里找不到 TAG"
+    expect = m.group(1).replace("{TAG}", mt.group(1))
     assert expect in named, \
         f"打包产物是 {expect}，README 里却写 {named} —— 用户会找不到文件"
+
+
+# ═══════════════════════════════════════════════════════
+# 3b. 所有随包发出的用户文档，链接也要在发布形态下可达
+# ═══════════════════════════════════════════════════════
+
+# 用户会读到的文档（相对快照根）。新增用户文档请登记到这里。
+SHIPPED_USER_DOCS = [
+    "README.md",
+    "CLAUDE.md",
+    "docs/用户手册/使用说明.md",
+    "docs/用户手册/文件同步指南.md",
+    "docs/用户手册/知识库维护.md",
+    "docs/模块地图.md",
+]
+
+
+def test_shipped_user_docs_have_no_dead_links():
+    """不只是 README——用户手册里的链接断了同样让人卡住，而且更隐蔽。
+
+    2026-09-19 审计抓到的实例：`使用说明.md` 末尾指向
+    `docs/开发规划/系统评估_20260729.md`，那份文件早已移进 `归档/`，
+    而归档目录整个不在发布包里——发布版用户点它 100% 断链，工作树里却一切正常。
+    """
+    snap = BASE.parent / "小糖糖-发布"
+    if not snap.is_dir():
+        pytest.skip("快照不存在——先跑 python tools/准备发布.py")
+
+    broken = []
+    for rel in SHIPPED_USER_DOCS:
+        p = snap / rel
+        if not p.is_file():
+            broken.append(f"{rel}（文件本身没进快照）")
+            continue
+        for target in _links(p.read_text(encoding="utf-8")):
+            # README 在仓库根，`../../` 由 GitHub 解析成仓库主页——那几条另有规则
+            if target.startswith("../../") and rel == "README.md":
+                if target.removeprefix("../../") not in GITHUB_REPO_SCOPED:
+                    broken.append(f"{rel} → {target}（越出仓库且不是已知 GitHub 页面）")
+                continue
+            if not (p.parent / target).resolve().exists():
+                broken.append(f"{rel} → {target}")
+    assert not broken, "随包发出的文档里有断链：\n  " + "\n  ".join(broken)
 
 
 # ═══════════════════════════════════════════════════════

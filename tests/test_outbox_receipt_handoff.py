@@ -11,7 +11,7 @@ from agent.action_contract import (
     finalize_action_receipt_template,
 )
 from agent.store import Store
-from napcat.ws_client import NapCatClient
+from onebot.ws_client import NapCatClient
 
 
 def _template(scope_id: str, action_id: str = "act-voice-outbox") -> dict:

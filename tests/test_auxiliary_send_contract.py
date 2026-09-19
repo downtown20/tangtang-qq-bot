@@ -21,7 +21,7 @@ from agent.opinion import OpinionManager
 from agent.personalization import BirthdayGreeter
 from agent.scheduler import CronScheduler
 from agent.store import Store
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _uncertain() -> SendResult:

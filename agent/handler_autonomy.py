@@ -12,7 +12,7 @@ import random
 import time as time_mod
 from datetime import datetime
 
-from napcat.ws_client import send_delivery_state
+from onebot.ws_client import send_delivery_state
 
 from . import protocols as _protocols  # 根基契约（2026-08-15 肯德基幻觉事件）
 from .async_io import run_bounded_blocking, run_bounded_store_io

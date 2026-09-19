@@ -15,7 +15,7 @@ import types
 
 from agent.handler import MessageHandler
 from agent.send_actions import build_receipt, execute_send_action
-from napcat.ws_client import SendResult
+from onebot.ws_client import SendResult
 
 
 def _run(coro):
