@@ -61,7 +61,16 @@ class SongLibrary:
         no_lyrics_count = 0
         candidates: list[tuple[Path, str]] = []
         if audio_dir.exists():
-            candidates.extend((w, w.stem) for w in sorted(audio_dir.glob("*.wav")))
+            # 两种后缀都认：开发机上存无损 wav，发布包里是 ffmpeg 转码后的 mp3。
+            # 理由同原声（见下方 original_audio）——唱歌走 CQ:record，QQ 侧本来就会
+            # 转成 SILK 低码率语音编码，40kHz PCM16 无损是白背 712M。
+            # 两版同时在时优先 wav（开发机场景）。
+            _by_audio: dict[str, Path] = {}
+            for w in sorted(audio_dir.glob("*.wav")) + sorted(audio_dir.glob("*.mp3")):
+                prev = _by_audio.get(w.stem)
+                if prev is None or (prev.suffix.lower() == ".mp3" and w.suffix.lower() == ".wav"):
+                    _by_audio[w.stem] = w
+            candidates.extend((w, n) for n, w in sorted(_by_audio.items()))
         if final_dir.exists():
             by_name: dict[str, Path] = {}
             for w in sorted(final_dir.glob("*_FINAL.*")):
@@ -175,10 +184,13 @@ class SongLibrary:
         if not audio_path.exists():
             audio_path = audio_dir / f"{name}.mp3"
 
-        # 向后兼容：旧格式 songs/audio/歌名.wav（只有一段时）
-        legacy_audio = self.songs_dir / "audio" / f"{title}.wav"
-        if not audio_path.exists() and legacy_audio.exists() and len(lines) > 0:
-            audio_path = legacy_audio
+        # 向后兼容：旧格式 songs/audio/歌名.{wav,mp3}（只有一段时）
+        if not audio_path.exists() and len(lines) > 0:
+            for _suf in (".wav", ".mp3"):
+                _legacy = self.songs_dir / "audio" / f"{title}{_suf}"
+                if _legacy.exists():
+                    audio_path = _legacy
+                    break
 
         # 原声兜底：covers/separated/歌名_FINAL.{wav,mp3}（分离好的原唱人声，未拷贝到 audio/ 的歌）
         if not audio_path.exists():
@@ -381,12 +393,18 @@ class SongLibrary:
         song = self.songs.get(title)
         if not song:
             # 曲库里没有但可能 audio/（RVC）或 covers/separated（原声）下有文件
-            return (self.songs_dir / "audio" / f"{title}.wav").exists() or \
+            _ad = self.songs_dir / "audio"
+            return any((_ad / f"{title}{s}").exists() for s in (".wav", ".mp3")) or \
                    bool(self.original_audio(title))
         for sec in song["sections"].values():
             if sec.get("audio"):
                 return True
-        return (self.songs_dir / "audio" / f"{title}.wav").exists() or \
+        # 兜底要与上面 `not song` 那条、以及 get_section_audio 的旧格式兜底**同口径**：
+        # 都认 wav 与 mp3。原来这里只查 .wav——「段落标记下没有歌词」+ 只有旧式 mp3
+        # 时，has_any_audio=False 而 get_section_audio 能返回真实路径，
+        # 那首歌就不进 list_songs_with_audio()，LLM 数出来的歌名比实际少。
+        _ad = self.songs_dir / "audio"
+        return any((_ad / f"{title}{s}").exists() for s in (".wav", ".mp3")) or \
                bool(self.original_audio(title))
 
     def list_songs_with_audio(self) -> list[str]:

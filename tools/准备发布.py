@@ -151,6 +151,14 @@ TOOLS_KEEP_NAMES = {
     "标注贴图情绪.py", "模拟消息测试.py", "打包发布附件.py", "准备发布.py",
     "打包发布版本.py", "发布前检查.py", "渲染架构图.py",
     "separate_vocals.py", "separate_vocals.bat",   # 唱歌链（可选附加场景）
+    # 一键全流程的第 1/3 步（降噪、切静音）。**这两个从 7 月 3 日起就没随包发过**——
+    # 白名单里一直漏着，而控制台会调它们。2026-09-20 由
+    # test_referenced_tools_are_whitelisted 扫出来（它当初是为别的漏项建的）。
+    "denoise.py", "trim_silence.py",
+    # 翻唱组件的自动安装通道。**控制台按路径去调它**（_singing_tool()）——
+    # 漏了它，用户在「一键全流程」里点「自动安装」会 FileNotFoundError。
+    # 2026-09-20 就是这么漏过一次，由 test_referenced_tools_are_whitelisted 钉住。
+    "歌唱组件.py",
 }
 # 骨架目录：主仓预装空目录 + 摆放说明（用户 clone 即见全貌，附件解压有指引；2026-09-05 主人提议）
 SCAFFOLD_NOTES = {

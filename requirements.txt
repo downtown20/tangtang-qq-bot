@@ -38,8 +38,17 @@ matplotlib>=3.7,<4    # GPT-SoVITS AR/modules/lr_schedulers.py 顶层导入（�
 # ── L3 识图辅助（本地识图还需独立安装 Ollama；缺省自动用云端 qwen-vl）──
 Pillow>=10.0
 
-# ── L4 唱歌辅助（DiffSinger/RVC 为独立环境，最重，笔记本建议跳过）──
+# ── L4 唱歌辅助 ──
+# 播放预录成品不需要任何依赖；下面是「歌唱工作室」（做新翻唱）用的。
+# 它跑在**主环境**里（控制台用 sys.executable 调 infer_cli.py），所以这四项必须装在主环境。
 pypinyin>=0.48
+pyworld>=0.3.4        # RVC 的 f0 处理（有 cp310 win 轮子）
+torchfcpe>=0.0.4      # f0method=fcpe 用的音高提取（纯 Python 轮子）
+librosa>=0.10         # RVC 读音频
+# [!] fairseq 只有源码包，Windows 上要 MSVC 编译（与 jieba-fast 同一个前置）。
+#     装不上时 RVC 的 HuBERT 加载会失败——所以它在安装器里是 soft 项，
+#     且「歌唱组件.py 检查」会把它报出来。见 tools/歌唱组件.py。
+fairseq==0.12.2
 
 # ── L5 文件解析（可选，缺失时对应格式无法读取）──
 python-docx>=0.8       # .docx

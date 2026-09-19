@@ -84,8 +84,10 @@ def gate_functional() -> None:
     names = set(z.namelist())
     read = lambda p: z.read(p).decode("utf-8")  # noqa: E731
 
-    rvc = {n.split("/")[-1][:-4] for n in names
-           if n.startswith("songs/audio/") and n.endswith(".wav")}
+    # 包里的糖糖声线也是转码后的 .mp3（见 打包发布版本.py 的 _voice_mp3）——
+    # 只认 .wav 会在换格式当天数出 0 首，而这是个"看起来还在跑"的静默失效
+    rvc = {n.split("/")[-1].rsplit(".", 1)[0] for n in names
+           if n.startswith("songs/audio/") and n.lower().endswith((".wav", ".mp3"))}
     # 包里的原声是转码后的 .mp3（见 打包发布版本.py 的 _original_mp3），不是 .wav
     orig = {n.split("/")[-1].removesuffix("_FINAL.mp3") for n in names
             if n.startswith("songs/covers/separated/") and n.endswith("_FINAL.mp3")}

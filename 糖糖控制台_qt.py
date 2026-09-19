@@ -105,17 +105,36 @@ TASK_GATE_DEFAULTS = {
     "tasks.media_action_outbox_enabled": False,
 }
 _PIPELINE_DOWNLOADS = {
-    # kind: "dl" = 有在线下载地址（url 空 = 作者待提供）| "env" = 需安装器安装 | "pkg" = 随项目/RVC 自带（缺失属异常）
-    "HuTao 模型": ("Retrieval-based-Voice-Conversion-WebUI/assets/weights/hutao.pth",
-                   "", "dl"),   # 随发布「歌唱模型包」附件分发；Release 地址发布后填入
-    "HuTao 索引": ("Retrieval-based-Voice-Conversion-WebUI/assets/weights/hutao.index",
-                   "", "dl"),   # 同上（附件包内，本机已有 55M+301M）
-    "HuBERT 模型": ("Retrieval-based-Voice-Conversion-WebUI/assets/hubert/hubert_base.pt",
-                    "https://github.com/lj1995/VoiceConversionWebUI/raw/master/assets/hubert/hubert_base.pt", "dl"),
-    "RVC infer_cli.py": ("Retrieval-based-Voice-Conversion-WebUI/tools/infer_cli.py", "", "pkg"),
+    # kind 的口径（2026-09-20：从「待作者提供」改成真能自动装，见 tools/歌唱组件.py）：
+    #   "pack" = 来自 `tangtang-singing-models.zip` 附件，一键下载解压
+    #   "env"  = 在本机就地建虚拟环境（**不能随包发**——venv 的 pyvenv.cfg 里
+    #            记的是建它那台机器的 Python 绝对路径，发到别人机器上直接失效）
+    #   "pkg"  = 随包自带，缺了说明安装包异常，只能重装
+    # 分离模型（uvr5_models 四个 ckpt 约 2.5 G）**不在此表**：audio-separator
+    # 的 load_model() 自带下载，首次用到时自己拉。
+    "HuTao 模型": ("Retrieval-based-Voice-Conversion-WebUI/assets/weights/hutao.pth", "", "pack"),
+    "HuTao 索引": ("Retrieval-based-Voice-Conversion-WebUI/assets/weights/hutao.index", "", "pack"),
+    "HuBERT 模型": ("Retrieval-based-Voice-Conversion-WebUI/assets/hubert/hubert_base.pt", "", "pack"),
+    "RVC infer_cli.py": ("Retrieval-based-Voice-Conversion-WebUI/tools/infer_cli.py", "", "pack"),
     "Demucs 环境": ("venv_demucs/Scripts/python.exe", "", "env"),
     "人声分离脚本": ("tools/separate_vocals.py", "", "pkg"),
+    # 一键全流程的降噪与切静音两步。**原先不在这张表里，也不在发布白名单里**——
+    # 走到那两步才炸，而不是开跑前就告诉用户缺件。
+    "降噪脚本": ("tools/denoise.py", "", "pkg"),
+    "切静音脚本": ("tools/trim_silence.py", "", "pkg"),
 }
+
+
+def _singing_tool():
+    """加载 tools/歌唱组件.py（单一实现——控制台与安装器共用，避免两份漂移）。
+
+    与 同步记忆.py / 诊断糖糖.py 同一套路：中文文件名没法直接 import。
+    """
+    import importlib.util as _ilu
+    spec = _ilu.spec_from_file_location("singing_tool", BASE / "tools" / "歌唱组件.py")
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 # 「打开目录」失败时的解释表。
 #
@@ -3944,7 +3963,7 @@ class TangTangQtConsole(QMainWindow):
                     denoise_script = str(BASE / "tools" / "denoise.py")
                     for name in self.song_names:
                         r = subprocess.run(
-                            ["python", denoise_script, "--song", name],
+                            [sys.executable, denoise_script, "--song", name],
                             capture_output=True, text=True, timeout=300,
                             cwd=str(BASE),
                         )
@@ -4021,7 +4040,7 @@ class TangTangQtConsole(QMainWindow):
                     trim_script = str(BASE / "tools" / "trim_silence.py")
                     for name in self.song_names:
                         r = subprocess.run(
-                            ["python", trim_script, "--song", name],
+                            [sys.executable, trim_script, "--song", name],
                             capture_output=True, text=True, timeout=120,
                             cwd=str(BASE),
                         )
@@ -4056,69 +4075,78 @@ class TangTangQtConsole(QMainWindow):
 
     # ── 流水线缺失文件下载（2026-09-05 L1 补丁：接「下载缺失文件」按钮）──
     def _download_missing_pipeline(self, missing):
-        """下载缺失的流水线依赖（kind=dl 且带 URL 的项）。
+        """自动安装缺失的流水线组件。
 
-        env/pkg 类无下载地址，弹窗已分别提示去向（安装器/随包）；此处只处理
-        真正可在线下载的模型文件。子线程逐项落位，完成后可重跑一键全流程。
+        2026-09-20 起才真能自动装——在那之前 HuTao 模型/索引的下载地址是空的，
+        弹窗只会说「待作者提供」。两件事各走 `tools/歌唱组件.py` 的对应函数
+        （单一实现，安装器用同一份）：
+          · pack → 下载 `tangtang-singing-models.zip` 并解压到项目根
+          · env  → 就地建 `venv_demucs` 并装 audio-separator
+
+        **放子线程**：下 400 M 模型 + 建 venv 装 torch（约 1.7 G）都是分钟级，
+        压在 GUI 线程上整个控制台会假死。
         """
         from PySide6.QtCore import QThread, Signal
 
-        jobs = [(label, path, url) for label, path, url, kind in missing if kind == "dl" and url]
-        if not jobs:
-            QMessageBox.information(self, "提示", "缺少的文件均无在线下载地址：\n"
-                                    "• HuTao 模型/索引：待作者提供下载地址后重试\n"
-                                    "• Demucs 环境：运行「安装糖糖.bat」→ 安装唱歌组件\n"
-                                    "• 随包文件：重新解压或更新版本")
+        kinds = {kind for _, _, _, kind in missing}
+        if not kinds & {"pack", "env"}:
+            # 按 kind 动态列出，不写死文件名——原来写死了 separate_vocals.py，
+            # 而用户实际缺的可能是 denoise.py，会把人指去看一个不存在的名字
+            names = "、".join(label for label, _, _, kind in missing if kind == "pkg")
+            QMessageBox.information(self, "提示",
+                                    f"缺的是「随包自带」的文件：\n· {names}\n\n"
+                                    "它们本该在安装包里——建议重新解压安装包。")
             return
 
-        class _PipelineDownloadThread(QThread):
+        need_pack = "pack" in kinds
+        need_env = "env" in kinds
+
+        class _InstallThread(QThread):
             progress_sig = Signal(str)
             finished_sig = Signal(bool, str)
 
-            def __init__(self, jobs):
-                super().__init__()
-                self._jobs = jobs
-
             def run(self):
-                import urllib.request
-                ok_list, fail_list = [], []
-                for label, path, url in self._jobs:
-                    try:
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        tmp = path.with_name(path.name + ".part")
-                        req = urllib.request.Request(url, headers={"User-Agent": "TangTangConsole/1.0"})
-                        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as f:
-                            while True:
-                                chunk = resp.read(65536)
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                        tmp.replace(path)
-                        ok_list.append(label)
-                        self.progress_sig.emit(f"✅ 已下载 {label}")
-                    except Exception as e:
-                        fail_list.append(f"{label}（{e}）")
-                        self.progress_sig.emit(f"❌ {label} 下载失败: {e}")
-                self.finished_sig.emit(not fail_list, "；".join(fail_list))
+                try:
+                    mod = _singing_tool()
+                    fails: list[str] = []
+                    if need_pack:
+                        self.progress_sig.emit("下载翻唱模型包…")
+                        if not mod.install_pack(log=self.progress_sig.emit):
+                            fails.append("翻唱模型包")
+                    if need_env:
+                        self.progress_sig.emit("创建人声分离环境（约 1.7 G）…")
+                        if not mod.install_demucs_env(log=self.progress_sig.emit):
+                            fails.append("人声分离环境")
+                    # 重检覆盖**整张依赖表**，不是只有模型包那 4 项。
+                    # 2026-09-20 实测两种坏形态：只缺 pkg 项时会弹「✅ 已就位」，
+                    # 而 demucs 装失败时弹窗是「未完成的原因：」后面一片空白。
+                    rest = [label for label, (rel, _u, _k) in _PIPELINE_DOWNLOADS.items()
+                            if not (BASE / rel).exists()]
+                    reasons = fails + [f"仍缺 {x}" for x in rest]
+                    self.finished_sig.emit(not reasons, "、".join(reasons))
+                except Exception as e:                           # noqa: BLE001
+                    self.finished_sig.emit(False, f"{type(e).__name__}: {e}")
 
-        self._log("📥 开始下载缺失的流水线文件…")
+        self._log("📥 开始安装缺失的翻唱组件…")
 
         def _on_progress(msg):
-            self._studio_status.setText(f"📥 {msg}")
+            self._studio_status.setText(msg.strip()[:80])
+            self._log(msg.strip())
 
         def _on_finished(ok, fails):
             self._studio_set_busy(False)
             if ok:
-                self._studio_status.setText("✅ 缺失文件下载完成，可重新运行一键全流程")
-                self._log("✅ 缺失文件下载完成")
-                QMessageBox.information(self, "下载完成", "缺失文件已就位，可以重新点「一键全流程」。")
+                self._studio_status.setText("✅ 翻唱组件已就绪，可重新运行一键全流程")
+                self._log("✅ 翻唱组件已就绪")
+                QMessageBox.information(self, "安装完成",
+                                        "翻唱组件已就位，可以重新点「一键全流程」。")
             else:
-                self._studio_status.setText(f"❌ 下载未完成: {fails}")
-                self._log(f"❌ 下载未完成: {fails}")
-                QMessageBox.warning(self, "下载未完成", f"下载失败：\n{fails}")
+                self._studio_status.setText(f"❌ 安装未完成: {fails}")
+                self._log(f"❌ 安装未完成: {fails}")
+                QMessageBox.warning(self, "安装未完成", f"未完成的原因：\n{fails}")
 
         self._studio_set_busy(True)
-        self._download_worker = _PipelineDownloadThread(jobs)
+        self._download_worker = _InstallThread()
         self._download_worker.progress_sig.connect(_on_progress)
         self._download_worker.finished_sig.connect(_on_finished)
         self._download_worker.start()
@@ -4144,16 +4172,17 @@ class TangTangQtConsole(QMainWindow):
         if missing:
             lines = []
             for label, path, url, kind in missing:
-                note = {"dl": "（可下载）", "env": "（需运行安装器装唱歌组件）",
-                        "pkg": "（文件异常——随包/随 RVC 自带，请重装）"}.get(kind, "")
-                if kind == "dl" and not url:
-                    note = "（暂无下载地址）"
+                note = {"pack": "（可自动下载，约 400 M）",
+                        "env": "（可自动创建，约 1.7 G）",
+                        "pkg": "（随包自带——文件异常，建议重装安装包）"}.get(kind, "")
                 lines.append(f"• {label}: {path} {note}")
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Warning)
             box.setWindowTitle("流水线依赖缺失")
-            box.setText(f"一键全流程暂不可用，缺少：\n" + "\n".join(lines))
-            dl_btn = box.addButton("下载缺失文件", QMessageBox.AcceptRole)
+            box.setText(f"一键全流程暂不可用，缺少：\n" + "\n".join(lines)
+                        + "\n\n自动安装会从项目 Release 下载翻唱模型包，"
+                          "并在本机创建人声分离环境。")
+            dl_btn = box.addButton("自动安装缺失组件", QMessageBox.AcceptRole)
             box.addButton("取消", QMessageBox.RejectRole)
             box.exec()
             if box.clickedButton() is dl_btn:

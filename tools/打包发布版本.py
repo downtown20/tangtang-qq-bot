@@ -17,7 +17,7 @@
     python tools/打包发布版本.py --no-voice   # 只出主包（补发小版本时用）
 
 产出（默认放在项目同级目录「小糖糖-发布版/」）：
-    tangtang-v1.5.zip            约 1.1G（单文件，GitHub 上限 2G）
+    tangtang-v0.01.00.zip       约 700M（单文件，GitHub 上限 2G）
     附件/tangtang-voice-1ofN.zip  语音推理集分卷（仅勾了语音的用户下载）
 
 `--no-voice`：语音分卷只从 `gpt-sovits/` 取内容（第三方引擎 + 模型），
@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import zipfile
@@ -47,15 +48,16 @@ ATTACH = OUT / "附件"
 #   末位留给同一版本的补丁。由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
 #
-# 下一版（v1.5 之后）应为 v0.01.00。
-TAG = "v1.5"
+# v0.01.00 是第一个用新编号的版本（v1.5 之后）；再下一版写 v0.02.00。
+TAG = "v0.01.00"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
 PKG_NAME = f"tangtang-{TAG}.zip"
 
 # 打进包的排除项（快照里的 .git 是发布仓库的，不能进用户包）
-ZIP_EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files", "_原声mp3缓存"}
+ZIP_EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files",
+                    "_原声mp3缓存", "_糖糖声线mp3缓存"}
 # ⚠ .sqlite3 **不能一刀切**（2026-09-19 在这上面反复过一次）：
 #   knowledge/.knowledge_index.sqlite3 是**要随包**的——它带 BGE 向量，
 #   用户首启省 6.2 秒。当初因为它带着旧文本而把它整个排除，砍掉的是用户的等待时间。
@@ -121,25 +123,61 @@ def _add_tree(zf: zipfile.ZipFile, root: Path, extra: dict[str, str] | None = No
 BUNDLED_STICKER_DIRS = ["stickers_michele", "stickers_murasame"]
 
 
-# 原声转码缓存：重复打包不重转（41 首约 70 秒，没必要每次付）。放在 OUT 下，
+# 转码缓存：重复打包不重转（80 首约 2 分钟，没必要每次付）。放在 OUT 下，
 # 不进快照也不进 zip——zip 的输入只有 SNAPSHOT 与 _add_bundled_media 显式加的东西。
-MP3_CACHE = OUT / "_原声mp3缓存"
+MP3_CACHE_ORIGINAL = OUT / "_原声mp3缓存"
+MP3_CACHE_VOICE = OUT / "_糖糖声线mp3缓存"
+
+
+def _to_mp3(wav: Path, cache_dir: Path, bitrate: str) -> Path | None:
+    """把 wav 转成 mp3（带缓存）。失败返回 None——**不抛异常**。
+
+    **为什么两种歌曲都要转**（2026-09-20 补齐，原声在 v1.2 已转、糖糖声线漏了）：
+    唱歌是通过 `[CQ:record,file=file:///...]` 发出去的，也就是 **QQ 语音消息**，
+    QQ 侧本来就会把它转成 SILK 这类低码率语音编码。存 40kHz PCM16 无损是白背——
+    糖糖声线 40 首共 712M，占整包 67%。
+
+    下面两条防护是复核时补的（两条都实测复现过）：
+      · **ffmpeg 起不来时抛 FileNotFoundError**：docstring 说返回 None，实际会一路
+        穿出 main()，在输出目录留下一个 235 MB、有贴图没有歌的残缺 zip，
+        而文件名已经是最终的 `tangtang-vX.zip`
+      · **直接写目标文件**：ffmpeg 被中断会留下截断的 mp3（实测残 2,097,152 字节），
+        而它比源 wav 新 → **下次打包缓存命中，残file 就这么进了包**
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out = cache_dir / f"{wav.stem}.mp3"
+    if out.exists() and out.stat().st_size > 0 and out.stat().st_mtime >= wav.stat().st_mtime:
+        return out
+    tmp = out.with_name(out.name + ".part")
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(wav),
+             "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, str(tmp)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as e:                         # FileNotFoundError 也是 OSError
+        print(f"      ffmpeg 起不来（{e}）——装了吗？tools/快速安装ffmpeg.py")
+        tmp.unlink(missing_ok=True)
+        return None
+    if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+        print(f"      ffmpeg 返回 {r.returncode}：{(r.stderr or '')[:200]}")
+        tmp.unlink(missing_ok=True)
+        return None
+    os.replace(tmp, out)                         # 原子落位，断在半路不会留下残file
+    return out
 
 
 def _original_mp3(wav: Path) -> Path | None:
-    """把原声 wav 转成 192kbps mp3（带缓存）。ffmpeg 失败返回 None。"""
-    MP3_CACHE.mkdir(parents=True, exist_ok=True)
-    out = MP3_CACHE / f"{wav.stem}.mp3"
-    if out.exists() and out.stat().st_mtime >= wav.stat().st_mtime:
-        return out
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(wav),
-         "-vn", "-c:a", "libmp3lame", "-b:a", "192k", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode != 0 or not out.exists():
-        print(f"      ffmpeg 返回 {r.returncode}：{r.stderr[:200]}")
-        return None
-    return out
+    """原声（分离出来的原唱人声）→ 192kbps mp3。"""
+    return _to_mp3(wav, MP3_CACHE_ORIGINAL, "192k")
+
+
+def _voice_mp3(wav: Path) -> Path | None:
+    """糖糖声线（RVC 成品）→ 128kbps mp3。
+
+    比原声低一档是因为这些是 **40kHz 单声道**（原声那批是立体声），
+    128k 单声道已经远超 SILK 能保留的信息量。
+    """
+    return _to_mp3(wav, MP3_CACHE_VOICE, "128k")
 
 
 def _add_bundled_media(zf: zipfile.ZipFile) -> int:
@@ -148,7 +186,21 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
     songs = BASE / "songs"
     if songs.is_dir():
         audio = songs / "audio"
+        # 糖糖声线 40 首：40kHz 单声道 PCM16 共 712M，占整包 67%——转 128k mp3。
+        # 与原声同理（唱歌走 CQ:record，QQ 侧转 SILK），见 _to_mp3 的注释。
+        _seen_audio: set[str] = set()
         for p in sorted(audio.glob("*.wav")):
+            mp3 = _voice_mp3(p)
+            if mp3 is None:
+                print(f"   [!] 糖糖声线转码失败，跳过：{p.name}")
+                continue
+            _seen_audio.add(p.stem)
+            zf.write(mp3, f"songs/audio/{p.stem}.mp3")
+            n += 1
+        # 已经是 mp3 的（或开发机上只有 mp3 的歌）原样带
+        for p in sorted(audio.glob("*.mp3")):
+            if p.stem in _seen_audio:
+                continue
             zf.write(p, f"songs/audio/{p.name}")
             n += 1
         # 原声版：**41 首全部进包**，且转码成 mp3。
@@ -160,14 +212,25 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
         #   ② 无损 WAV 存着没意义：唱歌走 `[CQ:record,...]`，QQ 侧本来就会转成 SILK
         #      这类低码率语音编码。192kbps mp3 已远超 SILK 能保留的信息量，
         #      而 1.78G → 242M 让整包留在 GitHub Releases 的 2G 单附件上限内。
+        # 与原声段同口径：**wav 与 mp3 都收**。原先只 glob `*_FINAL.wav`，
+        # 于是「从发布包解出来的树上重新打包」时 41 首原声会整批静默不进包
+        # （发布包里 separated/ 下 41 个全是 mp3）——而 sing 工具还在对 LLM
+        # 承诺「对方说原声就放原唱」。
         sep = songs / "covers" / "separated"
+        _seen_orig: set[str] = set()
         for p in sorted(sep.glob("*_FINAL.wav")):
             mp3 = _original_mp3(p)
             if mp3 is None:
                 print(f"   [!] 原声转码失败，跳过：{p.name}")
                 continue
             # 注意用 p.stem 而不是 p.stem+"_FINAL"：p.stem 本身已经是 "歌名_FINAL"
+            _seen_orig.add(p.stem)
             zf.write(mp3, f"songs/covers/separated/{p.stem}.mp3")
+            n += 1
+        for p in sorted(sep.glob("*_FINAL.mp3")):
+            if p.stem in _seen_orig:              # 两版都在时优先无损 wav
+                continue
+            zf.write(p, f"songs/covers/separated/{p.name}")
             n += 1
         for p in sorted(songs.glob("*.txt")):        # 歌词
             zf.write(p, f"songs/{p.name}")

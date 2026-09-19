@@ -76,10 +76,15 @@ GROUPS = {
         "pkgs": ["Pillow>=10.0"],
     },
     "唱歌": {
-        "desc": "L4 唱歌——播放预录成品歌曲（曲库已随包自带）",
+        "desc": "L4 唱歌——播放预录成品歌曲（曲库已随包自带）+ 翻唱制作的依赖",
         # faiss-cpu：RVC 音色转换读 .index 用。1.9+ 的 wheel 只认 NumPy 2，
         # 与上面的 numpy<1.24 冲突，所以钉 1.7.4（见 requirements.txt）。
-        "pkgs": ["pypinyin>=0.48", "faiss-cpu==1.7.4"],
+        "pkgs": ["pypinyin>=0.48", "faiss-cpu==1.7.4",
+                 "pyworld>=0.3.4", "torchfcpe>=0.0.4", "librosa>=0.10"],
+        # soft：失败仅警告不中断。fairseq 只有源码包，Windows 上要 MSVC 编译
+        # （与 jieba-fast 同一前置）；装不上时 RVC 的 HuBERT 加载会失败，
+        # 由 tools/歌唱组件.py 的检查报出来，而不是让用户对着一个沉默的失败猜。
+        "soft": ["fairseq==0.12.2"],
     },
     "文档": {
         "desc": "L5 读 docx/pdf",
@@ -929,6 +934,40 @@ def cmd_health() -> int:
     return subprocess.run([sys.executable, str(script)], cwd=str(BASE)).returncode
 
 
+def _load_singing_tool():
+    """加载 tools/歌唱组件.py——控制台用的是同一份（避免两处实现漂移）。
+
+    [!] 2026-09-20：本模块的 docstring 原先就写着「安装器会用它」，但安装器
+    其实从没加载过它（复核时 grep 全文确认：只有一句注释提到）。现在真的接上了，
+    由 tests/test_singing_component.py::test_installer_actually_uses_the_shared_module 钉住。
+    """
+    import importlib.util as _ilu
+    spec = _ilu.spec_from_file_location(
+        "singing_tool", Path(__file__).resolve().parent / "歌唱组件.py")
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def cmd_singing() -> int:
+    """安装翻唱制作组件：模型包（Release 附件）+ demucs 环境（本机现建）。"""
+    print("━━━ 翻唱制作组件 ━━━")
+    print("  做新翻唱时才需要。点歌播放的 41 首成品已随包自带，不需要它。\n")
+    try:
+        mod = _load_singing_tool()
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  [x] 加载 tools/歌唱组件.py 失败：{e}")
+        return 1
+    st = mod.status()
+    if st["ready"]:
+        print("  [√] 翻唱组件已经齐了，无需安装")
+        return 0
+    ok = mod.install_all()
+    if ok:
+        print("\n  装好了。打开控制台 → 设置 → 曲库 → 歌唱工作室即可使用。")
+    return 0 if ok else 1
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if a]
     dry_run = "--dry-run" in args
@@ -947,6 +986,7 @@ def main() -> int:
             print("  5. 发布项目 — 清理个人数据后生成分享文件夹（发给别人）")
             print("  6. 检查状态 — 环境 + 快照总览")
             print("  7. 体检 — 换机功能对比（[×]=缺失 [!]=留意，两台机器各跑一遍对照）")
+            print("  8. 翻唱组件 — 做新翻唱用（约 2 G；只听歌不需要）")
             print("  0. 退出")
             try:
                 raw = input("\n  选择 > ").strip()
@@ -966,6 +1006,8 @@ def main() -> int:
                 cmd_check()
             elif raw == "7":
                 cmd_health()
+            elif raw == "8":
+                cmd_singing()
             else:
                 break
             try:
@@ -990,6 +1032,8 @@ def main() -> int:
         return cmd_check()
     if cmd in ("体检", "health"):
         return cmd_health()
+    if cmd in ("翻唱", "singing"):
+        return cmd_singing()
     # 兼容旧用法：直接指定依赖组
     return 0 if install_groups([cmd], dry_run) else 1
 
