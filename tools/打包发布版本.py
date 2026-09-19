@@ -16,7 +16,7 @@
     python tools/打包发布版本.py       # 再打包 + 语音分卷附件
 
 产出（默认放在项目同级目录「小糖糖-发布版/」）：
-    小糖糖-v1.0.zip              约 1.0G（单文件，GitHub 上限 2G）
+    tangtang-v1.0.zip            约 1.0G（单文件，GitHub 上限 2G）
     附件/tangtang-voice-1ofN.zip  语音推理集分卷（仅勾了语音的用户下载）
 """
 from __future__ import annotations
@@ -34,7 +34,10 @@ OUT = BASE.parent / "小糖糖-发布版"
 ATTACH = OUT / "附件"
 
 TAG = "v1.0"
-PKG_NAME = f"小糖糖-{TAG}.zip"
+# ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
+#   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
+#   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
+PKG_NAME = f"tangtang-{TAG}.zip"
 
 # 打进包的排除项（快照里的 .git 是发布仓库的，不能进用户包）
 ZIP_EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files"}

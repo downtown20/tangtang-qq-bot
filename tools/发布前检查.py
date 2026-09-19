@@ -30,7 +30,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 
 BASE = Path(__file__).resolve().parent.parent
 OUT = BASE.parent / "小糖糖-发布版"
-PKG = OUT / "小糖糖-v1.0.zip"
+PKG = OUT / "tangtang-v1.0.zip"
 
 QQ_RE = re.compile(r"\b[1-9]\d{8,10}\b")
 KEY_RE = re.compile(r"sk-[A-Za-z0-9]{16,}|api[_-]?key\s*[:=]\s*['\"]?[A-Za-z0-9]{16,}")

@@ -240,6 +240,31 @@ def test_architecture_graph_counts_match_readme():
         f"README 写 {claimed.group(2)} 条关系，图谱实际 {len(edges)} 条"
 
 
+def test_package_name_is_ascii_and_matches_readme():
+    """安装包名必须纯 ASCII，且 README 里写的和实际产物同名。
+
+    2026-09-19 实测踩坑：GitHub Releases 会把附件名里的中文吞掉——
+    `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`，而 README 让用户去找中文名，
+    两边对不上。纯 ASCII 也顺带避开浏览器/下载工具在非中文 locale 下的编码问题。
+    """
+    readme, _ = _readme()
+    text = readme.read_text(encoding="utf-8")
+    named = re.findall(r"`([^`]+\.zip)`", text)
+    assert named, "README 里应写出安装包文件名"
+
+    for name in named:
+        assert name.isascii(), \
+            f"安装包名含非 ASCII 字符：{name!r} —— GitHub Releases 会吞掉中文，必须用纯 ASCII"
+
+    # 与打包脚本实际产出的名字对齐（README 说的就是用户要下载的那个）
+    packer = (BASE / "tools" / "打包发布版本.py").read_text(encoding="utf-8")
+    m = re.search(r'PKG_NAME = f"([^"]+)"', packer)
+    assert m, "打包脚本里找不到 PKG_NAME"
+    expect = m.group(1).replace("{TAG}", "v1.0")
+    assert expect in named, \
+        f"打包产物是 {expect}，README 里却写 {named} —— 用户会找不到文件"
+
+
 # ═══════════════════════════════════════════════════════
 # 4. Mermaid 图必须能被 GitHub 渲染
 # ═══════════════════════════════════════════════════════
