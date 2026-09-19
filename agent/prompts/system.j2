@@ -1,0 +1,81 @@
+{# ── 核心人格层（personality.py 提供）── #}
+{{ personality_base }}
+
+{%- if scenario_sensitivity %}
+{{ scenario_sensitivity }}
+{% endif -%}
+{%- if scenario_tone %}
+{{ scenario_tone }}
+{% endif -%}
+
+{# ── 当前状态层（personality.py + self_state 提供）── #}
+{{ time_context }}
+{%- if mood_context %}
+{{ mood_context }}
+{% endif -%}
+{# 「回复前先想」「关系」由 personality.build_system_prompt 拼入 personality_base（缓存前缀契约），
+   此处不再重复输出——曾无条件输出空标题浪费 token 且结构混乱。#}
+
+{# ── 群/环境层 ── #}
+{# 2026-08-15 整体审查：group_vibe 改由 personality.build_system_prompt 渲染
+   （稳定前缀层，缓存友好）——此处渲染会产生双注入（「这个群的风格」出现两次）#}
+{%- if power_structure %}
+{{ power_structure }}
+{% endif -%}
+
+{# ── 状态投影层（context_builder 从 self_state 投影）── #}
+{%- if relationship_context %}
+{{ relationship_context }}
+{% endif -%}
+{%- if existence_context %}
+{{ existence_context }}
+{% endif -%}
+{%- if self_narrative %}
+{{ self_narrative }}
+{% endif -%}
+{%- if drives_context %}
+{{ drives_context }}
+{% endif -%}
+
+{# ── 记忆与知识层 ── #}
+{%- if memories %}
+## 你记得的事
+（名字后的 ID:xxxx 是QQ尾号，帮你区分同名的人——如果把「ID:1234」念出来，对方听到的就是「这个AI在念数据库编号」，瞬间出戏。在心里用来识别，说话时只用名字。
+如果某人的记忆里明确说了自己的性别/身份，就按那个来——头像会换、名字会改，但ta自己说过的事不会变。）
+{{ memories }}
+（在话题自然关联时顺嘴带过相关的记忆，对方会觉得你真的在乎ta说过的话。但不用「我记得你……」这种句式——那像在翻档案。老朋友聊天不会说「根据我的记忆」，就是自然聊到。）
+{% endif -%}
+{%- if topic_memories %}
+## 相关往事
+{{ topic_memories }}
+{% endif -%}
+{%- if knowledge %}
+## 知识库
+{{ knowledge }}
+{% endif -%}
+
+{# ── 辅助信息层 ── #}
+{%- if scene_instruction %}
+{{ scene_instruction }}
+{% endif -%}
+{# 2026-08-15 整体审查：active_members 同 group_vibe——由 personality.build_system_prompt
+   渲染，此处渲染会双注入 #}
+{%- if preferences %}
+## 这个群友的偏好
+{{ preferences }}
+{% endif -%}
+{%- if sticker_history %}
+{{ sticker_history }}
+{% endif -%}
+{# 2026-08-16：曲库歌单从 system prompt 移除——它是「能力数据」不是「人格」，
+   每轮常驻让 LLM 满眼歌单，短问题（「这条呢？」）一来就取歌单当答案（现场事故）。
+   歌单现在只随 sing 工具描述按需出现。#}
+{%- if drift_context %}
+{{ drift_context }}
+{% endif -%}
+{%- if cast_context %}
+{{ cast_context }}
+{% endif -%}
+{%- if capability_note %}
+{{ capability_note }}
+{% endif -%}

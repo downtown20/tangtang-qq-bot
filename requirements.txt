@@ -1,0 +1,53 @@
+# 小糖糖 依赖清单（按功能分组）
+# 推荐用 tools/安装依赖.py 按需安装——笔记本等新机器不必装全部
+
+# ── L0 核心（必装，缺了无法启动）──
+websockets>=12.0
+httpx>=0.27.0
+pyyaml>=6.0
+python-dotenv>=1.0
+jinja2>=3.0            # system prompt 模板（context_builder.py 顶层导入，缺了直接崩）
+numpy>=1.24
+
+# ── L1 高质量记忆（强烈建议——缺了记忆降级为关键词匹配）──
+jieba>=0.42            # 中文分词——知识库+插话+话题追踪（纯 Python，无编译前置）
+transformers==4.57.6   # BGE 语义向量/BERT 兼容（台式机生产实跑版本；变更需全量记忆回归）
+modelscope>=1.20       # 模型下载——阿里云国内源
+# torch 另装 CPU 版（约200MB）: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# ── L2 语音辅助（缺则纯文字/纯文本降级，不阻断主聊天）──
+soundfile>=0.12
+edge-tts>=6.1
+sherpa-onnx>=1.10     # 语音识别（语音消息转文字）——2026-08-15 修复后依赖，缺则听不懂语音消息
+pilk>=0.2             # SILK v3 解码——QQ 语音实为 silk 而非 amr（2026-08-24 取证），缺则听不懂语音消息
+jieba-fast>=0.39      # GPT-SoVITS 中文文本前端硬导入（text/chinese.py）——服务与主程序同解释器运行
+                      # ⚠ Windows 常无预编译 wheel，pip 会源码编译 → 需先装 VS2022 Build Tools（C++ 工作负载，
+                      #    含 MSVC x64 与 Windows SDK，验证 cl.exe）。无 MSVC 时可用纯 Python jieba 回退
+                      #    （见 gpt-sovits/start_api_patched.py），速度较慢但可启动
+matplotlib>=3.7,<4    # GPT-SoVITS AR/modules/lr_schedulers.py 顶层导入（即使只推理也会被加载）
+
+# ── L3 识图辅助（本地识图还需独立安装 Ollama；缺省自动用云端 qwen-vl）──
+Pillow>=10.0
+
+# ── L4 唱歌辅助（DiffSinger/RVC 为独立环境，最重，笔记本建议跳过）──
+pypinyin>=0.48
+
+# ── L5 文件解析（可选，缺失时对应格式无法读取）──
+python-docx>=0.8       # .docx
+pdfplumber>=0.10       # .pdf（比 PyPDF2 效果好）
+PyPDF2>=3.0            # .pdf 兜底
+
+# ── L6 运行维护（runtime_observer / 体检 / 语音质检脚本，选装）──
+psutil>=5.9
+requests>=2.28
+
+# ── 控制台（图形界面，强烈建议）──
+pyside6>=6.5
+
+# ── 开发测试 ──
+pytest>=8.0
+pytest-asyncio>=0.24
+pyflakes>=3.0         # undefined 名称门禁（CLAUDE.md 铁律扫描工具）
+
+# 已移除（全项目无使用点的历史遗留）: customtkinter, pystray
+# snownlp 不采用——电商评论训练集不适合QQ聊天情感判断（"谢谢你"被判负面）

@@ -1,0 +1,31 @@
+# 密钥与隐私——绝不提交
+.env
+config.yaml
+*.db
+*.db-shm
+*.db-wal
+memory_sync/
+QQ数据备份-*/
+
+# 运行时产物
+__pycache__/
+*.pyc
+.pytest_cache/
+voice_cache/
+share_images/
+generated_images/
+temp_files/
+*.log
+*.json
+!stickers/metadata.json
+!stickers_cg/metadata.json
+!voice_cache/摆放说明.txt
+!share_images/摆放说明.txt
+!requirements.txt
+
+# 本机工具目录
+.claude/
+.codex/
+.gitnexus/
+.stfolder/
+.stignore
