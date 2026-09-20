@@ -9,11 +9,13 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 【仪表盘】— 启动/停止糖糖，查看数据统计
-  ・点「启动 SnowLuma」→ 弹出 QQ 登录窗口 → 扫码登录
+  ・点「启动 SnowLuma」→ 到它的网页面板里注入 QQ 并配好连接
+  　（**没有扫码登录**：SnowLuma 注入进已登录的 QQ 进程，QQ 自己在客户端登）
+  ・拿不准点「连接自检」——它会说还差哪一步
   ・点「启动小糖糖」→ 连接 SnowLuma 后糖糖上线
   ・下方统计卡片可点击展开详细数据浏览
 
-【设置】— 修改所有配置，左侧 15 个分类可切换
+【设置】— 修改所有配置，左侧分类可切换
   ・改完点「保存设置」→ 写入 config.yaml
   ・群管理和黑名单支持增删改
 
@@ -95,10 +97,50 @@ BASE = _get_base()
 CONFIG_PATH = BASE / "config.yaml"
 BACKUP_PATH = BASE / "config.yaml.bak"
 SHARE_DIR = BASE / "share_images"
-_SL_DIRS = sorted((BASE / "SnowLuma").glob("SnowLuma-v*"), key=lambda p: [int(x) for x in p.name.replace("SnowLuma-v", "").split("-")[0].split(".")], reverse=True)
+def _sl_version_key(p: Path) -> tuple:
+    """给 SnowLuma 安装目录排序的键——**绝不允许抛异常**。
+
+    ⚠ 2026-09-20 审查：原来是裸 `int(x)` 直接解析目录名。用户只要把目录改名成
+    `SnowLuma-v1.14.9备份` 之类，`int()` 就抛 ValueError，而这段跑在**模块导入期**
+    —— 于是整个控制台起不来，屏幕上只有一段裸 traceback。
+    解析不出来的按「最旧」处理；同一版本则**有 launcher.bat 的优先**
+    （与 `tools/检查连接.py` 的判据一致，免得自检说"装好了"而控制台让你重下）。
+    """
+    stem = p.name.replace("SnowLuma-v", "").split("-")[0]
+    try:
+        parts: tuple = tuple(int(x) for x in stem.split("."))
+    except ValueError:
+        parts = (0,)
+    return (parts, (p / "launcher.bat").is_file())
+
+
+_SL_DIRS = sorted((BASE / "SnowLuma").glob("SnowLuma-v*"),
+                  key=_sl_version_key, reverse=True)
 _SL_DIR = _SL_DIRS[0] if _SL_DIRS else (BASE / "SnowLuma")
 SNOWLUMA_EXE = _SL_DIR / "launcher.bat"
 SNOWLUMA_DIR = _SL_DIR
+
+
+def _snowluma_webui_port() -> int:
+    """SnowLuma 网页面板的端口——读它自己的 config/runtime.json，读不到退回官方默认 5099。
+
+    2026-09-20 加：这个地址此前**全仓一次都没出现过**（`5099` 在运行代码里零命中）。
+    而它是新手唯一能配置连接的地方——进不去面板，后面每一步都无从谈起。
+    """
+    try:
+        import json as _json
+        cfg = SNOWLUMA_DIR / "config" / "runtime.json"
+        if cfg.exists():
+            port = _json.loads(cfg.read_text(encoding="utf-8")).get("webuiPort")
+            if port:
+                return int(port)
+    except (OSError, ValueError, TypeError):
+        pass
+    return 5099
+
+
+SNOWLUMA_WEBUI_PORT = _snowluma_webui_port()
+SNOWLUMA_WEBUI_URL = f"http://127.0.0.1:{SNOWLUMA_WEBUI_PORT}"
 
 TASK_GATE_DEFAULTS = {
     "tasks.text_action_outbox_enabled": True,
@@ -2155,12 +2197,34 @@ class TangTangQtConsole(QMainWindow):
         row1 = QHBoxLayout()
         self._btn_snowluma = QPushButton("启动 SnowLuma")
         self._btn_snowluma.setObjectName("actionBtn")
-        self._btn_snowluma.setToolTip("启动 SnowLuma QQ 客户端，需先扫码登录才能使用糖糖")
+        # ⚠ 2026-09-20：原 tooltip 写「需先扫码登录」——SnowLuma **没有二维码登录**。
+        #   它靠把 DLL 注入到已运行的 QQ 进程里工作（源码里是
+        #   `tasklist /fi "imagename eq QQ.exe"` 找进程再注入），QQ 的登录在 QQ 客户端里做。
+        self._btn_snowluma.setToolTip(
+            "启动 SnowLuma 协议端。要先用 QQ 客户端登录机器人账号并保持 QQ 开着——"
+            "SnowLuma 是注入到 QQ 进程里的，它自己不登录。")
         self._btn_snowluma.clicked.connect(self._start_snowluma)
         row1.addWidget(self._btn_snowluma)
-        self._lbl_snowluma_hint = QLabel("启动后自动登录")
+        self._lbl_snowluma_hint = QLabel("先开 QQ 并登录机器人账号")
         self._lbl_snowluma_hint.setObjectName("muted")
         row1.addWidget(self._lbl_snowluma_hint)
+
+        # 「打开网页面板」——2026-09-20 加。面板地址此前在运行代码里零命中，
+        # 新手连门都找不到；而配置连接、看 Token 全在那个面板里。
+        btn_webui = QPushButton("打开网页面板")
+        btn_webui.setObjectName("actionBtn")
+        btn_webui.setToolTip(f"在浏览器里打开 SnowLuma 网页面板（{SNOWLUMA_WEBUI_URL}）"
+                             "—— 配置 WS 客户端、看「授权 Token」都在这里")
+        btn_webui.clicked.connect(self._open_snowluma_panel)
+        row1.addWidget(btn_webui)
+
+        # 「连接自检」——把「连不上」翻译成「第几步还没做」。
+        btn_diag = QPushButton("连接自检")
+        btn_diag.setObjectName("actionBtn")
+        btn_diag.setToolTip("逐项检查 QQ ↔ SnowLuma ↔ 糖糖 这条链，告诉你还差哪一步、下一步填什么")
+        btn_diag.clicked.connect(self._run_connection_check)
+        row1.addWidget(btn_diag)
+
         row1.addStretch()
         cl.addLayout(row1)
 
@@ -2772,7 +2836,9 @@ class TangTangQtConsole(QMainWindow):
         _add_section("napcat", "SnowLuma — QQ 协议连接", [
             ("napcat.http_url", "HTTP地址", "str", "SnowLuma 的 HTTP API 地址，默认 http://127.0.0.1:3000"),
             ("_napcat_token_hint", "", "label",
-             "🔑 SnowLuma Token 已迁移至「🔑 密钥管理」分类。"),
+             "🔑 SnowLuma Token 在「🔑 密钥管理」分类里——它和 SnowLuma 网页面板里的"
+             "「授权 Token」是同一串，两边必须一致。"
+             "配完不确定就回仪表盘点「连接自检」。"),
         ])
 
         # ── Memory ──
@@ -4541,7 +4607,16 @@ class TangTangQtConsole(QMainWindow):
             ("QWEN_KEY", "识图 API Key",
              "识图选「云端千问 VL」时才需要，从阿里云 DashScope 获取；"
              "选「本地 MiniCPM-V」不需要填"),
-            ("SNOWLUMA_TOKEN", "SnowLuma Token", "SnowLuma QQ 的访问令牌，在 SnowLuma WebUI 查看"),
+            # ⚠ 2026-09-20 主人实机反馈：「SnowLuma 的 Token 是什么，我一直找不到，
+            #   在 SnowLuma 的网页也没有看到对应字段」——他说对了。SnowLuma 那边
+            #   这一栏叫「授权 Token」，而且**新装的 SnowLuma 里这个字段还不存在**：
+            #   要先在网页面板里选中一个账号、进「HTTP API」或「WS 客户端」页签，
+            #   才会看到它。原提示「在 SnowLuma WebUI 查看」等于让人去找一个还没有的东西。
+            ("SNOWLUMA_TOKEN", "SnowLuma Token",
+             "它和 SnowLuma 网页面板里的「授权 Token」是同一个东西，两边必须完全一样"
+             "（或者都留空）。位置：http://127.0.0.1:5099 → 节点配置 → 选中账号 → "
+             "「HTTP API」和「WS 客户端」两个页签里各有一栏「授权 Token」。"
+             "不确定填什么就点下面的「生成」再「复制」，粘过去覆盖掉它原来那串。"),
         ]
         for item in secrets:
             if len(item) == 4:
@@ -4573,6 +4648,35 @@ class TangTangQtConsole(QMainWindow):
             layout.addLayout(row)
             self._secrets_fields[key] = field
             self._secrets_labels[key] = lbl
+
+        # ── SnowLuma Token 专用操作行（2026-09-20）──────────────────────────
+        # 这一行存在的唯一理由：把用户从「去 SnowLuma 里找那一串」改成「我这里给你一串」。
+        # 前者对新装用户是无解的（那个字段还不存在，要先建节点才有），后者是复制粘贴。
+        if "SNOWLUMA_TOKEN" in self._secrets_fields:
+            _trow = QHBoxLayout()
+            _trow.addSpacing(150)
+            _gen = QPushButton("生成")
+            _gen.setToolTip("生成一串新的随机 Token（64 位十六进制，与 SnowLuma 的"
+                            "「生成新的随机令牌」同规格）")
+            _gen.clicked.connect(self._generate_snowluma_token)
+            _trow.addWidget(_gen)
+            _copy = QPushButton("复制")
+            _copy.setToolTip("复制到剪贴板，然后粘进 SnowLuma 网页面板的「授权 Token」")
+            _copy.clicked.connect(self._copy_snowluma_token)
+            _trow.addWidget(_copy)
+            _trow.addStretch()
+            layout.addLayout(_trow)
+
+            _tip = QLabel(
+                "这一串要和 SnowLuma 网页面板（<code>http://127.0.0.1:5099</code> → "
+                "节点配置 → 选中账号）里那一栏「<b>授权 Token</b>」<b>完全相同</b>，"
+                "或者两边都留空。<br>"
+                "「HTTP API」和「WS 客户端」两个页签里各有一栏，都要改；"
+                "改完点右上角<b>保存</b>。<br>"
+                "拿不准就：点「生成」→ 点「复制」→ 到面板里<b>覆盖</b>掉它原来那串。")
+            _tip.setWordWrap(True)
+            _tip.setTextFormat(Qt.TextFormat.RichText)
+            layout.addWidget(_tip)
 
         layout.addStretch()
         self._settings_sections["secrets"] = container
@@ -4617,6 +4721,34 @@ class TangTangQtConsole(QMainWindow):
         env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         # 重载环境变量让 config 解析器生效
         load_dotenv(override=True)
+
+    def _generate_snowluma_token(self):
+        """生成 64 位十六进制 Token——与 SnowLuma「生成新的随机令牌」同规格。
+
+        用 `secrets` 而不是 `random`：这是要发给第三方程序的共享密钥。
+        """
+        import secrets as _secrets
+        field = self._secrets_fields.get("SNOWLUMA_TOKEN")
+        if field is None:
+            return
+        field.setText(_secrets.token_hex(32))
+        field.setEchoMode(QLineEdit.Normal)   # 刚生成的要看得见，方便核对
+        self._log("已生成新的 SnowLuma Token。接下来：点「💾 保存设置」，"
+                  "再点「复制」，粘到 SnowLuma 网页面板的「HTTP API」与「WS 客户端」"
+                  "两处「授权 Token」里（改完点面板右上角保存）。")
+
+    def _copy_snowluma_token(self):
+        """复制当前 Token 到剪贴板——新手的下一步就是把它粘到 SnowLuma 面板里。"""
+        field = self._secrets_fields.get("SNOWLUMA_TOKEN")
+        text = field.text().strip() if field is not None else ""
+        if not text:
+            QMessageBox.information(
+                self, "还没有 Token",
+                "先点「生成」，或者自己填一串（至少 16 位）。\n\n"
+                "它要和 SnowLuma 网页面板里的「授权 Token」完全一样。")
+            return
+        QApplication.clipboard().setText(text)
+        self._log("SnowLuma Token 已复制到剪贴板 → 粘到网页面板里那栏「授权 Token」")
 
     # LLM 提供商预设
     _PROVIDER_PRESETS = {
@@ -5589,14 +5721,119 @@ class TangTangQtConsole(QMainWindow):
     # SnowLuma 管理
     # ═══════════════════════════════════════════════════════
     def _check_snowluma_status(self) -> bool:
-        """检查 SnowLuma 是否在运行 — 检测 OneBot HTTP API 端口"""
+        """**OneBot HTTP API 是否可用**（探 3000）。
+
+        ⚠ 2026-09-20 之前，这个函数的返回值被当成「SnowLuma 在不在跑」，是错的：
+        3000 只有在 SnowLuma **注入成功、QQ 已登录、且配了 HTTP API 节点**之后才监听。
+        SnowLuma 开着但从没登录 QQ 时，这里返回 False → 界面显示「离线」→
+        用户再点一次「启动 SnowLuma」→ `_start_snowluma` 同样测不到 3000 →
+        **又开一份 SnowLuma**。
+
+        判「在不在跑」请用 `_snowluma_alive()`；这个函数只回答「能不能收糖糖的 API 调用」。
+        """
+        return self._port_open(3000)
+
+    def _snowluma_alive(self) -> bool:
+        """SnowLuma 这个程序在不在跑——**只认网页面板端口**。
+
+        面板端口从它自己的 `config/runtime.json` 读（`webuiPort`，默认 5099），
+        是「进程已经起来并在服务」最可靠的信号：不依赖 QQ 有没有登录，
+        也不依赖 OneBot 节点配没配。
+
+        ⚠ 2026-09-20 审查：**不能拿 3000 当兜底判据**。3000 是 OneBot HTTP API，
+        任何程序都能占（Grafana、各种 dev server 默认就是 3000）。一旦占上，
+        这里会返回 True → 点「启动 SnowLuma」得到「已在运行中」而不开窗口，
+        按钮还显示「✅ 在线」——用户没有任何解释可循。这是个新引入的失败模式。
+        （`_check_snowluma_status` 仍然探 3000，但它回答的是另一个问题：
+         「能不能收糖糖的 API 调用」，与"程序在不在跑"分开。）
+        """
+        return self._port_open(SNOWLUMA_WEBUI_PORT)
+
+    def _wait_snowluma_gone(self, deadline_ms: int = 8000) -> bool:
+        """等 SnowLuma 真的不再监听（最多 deadline_ms）。返回是否等到了。
+
+        用嵌套事件循环而不是 `time.sleep`——sleep 会把界面冻死。
+        为什么需要它：`taskkill` 返回成功不等于端口已经释放，早先靠"睡 3 秒"赌，
+        赌输了就会在 `_start_snowluma` 里得到「已在运行中」——而上一行日志刚说
+        "正在重启"，两句自相矛盾。
+        """
+        waited = 0
+        step = 250
+        while waited < deadline_ms and self._snowluma_alive():
+            _loop = QEventLoop()
+            QTimer.singleShot(step, _loop.quit)
+            _loop.exec()
+            waited += step
+        if self._snowluma_alive():
+            self._log("⚠ SnowLuma 好像没被杀干净（面板端口还在监听）。"
+                      "请手动关掉它那个窗口，再点「启动 SnowLuma」。")
+            return False
+        return True
+
+    @staticmethod
+    def _port_open(port: int, timeout: float = 0.2) -> bool:
         import socket
         try:
-            s = socket.create_connection(('127.0.0.1', 3000), timeout=0.2)
+            s = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
             s.close()
             return True
         except (OSError, ConnectionRefusedError):
             return False
+
+    def _open_snowluma_panel(self):
+        """在浏览器里打开 SnowLuma 网页面板。
+
+        首次打开会被要求用「初始密码」登录——那串密码只在 SnowLuma 的启动窗口里
+        打印过一次（不进日志文件）。所以这里顺手把找回办法说清楚。
+        """
+        if not self._snowluma_alive():
+            QMessageBox.information(
+                self, "SnowLuma 还没启动",
+                "网页面板要等 SnowLuma 跑起来才能打开。\n\n"
+                "点「启动 SnowLuma」——注意<b>要先开 QQ 客户端并登录机器人账号</b>，"
+                "SnowLuma 是注入到 QQ 进程里的。")
+            return
+        QDesktopServices.openUrl(QUrl(SNOWLUMA_WEBUI_URL))
+        self._log(f"已打开 SnowLuma 网页面板：{SNOWLUMA_WEBUI_URL}"
+                  "（用户名 admin；初始密码在 SnowLuma 启动窗口里打印过。忘记就："
+                  "关掉 SnowLuma → 删掉它的 config/webui.json → 再启动一次，会重新打印）")
+
+    def _run_connection_check(self):
+        """跑 `tools/检查连接.py`，把每一行结论写进控制台日志。
+
+        这个按钮存在的意义：把「连不上」这种笼统的失败，翻译成
+        「第 N 步还没做、下一步填什么」。只读，不改任何配置。
+        """
+        # ⚠ 先跳到「日志」页（2026-09-20 审查）。按钮长在**仪表盘**上，而结论全都
+        #   写进日志页——不跳的话用户点完看到的是一个没有任何反应按钮，
+        #   而所有新文案又都在说"点『连接自检』看缺哪一步"。
+        #   与 _run_diagnostic 同一约定。
+        self._navigate("log")
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location(
+                "conn_check", BASE / "tools" / "检查连接.py")
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            results = mod.check_all(BASE)
+        except FileNotFoundError:
+            self._log("⚠ 没找到 tools/检查连接.py（这一版发布包可能不完整）")
+            return
+        except Exception as e:
+            self._log(f"⚠ 连接自检跑不起来：{type(e).__name__}: {e}")
+            return
+
+        self._log("──────── 🔍 连接自检 ────────")
+        for r in results:
+            # 四个状态都要有对应标记，漏一个就会静默显示成 "[?]"。
+            # skip = 上游没就绪、本项没得查——用 "[ ]" 表示「还没走到」，
+            # 与检查连接.py 自己的 GLYPH 表保持一致。
+            mark = {"ok": "[√]", "warn": "[!]", "fail": "[×]", "skip": "[ ]"}.get(
+                getattr(r.status, "value", r.status), "[?]")
+            self._log(f"{mark} {r.detail}")
+            if r.next_step:
+                self._log(f"    → {r.next_step}")
+        self._log("────────────────────────────")
 
     def _sync_snowluma_status(self):
         # 🔄 检查自动重启信号（main.py 检测到 QQ 离线后写入）
@@ -5608,11 +5845,34 @@ class TangTangQtConsole(QMainWindow):
             except Exception:
                 pass
             # 杀掉旧 SnowLuma → 等 3 秒 → 重新启动
-            import subprocess
+            #
+            # ⚠ 2026-09-20 两处修：
+            #   ① 原先是 `taskkill /f /im SnowLuma.exe`——而 SnowLuma 发布包里
+            #      **根本没有 SnowLuma.exe**：它是 `node.exe` 跑 `index.mjs`
+            #      （launcher.bat 的内容）。所以这行杀的一直是空气。
+            #   ② 紧接着无论 `_start_snowluma` 有没有真的干活，都照打
+            #      「✅ SnowLuma 已自动重启」——日志会骗人。
+            pid = None
+            if self._snowluma_proc is not None:
+                try:
+                    if self._snowluma_proc.poll() is None:
+                        pid = self._snowluma_proc.pid
+                except Exception:
+                    pid = None
+            if pid is None:
+                self._log("⚠ 这次的 SnowLuma 不是本控制台启动的，没法替你重启它。"
+                          "请手动关掉它的那个窗口，再点「启动 SnowLuma」。")
+                return
             # 用 QProcess 避免阻塞 UI：taskkill 在后台完成
+            #
+            # ⚠ `/t` 不能省（2026-09-20 审查实测）。`self._snowluma_proc.pid` 是
+            #   `Popen([launcher.bat])` 返回的 **cmd.exe** 的 PID，而真正跑 SnowLuma 的
+            #   `node ./index.mjs` 是它的**子进程**。只杀 cmd.exe 的话 node.exe 继续活着、
+            #   继续占着端口 —— 于是 3 秒后 `_start_snowluma()` 只会说「已在运行中」，
+            #   而这边的日志却说"自动重启没成功"，两句话自相矛盾，恢复路径根本不通。
             proc = QProcess()
             proc.setProgram("taskkill")
-            proc.setArguments(["/f", "/im", "SnowLuma.exe"])
+            proc.setArguments(["/f", "/t", "/pid", str(pid)])
             proc.setProcessChannelMode(QProcess.SeparateChannels)
             proc.start()
             # 等待最多 10 秒（事件循环保持活跃）
@@ -5620,28 +5880,44 @@ class TangTangQtConsole(QMainWindow):
             proc.finished.connect(_loop.quit)
             QTimer.singleShot(10000, _loop.quit)
             _loop.exec()
-            # 等进程完全退出后用定时器异步启动——不阻塞 UI 线程
-            QTimer.singleShot(3000, lambda: (
-                self._start_snowluma(),
-                self._log("✅ SnowLuma 已自动重启")
-            ))
+            # 等进程树真的退出后再启动：轮询端口，不再靠"睡 3 秒"赌它死了
+            self._wait_snowluma_gone(deadline_ms=8000)
+
+            def _relaunch():
+                if self._start_snowluma():
+                    self._log("✅ SnowLuma 已自动重启")
+                else:
+                    self._log("⚠ 自动重启没成功，请看上面的原因")
+            QTimer.singleShot(1000, _relaunch)
             return
 
-        alive = self._check_snowluma_status()
-        if alive:
+        # 两个信号分开看（2026-09-20）：
+        #   running = 程序在跑（面板端口）        → 决定按钮长什么样、要不要再开一份
+        #   ready   = OneBot HTTP API 通了(3000)  → 决定能不能启动糖糖
+        # 以前只看 3000，于是「开着但没登录 QQ」会被显示成「离线」，诱导用户重复启动。
+        running = self._snowluma_alive()
+        ready = self._check_snowluma_status()
+        if running:
             self._btn_snowluma.setText("✅ SnowLuma 在线")
             self._btn_snowluma.setStyleSheet(
                 f"QPushButton {{ background-color: {GREEN}; color: white; padding: 10px 20px; "
                 f"font-size: 13px; font-weight: bold; border: none; border-radius: 6px; }}"
             )
-            self._lbl_snowluma_hint.setText("已检测到 SnowLuma · 可启动糖糖")
-            self._card_status._val_label.setText("已连接")
-            self._set_status_color(self._card_status._val_label, self._pal['green'])
+            if ready:
+                self._lbl_snowluma_hint.setText("已检测到 SnowLuma · 可启动糖糖")
+                self._card_status._val_label.setText("已连接")
+                self._set_status_color(self._card_status._val_label, self._pal['green'])
+            else:
+                # 程序在跑，但 OneBot 那侧还没起来——最可能是 QQ 没登录 / 没注入 /
+                # 没配 HTTP API 节点。旧代码这时显示「离线」，直接诱导用户去双开。
+                self._lbl_snowluma_hint.setText("在跑，但还没接入 QQ → 点「连接自检」")
+                self._card_status._val_label.setText("未接入")
+                self._set_status_color(self._card_status._val_label, self._pal['orange'])
         else:
             self._btn_snowluma.setText("启动 SnowLuma")
             self._btn_snowluma.setObjectName("actionBtn")
             self._btn_snowluma.setStyleSheet("")
-            self._lbl_snowluma_hint.setText("启动后自动登录")
+            self._lbl_snowluma_hint.setText("先开 QQ 并登录机器人账号")
             self._card_status._val_label.setText("离线")
             self._set_status_color(self._card_status._val_label, self._pal['text_muted'])
 
@@ -5664,7 +5940,10 @@ class TangTangQtConsole(QMainWindow):
             "　2. 解压到下面这个目录里<br>"
             f"　　　<code>{SNOWLUMA_DIR.parent}</code><br>"
             "　　　（解压后应得到 <code>SnowLuma-vX.Y.Z-win-x64/</code> 文件夹）<br>"
-            "　3. 回到这里再点一次「启动 SnowLuma」"
+            "　3. 回到这里再点一次「启动 SnowLuma」<br><br>"
+            "<b>另外需要先装好 QQ 客户端</b>（QQ NT 9.x）并登录<b>机器人那个 QQ 号</b>。"
+            "SnowLuma 不是自己登录 QQ 的——它是把 DLL 注入到<b>正在运行的 QQ 进程</b>里工作，"
+            "所以 QQ 必须开着。"
         )
         open_btn = box.addButton("打开发布页", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("知道了", QMessageBox.ButtonRole.RejectRole)
@@ -5674,24 +5953,76 @@ class TangTangQtConsole(QMainWindow):
             self._log("已在浏览器打开 SnowLuma 发布页——下载 Windows x64 版解压到 "
                       f"{SNOWLUMA_DIR.parent}")
 
-    def _start_snowluma(self):
-        if self._check_snowluma_status():
+    @staticmethod
+    def _snowluma_needs_new_password() -> bool:
+        """SnowLuma 下一次启动会不会**重新生成并打印**网页面板密码。
+
+        判据是实测出来的（2026-09-20 在 SnowLuma 的副本上跑了四次对照）：
+        打不打印只取决于 `config/webui.json` 里的 `mustChangePassword`——
+          · 文件不存在 / 损坏 / `mustChangePassword == true` → 打印（且**每次启动都重新生成**）
+          · `mustChangePassword == false`（用户真的改过密码）→ 一个字都不打印
+        注意：文件不存在时它连 `webui.json` 都不会先建，是"启动即打印"。
+        """
+        try:
+            import json as _json
+            f = SNOWLUMA_DIR / "config" / "webui.json"
+            if not f.exists():
+                return True
+            return bool(_json.loads(f.read_text(encoding="utf-8"))
+                        .get("mustChangePassword", True))
+        except (OSError, ValueError, TypeError):
+            return True
+
+    def _start_snowluma(self) -> bool:
+        """启动 SnowLuma，返回「这次是否真的拉起了进程」。
+
+        返回值是给自动重启用的——它以前无条件打「✅ 已自动重启」，包括什么都没做的那次。
+
+        首次启动必须先提醒密码：SnowLuma 首次运行会随机生成网页面板密码，
+        **只在它自己的启动窗口里打印一次，而且不进日志文件**——那行是
+        `process.stdout.write(...)` 绕过了 logger（横幅走 log.info，所以横幅在日志里、
+        密码不在）。窗口一关，那串密码就永远找不回来，只能删 `webui.json` 重启再拿一个。
+        """
+        if self._snowluma_alive():
             self._log("ℹ SnowLuma 已在运行中")
-            return
+            return False
         if not SNOWLUMA_EXE.exists():
             self._ask_download_snowluma()
-            return
+            return False
+
+        if self._snowluma_needs_new_password():
+            self._log("[!] 首次启动（或上次没改过密码）：新窗口里会打印一行 "
+                      "「initial credentials: user=admin password=...」，"
+                      "那就是网页面板的登录密码，**只显示这一次**，记下来再关那个窗口。")
+
         try:
             import subprocess
+            # ⚠ 2026-09-20 修（主人在笔记本实机发现）：这里原来是
+            #   `CREATE_NEW_CONSOLE` + `stdout/stderr=DEVNULL`——**窗口开了，但输出全进 NUL 设备**，
+            #   于是 SnowLuma 首次启动打印的那行初始密码谁也没看见，用户只能自己去目录里
+            #   双击 launcher.bat 才拿得到。
+            #   四种启动方式的实测对照（子进程自读自己控制台的屏幕缓冲区）：
+            #     · 留着 DEVNULL          → 自己窗口搜不到标记（写进 NUL，3000 行只花 2ms）
+            #     · 去掉 DEVNULL（本行）  → 自己窗口搜得到（0.74s）✅ 采纳
+            #     · cmd /c start … cmd /k → 也行，但 bat 跑完会多留一个常驻空 cmd 窗口
+            #     · os.startfile          → **不能设 cwd**，而 launcher.bat 没有 `cd /d`，
+            #                               它靠 cwd 找 `./index.mjs`，会直接报找不到文件
+            #   顺带排除一个直觉上的猜测：父进程自己有控制台**不会**让输出跑到父窗口去——
+            #   Windows 控制台初始化会把"指向另一扇控制台"的标准句柄换成本控制台的，
+            #   只有非控制台句柄（NUL/文件/管道）才会被原样保留。
+            #   也**不要**改成 stdout=PIPE 想顺便抓日志：实测子进程会写满 64KB 管道缓冲后卡死。
             self._snowluma_proc = subprocess.Popen(
                 [str(SNOWLUMA_EXE)],
                 cwd=str(SNOWLUMA_EXE.parent),
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            self._log("SnowLuma 已启动 → 屏幕应该弹出了 QQ 登录窗口")
+            self._log(f"SnowLuma 已启动。接下来：用 QQ 客户端登录机器人账号 → "
+                      f"浏览器打开 {SNOWLUMA_WEBUI_URL}（用户名 admin）→ "
+                      f"在「节点配置」里配好连接 → 点「连接自检」确认全绿。")
+            return True
         except Exception as e:
             self._log(f"❌ SnowLuma 启动失败: {e}")
+            return False
 
     # ═══════════════════════════════════════════════════════
     # 糖糖进程管理 (QProcess)
@@ -5714,6 +6045,41 @@ class TangTangQtConsole(QMainWindow):
         self._sugar_process.start(python_exe, [str(BASE / "main.py")])
         self._log("🍬 小糖糖正在启动...")
         self._update_sugar_ui("start")
+
+        # 「起来了但没人连过来」必须有话说（2026-09-20）。
+        # 以前 UI 只在日志出现「SnowLuma 已连接」时才离开「⏳ 启动中…」，
+        # 没连上就永远停在那儿、一个字不解释——用户的原话是「我也启动不了糖糖」。
+        self._sugar_connected = False
+        if not self._snowluma_alive():
+            self._log("ℹ SnowLuma 现在没在跑。糖糖会先开着服务端等它连过来；"
+                      "若一直停在「启动中」，点「连接自检」看缺哪一步。")
+        # 代次：`singleShot` 挂了就没法取消，所以让回调自己认领「我是第几次启动的」。
+        # 2026-09-20 独立复核实测：没有这个的话，「启动 → 停止 → 再启动」时，
+        # run#1 的定时器会在 run#2 **只跑了 10 秒**（而不是 20 秒）就用 run#2 的状态
+        # 判定并误报「糖糖起来了但 SnowLuma 没连过来」。
+        self._sugar_run_id = getattr(self, "_sugar_run_id", 0) + 1
+        _run_id = self._sugar_run_id
+        QTimer.singleShot(20000, lambda: self._check_sugar_connection_stuck(_run_id))
+
+    def _check_sugar_connection_stuck(self, run_id: int = -1):
+        """起来 20 秒还没等到协议端连过来——把原因讲出来，别让它一直转圈。
+
+        判据是日志里那条 `✅ SnowLuma 已连接！来自 ...`（`onebot/ws_client.py`），
+        与 `_read_sugar_output` 切「运行中」用的是**同一个信号**，不引入第二个判定点。
+        """
+        # 陈旧的定时器不许用**新进程**的状态做判定（见 _start_sugar 里的代次说明）
+        if run_id != getattr(self, "_sugar_run_id", None):
+            return
+        if getattr(self, "_sugar_connected", True):
+            return
+        if not (self._sugar_process and self._sugar_process.state() == QProcess.Running):
+            return   # 进程已经不在了，交给 finished 回调去报错
+        self._log("[!] 糖糖已经起来了，但 SnowLuma 一直没连过来。最常见的原因："
+                  "SnowLuma 里没建「WS 客户端」，或者它的「目标 URL」还是默认的 "
+                  "ws://127.0.0.1:8080/ws（要改成 ws://127.0.0.1:3001）。"
+                  "点「连接自检」会告诉你具体缺哪一步。")
+        self._card_online._val_label.setText("等待协议端")
+        self._set_status_color(self._card_online._val_label, self._pal['orange'])
 
     def _stop_sugar(self):
         self._manual_stop = True
@@ -5916,6 +6282,7 @@ class TangTangQtConsole(QMainWindow):
             if line.strip():
                 self._log(line.strip())
                 if "SnowLuma 已连接" in line:
+                    self._sugar_connected = True   # 见 _check_sugar_connection_stuck
                     self._update_sugar_ui("running")
                 if "QQ 账号已掉线" in line:
                     self._update_sugar_ui("qq_offline")

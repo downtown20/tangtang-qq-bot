@@ -81,6 +81,38 @@ def test_text_suffix_list_covers_known_text_types():
         assert s in text_types, f"{s} 不在文本扫描范围——纯文本被当二进制跳过了"
 
 
+@pytest.mark.parametrize("planted", [
+    "SNOWLUMA_TOKEN=SYNTHETICsampleTOKEN42",
+    "NAPCAT_TOKEN=SYNTHETICsampleTOKEN42",
+    "VOLC_TOKEN=abcdef1234567890",
+    # 带引号的写法同样要命中（2026-09-20 审查补：原模式只认不带引号的，
+    # 而 `.env` 里写成 `X_TOKEN="…"` 是完全合法的——「判据绑死形状」的又一例）
+    'SNOWLUMA_TOKEN="SYNTHETICsampleTOKEN42"',
+    "SNOWLUMA_TOKEN='SYNTHETICsampleTOKEN42'",
+])
+def test_sanitizer_catches_planted_token_assignment(tmp_path: Path, planted: str):
+    """明文的 `XXX_TOKEN=真值` 必须拦得住。
+
+    这是反模式 #30 的又一例：原规则写死成 `"NAPCAT_TOKEN" + "=8"`，只认**那一个
+    具体赋值**。2026-09-20 把 `.env.example` 的键名改成 `SNOWLUMA_TOKEN` 之后，
+    它就从「能挡住一个已知泄漏」变成「永远不可能命中」——而且不会报错。
+    """
+    (tmp_path / ".env.example").write_bytes(f"# 注释\n{planted}\n".encode("utf-8"))
+    assert _prep.scan_sensitive(tmp_path), (
+        f"明文 token 赋值漏掉了：{planted!r}——_TOK_ASSIGN 又绑死到某个字面量上了吗？")
+
+
+def test_sanitizer_ignores_empty_and_placeholder_tokens(tmp_path: Path):
+    """阴性对照：占位符不能被当成泄漏，否则这条检查会变成噪音然后被忽略。
+
+    发布包里的 `.env.example` 就该长这样——空的，或者中文提示语。
+    """
+    (tmp_path / ".env.example").write_bytes(
+        "SNOWLUMA_TOKEN=\nNAPCAT_TOKEN=请填写你的access_token\n".encode("utf-8"))
+    hits = _prep.scan_sensitive(tmp_path)
+    assert not hits, f"占位符被误报成泄漏：{hits}"
+
+
 def test_sanitizer_catches_planted_secret(tmp_path: Path):
     """密钥与 QQ 号同样要拦得住（顺带确认那条路径没被一起改坏）。"""
     (tmp_path / "cfg.yaml").write_bytes(
@@ -274,7 +306,7 @@ def test_release_snapshot_is_clean():
     snap = BASE.parent / "小糖糖-发布"
     if not snap.is_dir():
         pytest.skip("快照不存在——先跑 python tools/准备发布.py")
-    hits = _prep.scan_sensitive(snap)
+    hits = _prep.scan_sensitive(snap) + _prep.scan_env_values(snap)
     assert not hits, (
         f"快照里有 {len(hits)} 处敏感命中，不能发布：\n  " + "\n  ".join(hits[:10]))
 
@@ -356,3 +388,125 @@ def test_shipped_index_matches_snapshot_sources_exactly():
     assert not junk, (
         f"索引里混进了非发布模型的向量：{junk}\n"
         f"  —— 多半是拷了开发机那份（它带着 benchmark 跑的 bench-v1 向量，纯属垃圾）")
+
+
+# ═══════════════════════════════════════════════════════
+# 2. 豁免文件不许装「真值」
+# ═══════════════════════════════════════════════════════
+
+def test_exempt_files_never_contain_real_secrets():
+    """被整体豁免的文件是为了装**格式样本**，不是为了装**真值**。
+
+    2026-09-20 我自己踩的：往 `tests/test_release_sanitizer.py`（全仓唯一被
+    `SCAN_EXEMPT_FILES` 整体跳过、又随 `tests/` 一起发布）里塞了维护者**真实的**
+    SnowLuma token 当"样本"——扫描器照旧打印「零命中」，而它下次推公开仓就会出去。
+    这条闸门拿 `.env` 里的真值去比对所有豁免文件。
+    """
+    env = BASE / ".env"
+    if not env.exists():
+        pytest.skip(".env 不存在（clone 出来的仓库里没有它）")
+
+    secrets = []
+    for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        val = val.strip().strip('"').strip("'")
+        # 太短的值会跟普通文本撞（`1`、`true` 之类），不拿它做判据
+        if len(val) >= 8:
+            secrets.append((key.strip(), val))
+    assert secrets, "`.env` 里一个够长的值都没有——读取逻辑是不是坏了？"
+
+    for rel in sorted(_prep.SCAN_EXEMPT_FILES):
+        p = BASE / rel
+        if not p.is_file():
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        leaked = [k for k, v in secrets if v in text]
+        assert not leaked, (
+            f"{rel} 被整体豁免于脱敏扫描，却含有 .env 里的**真实值**：{leaked}\n"
+            f"  豁免是为了装格式样本，不是装真值——请换成合成值（形状像、值与真值不同）。")
+
+
+def test_env_value_scan_catches_a_real_value_by_shape_free_matching(tmp_path: Path):
+    """按**真值**扫：不管密钥长什么样，只要真值出现在发布物里就报。
+
+    这是 `scan_sensitive` 结构上抓不到的一类——它按**形状**认（路径/QQ/密钥样式），
+    而"我的 token 原样出现在文件里"只有拿真值去比才能判定。
+    2026-09-20 一天里撞了两次，两次 `scan_sensitive` 都报"零命中"：
+      · 往被整体豁免的 `tests/test_release_sanitizer.py` 塞了真 token 当样本；
+      · `tests/test_connect_check.py` 拿真 token 当 `mask_token()` 的输入。
+    """
+    env = tmp_path / ".env"
+    env.write_text("SOME_KEY=Zq7-not-any-recognizable-shape-31\n", encoding="utf-8")
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    (snap / "doc.md").write_text("这一行里躺着 Zq7-not-any-recognizable-shape-31\n",
+                                encoding="utf-8")
+    hits = _prep.scan_env_values(snap, env)
+    assert hits, "真值原样出现在快照里却没报出来"
+    assert "SOME_KEY" in hits[0], f"没说清是哪个 key 的值：{hits}"
+
+
+def test_env_value_scan_is_quiet_on_clean_content(tmp_path: Path):
+    """阴性对照：干净内容不能误报，短值也不参与比对（否则会变成噪音）。"""
+    env = tmp_path / ".env"
+    env.write_text("LONG_KEY=Zq7-not-any-recognizable-shape-31\nSHORT=1\n",
+                   encoding="utf-8")
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    (snap / "doc.md").write_text("这里只有 1 和一个无关的长串 abcdefghijklmnop\n",
+                                 encoding="utf-8")
+    assert not _prep.scan_env_values(snap, env), "干净内容被误报成泄漏"
+
+
+def test_env_value_scan_never_leaks_the_value_into_its_own_report(tmp_path: Path):
+    """命中报告里只许说**哪个 key**，不许回抄真值。
+
+    否则同一个真值会被写进测试输出、CI 日志、聊天记录——比原泄漏还扩散。
+    """
+    env = tmp_path / ".env"
+    env.write_text("AKEY=Zq7-not-any-recognizable-shape-31\n", encoding="utf-8")
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    (snap / "doc.md").write_text("Zq7-not-any-recognizable-shape-31\n", encoding="utf-8")
+    hits = _prep.scan_env_values(snap, env)
+    assert hits
+    for h in hits:
+        assert "Zq7-not-any-recognizable-shape-31" not in h, (
+            f"报告里回抄了真值本身：{h}")
+
+
+def test_scanner_regexes_compile_cleanly_no_inline_flags():
+    """扫描器的正则里不许出现**内联标志**（`(?m)` / `(?i)` 之类）。
+
+    2026-09-20 独立复核抓到的：`_TOK_ASSIGN` 里写了 `(?m)`，而它被拼进 `KEY_RE` 的
+    中间——内联标志不在表达式开头时，**Python ≥3.12 直接抛**
+    `PatternError: global flags not at the start of the expression`，
+    `准备发布.py` **导入即崩**；而 3.10 只发一条 DeprecationWarning，本机完全测不出来。
+
+    这条闸门是**版本无关**的：把 DeprecationWarning 提升为错误再编译一遍——
+    3.10 上它变成硬错误，3.12+ 上本来就是硬错误。
+    （另外，扫描器是逐行 `search(line)` 的，每行的整串就是主题串，`^`/`$`
+    天然按行生效，**根本不需要** `(?m)`。）
+    """
+    import re
+    import warnings
+
+    for name in ("KEY_RE", "WINPATH_RE", "QQ_RE"):
+        rx = getattr(_prep, name)
+        # ⚠ `re` 有内部编译缓存：同一个模式串再 compile 一次只会**返回缓存对象**，
+        #   连解析都不做——警告自然不会出现。第一版闸门就是这么形同虚设的
+        #   （阳性对照把 (?m) 种回去，它照样绿）。purge 掉才真的重新编译。
+        re.purge()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            try:
+                re.compile(rx.pattern)
+            except (DeprecationWarning, re.error) as e:
+                raise AssertionError(
+                    f"{name} 的正则不能干净地编译：{e}\n"
+                    f"  多半是片段里带了内联标志（如 `(?m)`）而它不在表达式开头——"
+                    f"Python ≥3.12 会直接让 准备发布.py 导入失败。\n"
+                    f"  当前模式：{rx.pattern[:160]!r}")

@@ -487,3 +487,59 @@ def test_mermaid_blocks_are_wellformed():
     # 围栏必须成对
     assert text.count("```mermaid") == text.count("```") - \
         len(re.findall(r"```(?!mermaid)", text)), "代码围栏不配对"
+
+
+# ═══════════════════════════════════════════════════════
+# 安装器菜单：文档抄的那份必须和代码里那 8 行一模一样
+# ═══════════════════════════════════════════════════════
+
+_MENU_LINE_RE = re.compile(r'print\("  (\d+)\.\s*(.+?)"\)')
+
+
+def _installer_menu_lines() -> list[str]:
+    """从 `tools/安装糖糖.py` 里抓主菜单那几行（`print("  N. …")`）。
+
+    只取标题行**紧接着**的那一串编号行——早先按 `0. 退出` 做结束锚点，
+    结果把半个文件（版本号、注释里的数字）都扫进来了。
+    """
+    src = (BASE / "tools" / "安装糖糖.py").read_text(encoding="utf-8")
+    # 取**最后一次**出现——第一次是模块 docstring 里的同一句标题
+    lines = src.rsplit("小糖糖 安装/维护工具", 1)[1].splitlines()
+    out = []
+    for line in lines:
+        m = _MENU_LINE_RE.search(line)
+        if not m:
+            if out:
+                break      # 菜单块结束
+            continue
+        if m.group(1) == "0":
+            break          # `0. 退出` 是收尾，不是功能项
+        out.append(f"{m.group(1)}. {m.group(2)}")
+    return out
+
+
+def _manual_menu_lines() -> list[str]:
+    """从 `docs/用户手册/使用说明.md` 里抓同一段菜单的引用。"""
+    text = (BASE / "docs" / "用户手册" / "使用说明.md").read_text(encoding="utf-8")
+    assert "小糖糖 安装/维护工具" in text, (
+        "使用说明里那段「安装糖糖.bat 菜单」不见了——新手会不知道能选什么")
+    block = text.split("小糖糖 安装/维护工具", 1)[1].split("```", 1)[0]
+    return re.findall(r'\d+\.\s*[^\n]+', block)
+
+
+def test_manual_reproduces_installer_menu_verbatim():
+    """使用说明里抄的菜单，必须和安装器真正打印的一致。
+
+    这是反模式 #35 的机器化：文档最容易「静默过期」——2026-09-20 就发现
+    安装器已经加到第 8 项（翻唱组件），手册还停在 7 项，而且第 2/3 项的
+    说明文字也早就改了。这种错不会让任何测试变红，只会让照着做的人找不到菜单项。
+    """
+    code_lines = [re.sub(r"\s+", " ", x).strip() for x in _installer_menu_lines()]
+    doc_lines = [re.sub(r"\s+", " ", x).strip() for x in _manual_menu_lines()]
+    assert code_lines, "没从安装器里抓到菜单——菜单的打印格式改了吗？"
+    assert doc_lines, "没从使用说明里抓到菜单引用"
+    assert doc_lines == code_lines, (
+        "使用说明里的菜单和安装器实际打印的不一致：\n"
+        f"  安装器：{code_lines}\n"
+        f"  说明书：{doc_lines}\n"
+        f"  → 改一边就要改另一边")

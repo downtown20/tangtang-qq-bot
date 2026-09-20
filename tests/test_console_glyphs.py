@@ -47,6 +47,10 @@ CONSOLE_ENTRY = {
     "tools/安装糖糖.py": "安装器主程序（用户双击 安装糖糖.bat 跑的就是它）",
     "tools/同步记忆.py": "安装器菜单 2/3：记忆快照打包与解包",
     "tools/体检.py": "安装器菜单 7：换机功能对比",
+    "tools/检查连接.py": "链路自检——控制台「连接自检」按钮与 体检.py 都会调它，"
+                         "也能自己跑（python tools/检查连接.py）",
+    "tools/配置SnowLuma.py": "用户自己双击/命令行跑的 SnowLuma 配置脚本"
+                             "（EULA 原因：不由控制台代为调用）",
     "start.py": "bat 的实际入口，console / install 两条路径都经它",
 }
 

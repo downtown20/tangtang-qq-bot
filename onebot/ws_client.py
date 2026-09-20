@@ -665,6 +665,10 @@ class NapCatClient:
         """启动 WebSocket 服务器，等待 SnowLuma 连接"""
         self._running = True
         self._accept_events = True
+        # 「见过连上」与「已经提醒过没连上」——心跳循环靠它们区分
+        # 「掉线了」和「压根还没接上」。见 _heartbeat_loop 里的条件2。
+        self._ever_connected = False
+        self._never_connected_warned = False
         logger.info(f"🔗 启动反向WS服务 ws://{self.ws_host}:{self.ws_port}，等待 SnowLuma 连接...")
 
         async def handler(websocket):
@@ -678,6 +682,7 @@ class NapCatClient:
                 return
             self.client_ws = websocket
             self._ws_connected = True
+            self._ever_connected = True
             logger.info(f"✅ SnowLuma 已连接！来自 {remote}")
             if self.on_connected:
                 await self._safe_callback(self.on_connected)
@@ -1201,7 +1206,25 @@ class NapCatClient:
                 reason = f"meta_event 离线 {meta_offline:.0f}s"
 
             # 条件2：HTTP 心跳连续失败 10 次（5 分钟）
-            if self._heartbeat_fail_count >= 10:
+            #
+            # ⚠ 2026-09-20：**从没连上过时不许走重启链。**
+            #   新手的典型状态是「SnowLuma 面板里的 WS 客户端还没配」——那种情况下
+            #   糖糖的 HTTP 心跳当然一直失败，于是每 5 分钟刷一次
+            #   「🔄 尝试重启 SnowLuma」，把真病因（**压根还没接上**）讲成一桩"掉线事故"，
+            #   还让控制台去做一次重启——而控制台那边杀的是不存在的 SnowLuma.exe。
+            #   现在只提醒一次，然后把计数归零，等用户去把连接配好。
+            if self._heartbeat_fail_count >= 10 and not self._ever_connected:
+                if not self._never_connected_warned:
+                    self._never_connected_warned = True
+                    logger.warning(
+                        f"⚠️ 糖糖还没等到 SnowLuma 连过来（HTTP 心跳连续失败 "
+                        f"{self._heartbeat_fail_count} 次）。这不是掉线，是**还没接上**——"
+                        f"最可能是 SnowLuma 网页面板里没建「WS 客户端」，"
+                        f"或者它的目标 URL 还是默认的 ws://127.0.0.1:8080/ws"
+                        f"（要改成 ws://127.0.0.1:3001）。"
+                        f"在控制台点「连接自检」会告诉你缺哪一步。")
+                self._heartbeat_fail_count = 0
+            elif self._heartbeat_fail_count >= 10:
                 should_restart = True
                 reason = f"HTTP 心跳失败 {self._heartbeat_fail_count} 次"
 

@@ -121,7 +121,18 @@ def _assert_ws_port_available(host: str, port: int) -> None:
         probe.settimeout(0.2)
         if probe.connect_ex((host, int(port))) == 0:
             raise RuntimeError(
-                f"反向 WS 端口 {host}:{port} 已被占用；请先停止旧的小糖糖实例再重启"
+                # ⚠ 2026-09-20：原话只说「请先停止旧的小糖糖实例再重启」——归因**漏了一半**，
+                #   而漏掉的那一半恰好是每个新用户都会撞上的：
+                #   SnowLuma 的出厂配置（config-D1dwzoRS.js: makeDefaultOneBotConfig）
+                #   自带一个「WS 服务端」节点 ws-default，host 127.0.0.1、port 3001，
+                #   也就是糖糖要绑的那个端口。用户照提示去找"旧糖糖进程"永远找不到，
+                #   因为他根本没启动过第二次。
+                f"反向 WS 端口 {host}:{port} 已被占用。两种可能：\n"
+                f"  ① 已经有一个糖糖实例在跑 → 先停掉它。\n"
+                f"  ② SnowLuma 出厂配置里的「WS 服务端」节点（ws-default）默认就占着这个端口\n"
+                f"     → 打开 http://127.0.0.1:5099 → 节点配置 → 选中账号 →「WS 服务端」\n"
+                f"       → 删掉 ws-default（或把它改成别的端口）→ 保存。\n"
+                f"  分不清是哪种？点控制台的「🔍 连接自检」，它会告诉你是谁占着。"
             )
     finally:
         probe.close()

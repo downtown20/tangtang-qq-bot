@@ -180,7 +180,10 @@ def gate_security() -> None:
     insecure = [u for u in links if not u.startswith("https://")]
     check(G, "外链全部 HTTPS", not insecure, str(insecure))
     domains = sorted({urllib.parse.urlparse(u).netloc for u in links})
-    check(G, "外链域名收敛", set(domains) <= {"github.com", "img.shields.io"}, str(domains))
+    # www.python.org：2026-09-20 加的——README「先装这两样」里要指向 3.10 的下载页，
+    # 没有它用户得自己找版本，而装错版本（3.11+）依赖会出问题。是个必需且稳定的官方链接。
+    check(G, "外链域名收敛",
+          set(domains) <= {"github.com", "img.shields.io", "www.python.org"}, str(domains))
 
 
 # ═══════════════════════════════════════════════════════

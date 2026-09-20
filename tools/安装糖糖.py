@@ -237,6 +237,7 @@ def check_prerequisites() -> None:
         print("     需要你手动下载一次（一次性，约 100MB）：")
         print("       1. 打开 https://github.com/SnowLuma/SnowLuma/releases")
         print("       2. 下载 Windows x64 版（形如 SnowLuma-vX.Y.Z-win-x64.zip）")
+        print("          [!] 别下带 -lite 的那个包——它不带 Node.js，解压了也起不来")
         print(f"       3. 解压到：{BASE / 'SnowLuma'}")
         print("          （解压后应出现 SnowLuma-vX.Y.Z-win-x64/ 文件夹）")
         print("     也可以用任意其他 OneBot 11 反向 WebSocket 实现替代。")
@@ -790,7 +791,7 @@ def cmd_install(dry_run: bool) -> int:
     print("\n━━━ 完成 ━━━")
     print("  接下来：")
     print("    1. 双击 启动控制台.bat → 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key")
-    print("    2. 控制台里启动 SnowLuma → 扫码登录 → 启动糖糖")
+    print("    2. 控制台里启动 SnowLuma → 面板里注入并配好连接 → 启动糖糖")
     print("  （换机搬家：本工具菜单 2/3 打包/解包记忆快照）")
     return 0
 
@@ -891,7 +892,7 @@ def cmd_package() -> int:
     print("    1. 运行 安装糖糖.bat → 菜单 1 安装依赖")
     if snap:
         print("    2. 菜单 3 解包记忆（应用记忆快照）")
-    print("    3. 启动控制台 → SnowLuma 扫码 → 启动糖糖")
+    print("    3. 启动控制台 → 启动 SnowLuma → 面板里配好连接 → 启动糖糖")
     print("  [!] 部署包含 .env（API 密钥），请勿外传")
     return 0
 

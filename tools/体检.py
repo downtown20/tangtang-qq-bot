@@ -283,6 +283,36 @@ def check_gitnexus_index():
         print(f"  [√] GitNexus 索引新鲜（{_ts(idx)}）")
 
 
+def check_connection():
+    """链路自检：QQ ← SnowLuma ← 糖糖 这一条线到底接上没有。
+
+    复用的 `检查连接.py` 与控制台「连接自检」按钮**同一个实现**——
+    新装/换机后最常见的失败是「协议端配好了但糖糖收不到」，而这里能把
+    是雪糖哪一段断了一行一行列出来（含该填什么）。
+    """
+    _sec("[9] 链路自检（QQ ← SnowLuma ← 糖糖）")
+    try:
+        import importlib.util as _ilu
+        spec = _ilu.spec_from_file_location(
+            "conn_check", Path(__file__).resolve().parent / "检查连接.py")
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        print(f"  [!] 自检模块没加载起来（{type(e).__name__}: {e}）")
+        return
+    try:
+        results = mod.check_all(BASE)
+    except Exception as e:
+        print(f"  [!] 自检跑失败（{type(e).__name__}: {e}）")
+        return
+    for r in results:
+        mark = mod.GLYPH.get(r.status, "[?]")
+        print(f"  {mark} {r.title}")
+        # 汇总行只说结论——它的 next_step 与上面第一条 [×] 是同一句，重复打印反而看不清
+        if r.status is not mod.Status.OK and r.next_step and r.key != mod.KEY_SUMMARY:
+            print(f"        → {r.next_step}")
+
+
 def main():
     print(f"[·] 小糖糖换机体检 — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     check_paths()
@@ -293,6 +323,7 @@ def main():
     check_gpu()
     check_secrets()
     check_gitnexus_index()
+    check_connection()
     print(f"\n{'=' * 58}")
     print("[i] 在两台机器各跑一遍，逐行对比。[×] 即缺失功能，[!] 即需要留意。")
 

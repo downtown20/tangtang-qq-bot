@@ -53,7 +53,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.06.00"
+TAG = "v1.07.00"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -81,7 +81,7 @@ INSTALL_NOTE = """🍬 小糖糖 {tag} — 开箱即用的安装说明
 ━━━ 三步开始 ━━━
   1. 双击  安装糖糖.bat    —— 勾你需要功能，依赖与模型自动装好、配置自动接好线
   2. 双击  启动控制台.bat  —— 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key
-  3. 控制台里启动 SnowLuma 扫码登录，再启动糖糖
+  3. 控制台里启动 SnowLuma，在网页面板里配好连接，再启动糖糖
 
 ━━━ 关于功能勾选 ━━━
   默认已勾上「聊天+记忆」「唱歌」「图形控制台」——够用了。

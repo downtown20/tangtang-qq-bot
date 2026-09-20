@@ -148,6 +148,10 @@ TOOLS_KEEP_NAMES = {
     #   2026-09-19 主人问「不是没用 napcat 了吗」时查出来的，已移入 tools/_归档/。
     #   活的对等物是下面的 配置SnowLuma.py。
     "配置SnowLuma.py", "检查SnowLuma更新.py", "打包exe.py",
+    # 连接自检：控制台的「连接自检」按钮按路径调它（_run_connection_check）。
+    # 它把「连不上」翻译成「第几步还没做」。漏了它按钮就只会报一句"没找到"。
+    # 2026-09-20 加。闸门同上（test_referenced_tools_are_whitelisted）。
+    "检查连接.py",
     "标注贴图情绪.py", "模拟消息测试.py", "打包发布附件.py", "准备发布.py",
     "打包发布版本.py", "发布前检查.py", "渲染架构图.py",
     "separate_vocals.py", "separate_vocals.bat",   # 唱歌链（可选附加场景）
@@ -290,10 +294,37 @@ QQ_KNOWN_CONSTANTS = {"2147483647", "2147483648",      # int32 边界（store.py
                       }
 # 注意：token 模式拆串拼接——避免扫描器源码行被自己的 KEY_RE 命中（2026-09-05）
 _TOK_VOLC = "VOLC" + "_TOKEN"
-_TOK8 = "NAPCAT_TOKEN" + "=8"
+#
+# ⚠ 2026-09-20：原先是写死的 `"NAPCAT_TOKEN" + "=8"`——它只认那**一个具体赋值**，
+#   而 `.env.example` 的键名当天改成了 `SNOWLUMA_TOKEN`。若不动它，这条检查就又变成
+#   「跑了但永远不会命中」（反模式 #30）。改成按**形状**认：`XXX_TOKEN=一串像 token 的值`。
+#   值必须 ≥12 位 ASCII 字母数字/`_~.-`，所以 `SNOWLUMA_TOKEN=`（空）和
+#   `NAPCAT_TOKEN=请填写你的access_token`（中文开头）都不会误报。
+#   阳性对照：tests/test_release_sanitizer.py::test_sanitizer_catches_planted_token_assignment
+# `.env` 里一行明文赋值的形状。2026-09-20 二次收紧，两个方向都试过：
+#
+#   · 只写 `NAME_TOKEN=值`（不带引号）→ `.env` 里写成 `NAME_TOKEN="值"` 时**漏报**
+#     （审查提的 S10：「判据绑死形状」的又一例）。
+#   · 松成「`NAME_TOKEN` + 可有可无的引号」但**不锚行**→ 立刻**误报 4 处**：
+#     `_ENV_WITH_TOKEN = "..."`、`_write_env(..., X_TOKEN="...")`、
+#     `KEY_TOKEN = "token_consistency"` 全被当成 env 赋值。噪音会让人把检查关掉。
+#
+# 所以锚死三件事，恰好是 `.env` 与 Python 源码的分界：
+#   ① 行首（允许 `#`/`;` 注释前缀和 `export `）—— 关键字参数在括号里，不是行首；
+#   ② 键名后**紧跟** `=`（不许空格）—— Python 里习惯写 `KEY = "值"`，`.env` 不写空格；
+#   ③ 整行到值就结束 —— 值后面还有 `+ _X` 或 `)` 的都不是 env 赋值。
+# 空值、`${VAR}` 占位符、中文提示语都不会命中（值字符类里没有 $、{、引号、汉字）。
+# ⚠ **不要**在这里加 `(?m)` 之类的内联标志。这个片段会被拼进 `KEY_RE`，而内联标志
+#   出现在表达式中间时，Python ≥3.12 直接抛 `PatternError: global flags not at the
+#   start of the expression`——`准备发布.py` **导入即崩**；3.10 只是发个
+#   DeprecationWarning，本机测不出来（2026-09-20 独立复核用 3.14 实测抓到的）。
+#   而且这里**根本不需要**：扫描器是 `KEY_RE.search(line)` **逐行**喂进来的，
+#   每行的整串就是主题串，`^`/`$` 天然按行生效。
+_TOK_ASSIGN = (r"^[ \t]*(?:#|;|export[ \t]+)?[ \t]*"
+               r"[A-Z][A-Z0-9_]*_TOKEN=['\"]?[A-Za-z0-9_~.\-]{12,}['\"]?[ \t]*$")
 KEY_RE = re.compile(r"sk-[A-Za-z0-9]{16,}|api[_-]?key\s*[:=]\s*['\"]?[A-Za-z0-9]{16,}"
                     r"|access[_-]?token\s*[:=]\s*['\"]?[A-Za-z0-9]{10,}"
-                    r"|" + _TOK_VOLC + r"|" + _TOK8)
+                    r"|" + _TOK_VOLC + r"|" + _TOK_ASSIGN)
 # ⚠ 2026-09-19 修复：原写法 r"[Dd]:\\\\[^\\s\"'，。、]+" 有两处笔误，导致**从未匹配过任何东西**——
 #   ① `\\\\` 在正则里表示「两个字面反斜杠」，而真实路径只有一个 → 永不匹配
 #   ② `[^\\s...]` 的字符类把反斜杠本身也排除在外 → 就算匹配上也会在第一个分界符处截断
@@ -445,6 +476,60 @@ def _scan_bytes(p: Path, rel: str) -> list[str]:
 # ⚠ 但它里面躺着**历史提交的旧版本文件**，那些旧版本含清理前的本地路径。
 #   本扫描器管的是"这次要发出去的字节"，管不了历史——历史要不要洗是另一个决定。
 SCAN_SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files"}
+# `.env` 真值扫描的单文件上限：真值只会出现在文本里，超大文件（模型/音频）跳过
+SCAN_ENV_MAX_BYTES = 8 * 1024 * 1024
+
+
+def scan_env_values(root: Path, env_path: Path | None = None) -> list[str]:
+    """拿 `.env` 里的**真实值**去扫快照——这是 `scan_sensitive` 抓不到的一类。
+
+    为什么需要它：`.env` 里的密钥**没有固定形状**（`SCAN_EXEMPT_FILES` 之外的
+    正则只能按形状猜），而"真值出现在发布物里"是可以精确判定的——把真值当字符串
+    搜一遍就行。2026-09-20 一天里撞了两次：
+      · 往 `tests/test_release_sanitizer.py`（**被整体豁免**扫不到）里塞了真 token 当样本；
+      · `tests/test_connect_check.py` 拿真 token 当 `mask_token()` 的输入（输出打了码，
+        但**输入**是真值）。
+    两次都是 `scan_sensitive` 报"零命中"。所以这一道独立于它。
+
+    短值（<8 位）不参与比对：`true`、`1` 这类会跟普通文本撞，制造噪音。
+    """
+    env_path = env_path or (BASE / ".env")
+    if not env_path.exists():
+        return []
+    secrets = []
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            val = val.strip().strip('"').strip("'")
+            if len(val) >= 8:
+                secrets.append((key.strip(), val))
+    except OSError:
+        return []
+    if not secrets:
+        return []
+
+    hits = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or p.stat().st_size > SCAN_ENV_MAX_BYTES:
+            continue
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if SCAN_SKIP_DIRS & set(Path(rel).parts):
+            continue
+        try:
+            text = p.read_bytes().decode("utf-8", "ignore")
+        except OSError:
+            continue
+        for key, val in secrets:
+            # 报文件名不报行号：行号要在原文里定位真值，等于把真值又抄一遍
+            if val in text:
+                hits.append(f"{rel}: 含有 .env 里 {key} 的真实值")
+    return hits
 
 
 def scan_sensitive(root: Path) -> list[str]:
@@ -586,7 +671,12 @@ def main() -> None:
     (OUT / ".env.example").write_text(
         "# 环境变量配置（复制为 .env 并填写）\n"
         "# SnowLuma / OneBot —— 与 config.yaml 的 napcat.access_token 一致\n"
-        "NAPCAT_TOKEN=请填写你的access_token\n", encoding="utf-8")
+        # ⚠ 2026-09-20：这里原先写的是 `NAPCAT_TOKEN=请填写你的access_token`——
+        #   运行期只读 `SNOWLUMA_TOKEN`（config.yaml: napcat.access_token: ${SNOWLUMA_TOKEN}），
+        #   全仓运行代码对 NAPCAT_TOKEN 零命中。抄了这份模板的新手，token 白填。
+        "# 一般不用手改——控制台「密钥管理 → SnowLuma Token」里填，会自动写进来。\n"
+        "# 它对应 SnowLuma 网页面板里那一栏「授权 Token」；两边填一样的，或者都留空。\n"
+        "SNOWLUMA_TOKEN=\n", encoding="utf-8")
     print("  ✅ .env.example（占位）")
 
     # 7. 骨架目录 + 摆放说明（主人 2026-09-05：框架提前给用户，附件解压有指引）
@@ -627,14 +717,22 @@ def main() -> None:
         encoding="utf-8")
     print("  ✅ .gitignore")
 
-    # 8. 敏感复扫（红线自检）
-    hits = scan_sensitive(OUT)
+    # 8. 敏感复扫（红线自检）——两道，判据不同：
+    #    ① 按**形状**认（正则）：路径/QQ/密钥样式，会命中未来才知道的泄漏
+    #    ② 按**真值**认（拿 .env 里的值直接搜）：形状认不出来的密钥也躲不过
+    #    2026-09-20 证明两道都要有：一天里两次真 token 进发布物，① 都报"零命中"
+    #    （一次在被整体豁免的文件里，一次是打了码的值但**输入**是真值）。
+    hits = scan_sensitive(OUT) + scan_env_values(OUT)
     if hits:
         print("\n⚠️  ⚠️  敏感扫描发现命中（发布前必须清零）：")
         for h in hits[:20]:
             print(f"    {h}")
-    else:
-        print("  ✅ 敏感扫描：零命中")
+        # **命中即中止**（2026-09-20 独立复核建议）。原先只打印一行提示就继续往下走，
+        # 最后还以「该目录可 git init 后推送 GitHub」收尾——真正的红线只靠人读 stdout。
+        # 这个项目一天里两次把真 token 带进发布物，都是靠人眼漏过去的。
+        print("\n[×] 扫描命中，已中止（快照已生成但**不要推送**——先清干净再重跑）")
+        raise SystemExit(1)
+    print("  ✅ 敏感扫描：零命中（形状 + .env 真值，两道都过）")
 
     # 9. 附件清单（只报告，不打包）
     audio_dir = BASE / "songs" / "audio"
