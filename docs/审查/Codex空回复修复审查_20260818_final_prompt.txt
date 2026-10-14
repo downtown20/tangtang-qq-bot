@@ -1,0 +1,12 @@
+上一轮复审你给出 Request Changes，剩两条：
+
+1. Important（I4 残留）：`_call_llm_light` 第二次失败仍 sleep(1.5) 且记录"后重试"——持全局 _llm_lock 空等阻塞主回复。
+2. Minor（M1）：AST 闸门只验证方法体内存在带 THINKING_OFF 的 lambda，不验证它是目标调用的 llm_call 参数、不验证 lambda body 调用 self._call_llm_light——恢复裸接线 + 放一个未使用 lambda 仍假绿。
+
+已修：
+1. agent/handler.py `_call_llm_light`：`if attempt == 0:` 才记录重试+sleep；最后一次失败记录"放弃"直接返回。测试 test_max_two_attempts_empty_then_exception / exception_then_empty 新增断言 `sleep_mock.await_count == 1`。
+2. tests/test_empty_reply_chain.py TestThinkingOffWiring 重写：EXPECTED 表映射 {方法名: 目标调用 attr}，`_llm_call_lambda_wired` 定位方法体内的目标 Call（func.attr 匹配 extract_semantic_memories / extract_fact_clusters）→ 取 llm_call 关键字 → 必须是 Lambda → Lambda body 必须是 self._call_llm_light 调用且带 extra_body=THINKING_OFF。裸接线/未使用散落 lambda/接错函数都会红灯。
+
+测试现状：tests/ 479 全绿（本轮 +0 净增，断言加强），pyflakes 零 undefined。
+
+请复审这两条是否已闭环，若没有新问题请给出 Approve。不要修改文件，只审查。输出：Critical/Important/Minor（可为空）+ 总体结论。

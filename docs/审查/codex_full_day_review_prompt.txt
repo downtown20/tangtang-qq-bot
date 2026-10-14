@@ -1,0 +1,39 @@
+你是资深代码审查员。项目 <项目根> 是 QQ 猫娘 AI 机器人「糖糖」（Python，无 git 仓库，当前 458 测试全绿）。
+
+今天（2026-08-17）全天有大量改动。其中「对话质量审查」批次已被你两轮审过（方案+终审，标记「2026-08-17 Codex 对齐」——那部分只需复查终审修复后的最终状态，重点在**未被审过的其余改动**，全部带「2026-08-17」注释标记）：
+
+## 未审改动清单（按时间顺序，全部可在源码里 grep 标记定位）
+
+### A. 色色模式动态开关（上午，标记「2026-08-17」+「🎚」）
+- config.yaml：scenario_targets 加 '2524950083': 亲密模式
+- agent/handler.py：`_sed_active` set（state:sed_active kv 持久化）；`_set_seductive_active`；`_process_seductive_markers`（[进入色色]/[退出色色] 标记协议，私聊路径 LLM 回复后、_enrich_reply 前处理）；私聊路径 sed_allowed 判定（未激活→private_scenario=None + 入口提示注入 extra_sections）；群聊路径**没有** marker 处理（只有 clean 兜底剥除）
+- agent/reply_pipeline.py clean()：兜底剥除两个标记
+- scenarios/seductive.yaml：退出协议写入敏感层
+- tests：TestSeductiveModeStateMachine 6 条 + TestSeductiveMarkersNeverLeak 2 条 + PERSIST_STATE_KEYS 加 state:sed_active
+
+### B. 纠正主语误伤事故修复（上午，标记「2026-08-17 事故」+教训 #29）
+- agent/store.py：find_qq_by_nickname/find_qq_by_alias 加 fuzzy 参数（纠正类走 fuzzy=False 精确档）；nickname 匹配忽略 @ 前缀（TRIM）；新增 list_people_nicknames
+- agent/memory.py：correct_memory 零匹配 fail-closed（记忆+簇事实+notes 全不命中→拒绝写纠正事实，返回 matched=0）；返回 dict 加 matched 字段
+- agent/handler.py：correct_memory/forget_memory 工具定义加 subject_name 参数、required 从 [subject_qq, wrong_fact] 改为 [wrong_fact]；执行器 subject_name 精确解析（解析失败拒绝）；matched==0 返回确认提示；turn_actions["memory_correction_applied"] 只在真的纠正后标记
+- tests/test_memory_correction.py：TestWrongSubjectGate 6 条 + 2 条既有测试补种子记忆
+
+### C. 昵称交叉上下文（上午，标记「2026-08-17 事故加固」）
+- agent/handler.py：`_resolve_mentioned_people`（私聊交叉上下文：QQ号正则 + people 表昵称提及解析，共用主人/亲密度≥50 限权，最多3人）；私聊路径接入；dirty 画像加 [画像待更新] 标签
+- tests：TestMentionedPeopleResolution 5 条 + store 层 @前缀/精确档/list_people_nicknames 测试
+
+### D. 数据修复脚本（上午，一次性运维）
+- tools/cleanup_wrong_subject_correction_20260817.py：双人修复（回滚误伤+群主纠正），声称幂等，已 apply 且二次 dry-run 零变更
+
+### E. 对话质量批次（已被你审过，只复查终审修复后最终态）
+- 终审修复：契约段移到 CoT 前 + context_builder 双豁免截断；voice override+replace tone；姿态/补读优先级；reply_metrics 哈希键+删恒空字段+失败告警；叙事窗口 fail-closed；新增 TestCodexFinalReview 5 条
+
+## 审查维度（按重要性）
+1. **并发/异步安全**：_sed_active 读写时机（asyncio 单线程内是否安全、_resynthesize 等后台任务会不会碰到）；_resolve_mentioned_people 每轮全表遍历 people 的性能与一致性；_process_seductive_markers 与 _enrich_reply 的调用顺序（标记必须在 enrich 前处理，会不会被 clean 先剥导致状态不切换）
+2. **权限与安全**：subject_name 解析路径有没有绕过「仅主人纠第三人」的权限复验；昵称交叉上下文的信息泄露面（限权闸门是否在昵称路径同样生效）；markers 被普通用户（无 seductive 权限）在私聊发出时的行为
+3. **持久化铁律**：state:sed_active 的重启语义（重启后色色模式保持激活——合理吗？）；_save_state_kv 调用时机
+4. **跨模块契约**：correct_memory 返回新增 matched 字段后所有消费者（handler 执行器、测试、其他调用点）；工具定义 required 改为只含 wrong_fact 后 executor 对缺参的行为；list_people_nicknames 与 find_qq_by_nickname(fuzzy=False) 的语义一致性
+5. **状态机边界**：群聊路径无 marker 处理（LLM 在群聊输出 [进入色色] 会怎样）；seductive 激活时切到心理学场景/语音角色覆盖等组合；退出后 knowledge 缓存 _seductive_knowledge_cache 是否残留
+6. **数据安全**：cleanup 脚本的幂等性、事务性、误伤面（SQL 条件是否可能命中不该命中的行）
+7. **测试质量**：新增测试是否真走到路径、有没有假绿；E 批终审修复后有没有引入新回归
+
+只读审查：不要修改任何代码。报告写到 docs/审查/Codex全天改动审查_20260817.md，并在会话最后输出核心结论（300字内，含 Request Changes / Approved 判定与必须修的问题清单）。

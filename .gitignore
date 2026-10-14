@@ -1,0 +1,131 @@
+# ═══════════════════════════════════════════════════════════
+# 小糖糖 · .gitignore
+# 原则：仓库只放「源头」——代码、文档、配置模板。
+#       依赖、模型、语音/贴图资源、数据库、日志、构建产物一律不进库。
+#       派生数据（索引/缓存）也不进库——2026-09-19 事故：
+#       knowledge/*.md 的本机路径清干净了，索引 sqlite 里的旧副本却随包发了出去。
+# ═══════════════════════════════════════════════════════════
+
+# ── 密钥（最高优先，任何情况都不提交）─────────────────────
+.env
+.env.*
+config.yaml
+config.yaml.*
+*.key
+*.pem
+
+# ── 运行时状态（每台机器各自生成，重启语义靠它们落盘）──────
+# 2026-10-15 T55-F 根目录规范化：16 条逐文件规则收口成目录级规则。
+# 逐文件写法的代价是「每加一个状态文件都要记得补一行」，漏一行就是一次隐私
+# 随包泄漏（教训 #31 同族：白名单要穷举该扫的，不是穷举能想到的）。
+状态/
+# 唯一留在根的状态标记文件（零引用，见 T55-F 报告；只忽略、不动）
+.build_complete
+
+# ── 数据库（体积大 + 含全部聊天隐私，绝不入库）─────────────
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+memory_sync/
+backups/
+
+# ── 日志 ──────────────────────────────────────────────────
+# 2026-10-15 T55-F：日志收进 日志/ 目录——tangtang.log 与它按天轮转出来的
+# 副本（tangtang.log.YYYY-MM-DD）都在那里。
+日志/
+# 审查工作的原始 CLI 转储（2026-10-15 主人拍板 ②A）：
+#   docs/审查/ 共 46 文件，其中 *.log + *_result.txt ≈ 5.5 MB 是 Codex 的原始输出，
+#   含 180 处本机绝对路径。有文档价值的是同目录的 *.md 审查报告，那些照常入库。
+docs/审查/*.log
+docs/审查/*_result.txt
+
+# ── 依赖与模型（数 GB，clone 后由安装脚本拉取）──────────────
+依赖/
+python310/
+models/
+asr_models/
+assets/
+gpt-sovits/
+SnowLuma/
+米雪儿gpt-sovits模型/
+
+# ── 语音与贴图资源（著作权 + 体积）────────────────────────
+# 唱歌音频：完整曲库 41 首 / 5.58 GB 不进库；只挑 4 首代表作随仓库发出，
+# 让克隆下来就能点歌试听（2026-10-15 主人拍板 ①C）。
+# gitignore 的否定规则要求父目录先被放行，所以是「先忽略全部、再逐级放行」的写法。
+songs/*
+!songs/audio
+songs/audio/*
+!songs/audio/光年之外.wav
+!songs/audio/Lemon.wav
+!songs/audio/晴天.wav
+!songs/audio/secret base ~君がくれたもの~ (10 years after Ver.).wav
+!songs/光年之外.txt
+!songs/晴天.txt
+音频/
+voice_cache/
+stickers/
+stickers_cg/
+stickers_michele/
+stickers_murasame/
+share_images/
+Imag/
+
+# ── 构建产物 / 缓存 / 索引（派生数据，可重建）──────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# 测试的仓库内临时落点（2026-10-15 T55：test_drives_series 的 csv_guard 把 CSV 指到
+# tests/_tmp/<唯一名>/——必须留在仓库内，因为 append_drives_series() 的返回值里有
+# _DRIVES_SERIES.relative_to(ROOT)。正常 teardown 会清空，崩溃时会留残渣，故忽略）
+tests/_tmp/
+
+# 长期优化快照 = 派生数据（tools/长期优化快照.py 每次运行生成一份），且 :438 会把
+# COMPUTERNAME 写进 "host" 字段——留在公开库里等于每跑一次就重新泄露一次主机名。
+# 按 CLAUDE.md 教训 #32「发布物只放源头，派生数据不进包」排除；它在两机之间仍靠
+# Syncthing 同步（见 docs/用户手册/文件同步指南.md），棘轮对比照常工作。
+docs/开发规划/长期优化/快照/
+.gitnexus/
+artifacts/
+runtime-observations/
+.uv-cache*/
+.trash/
+_backups/
+.stfolder/
+.archify/
+
+# ── 一次性产物与临时文件（2026-10-14 T54-B 归置）──────────
+# 旧规则只有 *.bak-*，漏掉 main.py.bak 这类无标签命名
+*.bak
+*.bak-*
+*.bak_*
+_tmp_*
+tmp_*.png
+_clip_a*.png
+_tmp_shots/
+temp_files/
+generated_images/
+
+# ── 内部协作工作区（原始转录，不是项目文档）──────────────
+# 依据：2026-10-15 全库扫描——docs/协作/logs/ = 53 文件 / 41.6 MB，
+#   含 4,309 处本机绝对路径（单文件 codex_exec_L1.log 就 3,515 处）。
+#   这是 CLAUDE.md 教训 #30「本机路径随包发出」的同族：仓库是公开的，
+#   原始 CLI 转录既没有文档价值，又把机器布局摊了出去。文件仍留在本地。
+docs/协作/logs/
+
+# ── 可重下发的第三方二进制（tools/ 内，非本项目产物）──────
+# 依据：docs/发布/发布清单_v1_20260905.md:20 的发布规格本就排除「cloudflared*.exe 52M」；
+# tools/ 与 agent/ 全库零引用（不是运行时依赖，是内网穿透实验遗留）；T54 大件盘点标注「可重建（可重下）」
+cloudflared*.exe
+*.zip
+*.7z
+*.tar.gz
+
+# ── 编辑器 / 系统 ────────────────────────────────────────
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

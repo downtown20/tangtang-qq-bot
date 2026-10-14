@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "description": "知识库检索固定问句集：正例验证可召回，负例验证空召回。修改知识文档或检索器后应重新运行。",
+  "cases": [
+    {
+      "id": "功能清单",
+      "query": "你能做什么",
+      "expect_hit": true,
+      "expected_sources": ["糖糖功能"]
+    },
+    {
+      "id": "记忆幻觉防护",
+      "query": "怎么避免记忆幻觉",
+      "expect_hit": true,
+      "expected_sources": ["更新日志"]
+    },
+    {
+      "id": "游戏入门",
+      "query": "minecraft 合成工作台",
+      "expect_hit": true,
+      "expected_sources": ["minecraft"]
+    },
+    {
+      "id": "语音系统",
+      "query": "更新日志 GPT SoVITS",
+      "expect_hit": true,
+      "expected_sources": ["更新日志"]
+    },
+    {
+      "id": "角色资料",
+      "query": "千恋万花 丛雨",
+      "expect_hit": true,
+      "expected_sources": ["千恋万花_丛林"]
+    },
+    {
+      "id": "聊天索引",
+      "query": "chat_index 记忆",
+      "expect_hit": true,
+      "expected_sources": ["记忆系统技术文档"]
+    },
+    {
+      "id": "否定泛问句",
+      "query": "完全不存在的随机问题",
+      "expect_hit": false,
+      "expected_sources": []
+    },
+    {
+      "id": "不存在的功能",
+      "query": "请告诉我一个不存在的功能",
+      "expect_hit": false,
+      "expected_sources": []
+    },
+    {
+      "id": "闲聊",
+      "query": "我想随便聊聊天",
+      "expect_hit": false,
+      "expected_sources": []
+    },
+    {
+      "id": "实时天气闲聊",
+      "query": "今天天气怎么样",
+      "expect_hit": false,
+      "expected_sources": []
+    },
+    {
+      "id": "泛词文件名误召回",
+      "query": "完全不存在的随机天气系统",
+      "expect_hit": false,
+      "expected_sources": []
+    },
+    {
+      "id": "长概念正文召回",
+      "query": "主要矛盾怎么用",
+      "expect_hit": true,
+      "expected_sources": ["毛选思维框架"]
+    },
+    {
+      "id": "泛词标题误召回",
+      "query": "医院预约流程",
+      "expect_hit": false,
+      "expected_sources": []
+    },
+    {
+      "id": "Black Souls II Boss",
+      "query": "深渊之主 古神戒指",
+      "expect_hit": true,
+      "expected_sources": ["blacksouls"]
+    },
+    {
+      "id": "Minecraft 红石信号",
+      "query": "红石信号最多多少格",
+      "expect_hit": true,
+      "expected_sources": ["minecraft"]
+    },
+    {
+      "id": "多轮对话结构化",
+      "query": "多轮对话如何结构化",
+      "expect_hit": true,
+      "expected_sources": ["DeepSeek论文学习笔记"]
+    },
+    {
+      "id": "SnowLuma 工作原理",
+      "query": "SnowLuma Python 程序怎么处理消息",
+      "expect_hit": true,
+      "expected_sources": ["snowluma"]
+    },
+    {
+      "id": "永久记忆判定",
+      "query": "永久记忆由谁判定",
+      "expect_hit": true,
+      "expected_sources": ["记忆系统技术文档"]
+    }
+  ]
+}

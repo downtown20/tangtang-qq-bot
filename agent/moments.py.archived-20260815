@@ -1,0 +1,35 @@
+"""
+📱 动态/说说 — 糖糖发QQ空间一样的碎碎念
+
+支持两种模式：
+1. 自主发动态：让糖糖自己想想发什么
+2. 指定内容：主人让她发什么就发什么
+
+所有动态存本地 moments.json，可回顾。
+"""
+
+from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger("糖糖.Moments")
+
+
+def _register():
+    from .skills import register_skill
+
+    @register_skill(
+        "post_moment",
+        "发布一条QQ空间风格的动态/说说。就像真人发一条朋友圈——碎碎念、分享日常、记录此刻的心情。",
+        {"topic": "动态主题或内容，如'今天心情不错''分享一下刚才看到的猫'。留空则自己发挥"},
+        method_type="behavior",
+    )
+    async def _post_moment_skill(topic: str = "") -> str:
+        return "[请生成一条QQ空间动态]" if not topic else f"[请生成动态，主题：{topic}]"
+
+# 2026-08-15 接线审计：MomentManager 类 + create_moment_manager 工厂从未被
+# 业务调用（MomentManager() 构造点全仓库为零）——post_moment 技能走轻量标记
+# 协议，不经此类。框架先行（CLAUDE.md 反模式#6）已删除 ~100 行。
+# ⚠ 遗留发现：标记「[请生成一条QQ空间动态]」没有消费端——动态文本由 LLM
+# 现场生成但不会写入 moments.json（持久化逻辑恰好在这个死类里）。恢复
+# 持久化时重建。

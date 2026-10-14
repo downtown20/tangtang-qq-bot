@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python tools/migrate_lyrics_sections.py)",
+      "Bash(python tools/migrate_lyrics_sections.py --apply)"
+    ]
+  }
+}

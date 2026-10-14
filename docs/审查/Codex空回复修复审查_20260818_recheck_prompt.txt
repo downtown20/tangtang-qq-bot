@@ -1,0 +1,13 @@
+你上一轮审查了 <项目根> 的「LLM 空回复」修复（agent/handler.py + tests/test_empty_reply_chain.py），给出 Request Changes：I1 降级分支 append 拼接半截正文、I2 公共路径 msg=None 重置吞掉降级 tool_calls、I3 finish_reason 从 delta 层级读永远取不到、I4 轻量重试嵌套控制流不对称、M1 接线闸门字符串计数过松。
+
+现在已按你的最小修复建议全部改完，请复审：
+
+1. I1：`_stream_deepseek` 降级分支改为 `content_parts = [msg.get("content") or ""]` + `tool_call_chunks.clear()`（替换语义），注释写明原因。新测试 test_partial_stream_then_failure_replaces_not_appends：可编程 FakeStreamCM 先产出半截正文+半截 tool_calls 流再抛异常 → 断言返回「完整回复」且无 tool_calls。
+2. I2：msg 在函数开头初始化为 None，公共路径删掉 `msg: dict | None = None` 重置行（改成注释）。新测试 test_fallback_tool_calls_survive_and_execute：降级响应带 tool_calls → 断言 _execute_tool 被执行、结果「查到了」。
+3. I3：`choice_fr = chunk["choices"][0].get("finish_reason")` 优先，delta 层级作兼容兜底。新测试 test_finish_reason_read_from_choice_level：标准 SSE（finish_reason 在 choices[0] 层）→ caplog 断言日志含 stop。
+4. I4：`_call_llm_light` 改为显式 `for attempt in range(2)` 循环统一异常与空内容。新测试 test_max_two_attempts_empty_then_exception / exception_then_empty 断言总调用次数 == 2。
+5. M1：接线闸门改为 AST 精确定位 `_do_extract_memories` 与 `_extract_fact_clusters_task` 两个函数体内的 Lambda 关键字接线（不再是 count>=2 字符串计数），路径改用 Path(__file__).parents[1] 可移植。
+
+测试现状：tests/ 479 全绿（较审查前 +5），pyflakes 零 undefined。
+
+请复审这几处修改是否正确解决了你提出的问题，有没有引入新问题，测试是否真正覆盖了你说的场景（注意别让假绿蒙混）。输出：仍按 Critical/Important/Minor + 总体结论（Approve / Request Changes）。不要修改文件，只审查。

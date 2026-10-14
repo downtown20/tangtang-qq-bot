@@ -1,0 +1,38 @@
+你是资深代码审查员。审查 <项目根>（Windows 上的 QQ 机器人项目，Python）今天刚完成的一批改动。没有 git，改动集中在 agent/handler.py + tests/test_empty_reply_chain.py（新文件）。
+
+## 背景（为什么改）
+
+生产日志 120 次「LLM 工具循环+收尾轮后仍无文字回复」警告。取证结论：117 次是后台轻量调用（记忆提取/事实簇提取）里 LLM 返回空内容，日志签名「流式完成 0字 + 25~40s 长流」。API 实测：deepseek-v4-flash 是推理模型，流里带 reasoning_content，思考吃 max_tokens 预算，吃满时 finish_reason=length、content 为空（用 64 token 预算确定性复现）。另有 1 例：流式失败降级非流式分支直接 return，空内容绕过收尾轮导致主回复静默丢弃。事实簇提取失败游标不推进 → 同批次反复重试 → 警告刷屏。
+
+## 改动清单（请逐处精读）
+
+agent/handler.py:
+1. 第 47 行附近：模块常量 `THINKING_OFF = {"thinking": {"type": "disabled"}}`
+2. `_call_deepseek`（3311 行起）：新增 `extra_body: dict | None = None` 参数，构造 body 后 `if extra_body: body.update(extra_body)`
+3. `_call_llm_light`（3060 行起）：新增 extra_body 参数透传（仅 deepseek provider）；内部抽 `_attempt()` 闭包；空内容重试一次（与既有异常重试并列）；`asyncio.sleep(1.5)` 后重试
+4. 6794 行与 7209 行：两个 JSON 提取调用点改为 `llm_call=lambda s, u: self._call_llm_light(s, u, extra_body=THINKING_OFF)`（memory.py 侧契约是 `llm_call(system_prompt, user_message)` 两参调用）
+5. `_stream_deepseek`（3473 行起）：
+   - 新增 `reasoning_chars` 统计（delta["reasoning_content"] 累积）
+   - 流式完成日志带 finish_reason 与思考字数
+   - **降级分支不再早退**：原代码在 except 分支里 `return (msg.get("content") or "").strip(), msg, ...`；现改为 `content_parts.append(msg.get("content") or "")` + 记日志 + 落到公共路径（公共路径 `content = "".join(content_parts)`、`if tool_call_chunks:` 为空跳过、`if not msg:` 跳过——msg 已赋值）
+6. `_call_deepseek` 尾部警告文案分路：has_tools 时原文案，否则「轻量调用返回空内容」
+
+tests/test_empty_reply_chain.py（新文件）：
+- TestLightEmptyRetry（3 条，monkeypatch asyncio.sleep）
+- TestExtraBodyInRequest（fake_stream 捕获 body 断言 thinking 参数）
+- TestFallbackFallsThroughToWrapUp（真实 _stream_deepseek + FakeLLM.stream 抛异常 → 降级空 → 收尾轮补上）
+- TestThinkingOffWiring（源文件机械闸门 2 条）
+
+## 重点审查方向
+
+1. `_stream_deepseek` 降级分支改动是否引入新问题：公共路径对「降级已赋值 msg」的所有分支是否安全？content_parts 混入降级内容后 `content = "".join(content_parts)` 的语义是否正确？异常分支与公共路径之间有没有变量未定义/覆盖问题？
+2. `_call_llm_light` 重试：闭包 `_attempt` 在两次调用间是否可能复用错误状态？空内容重试与异常重试叠加语义是否正确？provider != deepseek 时 extra_body 被静默忽略——调用方（提取点 lambda）是否可能因此误以为关了思考？
+3. 提取点 lambda 包装：memory.py 所有 `llm_call(...)` 调用是否严格两参？（请grep验证）lambda 是否会因对象生命周期/序列化出问题？
+4. `extra_body` 与 `body` 的关系：`_stream_deepseek(body, ...)` 内部 `body = dict(body)` 浅拷贝后 `body["stream"] = True`——extra_body 的 thinking 参数在流式与非流式降级路径是否都保留？（降级时 `body["stream"] = False` 用的是同一个 body？）
+5. 收尾轮 `body["tool_choice"] = "none"` 与 thinking 参数共存是否有 API 冲突风险？
+6. 测试质量：FakeLLM.stream 抛异常的方式是否真走了 except 分支？测试是否可能假绿？源文件机械闸门是否过脆/过松？
+7. 其他：任何你发现的并发/锁/日志/兼容性问题。
+
+## 输出要求
+
+按严重度输出：Critical（必须修）/ Important（应该修）/ Minor（可选）。每条给：位置（文件:行）、问题、为什么是问题、最小修复建议。最后给出总体结论：Approve / Request Changes。不要修改任何文件，只审查。

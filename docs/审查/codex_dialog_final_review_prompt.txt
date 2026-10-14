@@ -1,0 +1,26 @@
+你是资深代码审查员。项目 <项目根> 是 QQ 猫娘 AI 机器人「糖糖」（Python，无 git 仓库，当前 453 测试全绿）。
+
+今天下午按你的方案（docs/审查/Codex对话质量方案_20260817.md）实施了对齐后的批次，所有新改动带「2026-08-17 Codex 对齐」注释标记——请以这些注释为变更标记做最终代码审查。这是「讨论出最优方案 → 实施 → 审查」流程的最后一步，Request Changes 或 Approved 都可以，如实判定。
+
+## 改动清单（全部带标记，可 grep「2026-08-17 Codex 对齐」定位）
+
+1. agent/personality.py：
+   - build_system_prompt 重构：voice override 前置到身份底座选择（只换身份不覆盖协议）；minimal 提前 return 补 CORRECTION_CONTRACT；CoT 6→1 条；新增独立「## 必须遵守」契约段（所有变体必经）；_get_time_context 客观化（只报时段）；_get_tier_prompt 五参数→一句姿态；新增 _split_minimal 单一拆分逻辑（reload_role_card 复用）
+2. agent/protocols.py：
+   - fit_backgrounds 三步重写（保护块入账→flex 按 BACKGROUND_PRIORITY 选择→按原始 index 恢复展示序）；_bg_wrap_tokens 标签包装计入；_truncate_bg_block 行边界优先；BACKGROUND_PRIORITY 重排（图片/提及/文件提为当前轮证据）；STYLE_ANCHOR 换 5 形态分布锚
+3. agent/handler.py：
+   - capability_note 收缩到 3 行（「## ⚙️ 当前运行模式」标题保留——context_builder 截断豁免 marker 依赖）；_tool_instructions 8→3 条；_call_llm_with_skills 加 tools token 计量（json 序列化估算计入 TokenReport）；私聊画像/关系档案从 extra_sections 移到 <背景·画像>/<背景·关系档案> 背景块；_checked_send 成功发送后落 reply_metrics 聚合指标（无正文）
+4. agent/context_builder.py：TokenReport.total_tools 字段；_get_self_narrative_context 加 3 天窗口
+5. agent/self_check.py：_check_anti_tells 补括号动作镜头正则
+6. agent/store.py：reply_metrics 表 + record_reply_metric 方法
+7. tests/test_dialog_quality.py：修复永真断言、补乱序优先级/展示序恢复/minimal 契约/voice override 契约/reload 拆分/时间客观化回归
+
+## 审查维度（按重要性）
+1. 契约不可绕过性：CORRECTION_CONTRACT 是否真的对所有变体在场——normal/minimal/overlay/replace/voice_override/reload 六种组合逐一推演；有没有漏掉的提示词出口
+2. fit_backgrounds 正确性：优先级选择与展示序恢复的交互（保护块顺序、同优先级稳定序、overflow 行为、空块、未知标签）；预算计算（标签包装、截断后估算）；调用点（群/私）是否都接入了
+3. 缓存前缀契约：改动后稳定前缀（角色卡→群风格→权力→思考链→契约段）跨调用是否真的静态——「## 必须遵守」段内容静态吗
+4. 回归风险：capability_note 收缩后 8-15 审查的「防答应做不到的事」边界是否还有兜底（工具描述是否覆盖）；tier 精简是否破坏别处对 _get_tier_prompt 的假设；画像/关系档案移背景块后群聊路径有没有类似豁免残留
+5. 遥测落库：reply_metrics 写入路径的异常安全性（不得影响发送主链路）、频率与隐私
+6. 测试质量：新回归测试是否真走到被测路径、有没有新的假绿
+
+只读审查：不要修改任何代码。报告写到 docs/审查/Codex对话质量终审_20260817.md，并在会话最后输出核心结论（300字内，含 Request Changes / Approved 判定）。

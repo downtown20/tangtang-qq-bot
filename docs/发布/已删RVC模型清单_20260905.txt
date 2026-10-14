@@ -1,0 +1,18 @@
+# 已删 RVC 模型清单（2026-09-05 冻结的历史清单）
+# ⚠️ 这是当时删除动作的原始记录，**不是当前状态**；权威清单见 已删除内容清单_20261015.md。
+# 本文件不进发布包（见 tools/准备发布.py 的 DOCS_EXCLUDE_NAMES）。
+D_990.pth
+added_IVF920_Flat_nprobe_1_mygf-xnyx_v2.index
+mygf-xnyx.pth
+tangtang.index
+tangtang.pth
+tangtang.pth.fairseq_backup
+tangtang_old_hetao.index
+tangtang_sing.index
+tangtang_sing.pth
+tangtang_v2.index
+tangtang_v2.pth
+tangtang_v3.index
+tangtang_v3.pth
+tangtang_v4.index
+tangtang_v4.pth

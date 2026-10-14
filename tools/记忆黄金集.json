@@ -1,0 +1,1106 @@
+{
+ "version": 1,
+ "description": "P2-1 记忆真值黄金集。每个 case 在独立临时 SQLite 使用 Store API 构造，绝不调用 LLM 或生产库。",
+ "cases": [
+  {
+   "id": "source-01",
+   "dimension": "source_attribution",
+   "subject": "source-user-01",
+   "source_group_id": "source-group-01",
+   "value": "来源用户01确认事实01",
+   "event_time": "2026-09-01 10:01:00",
+   "expect": {
+    "owner": "source-user-01",
+    "source_group_id": "source-group-01",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:01:00"
+   }
+  },
+  {
+   "id": "source-02",
+   "dimension": "source_attribution",
+   "subject": "source-user-02",
+   "source_group_id": "source-group-02",
+   "value": "来源用户02确认事实02",
+   "event_time": "2026-09-01 10:02:00",
+   "expect": {
+    "owner": "source-user-02",
+    "source_group_id": "source-group-02",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:02:00"
+   }
+  },
+  {
+   "id": "source-03",
+   "dimension": "source_attribution",
+   "subject": "source-user-03",
+   "source_group_id": "source-group-03",
+   "value": "来源用户03确认事实03",
+   "event_time": "2026-09-01 10:03:00",
+   "expect": {
+    "owner": "source-user-03",
+    "source_group_id": "source-group-03",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:03:00"
+   }
+  },
+  {
+   "id": "source-04",
+   "dimension": "source_attribution",
+   "subject": "source-user-04",
+   "source_group_id": "source-group-04",
+   "value": "来源用户04确认事实04",
+   "event_time": "2026-09-01 10:04:00",
+   "expect": {
+    "owner": "source-user-04",
+    "source_group_id": "source-group-04",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:04:00"
+   }
+  },
+  {
+   "id": "source-05",
+   "dimension": "source_attribution",
+   "subject": "source-user-05",
+   "source_group_id": "source-group-05",
+   "value": "来源用户05确认事实05",
+   "event_time": "2026-09-01 10:05:00",
+   "expect": {
+    "owner": "source-user-05",
+    "source_group_id": "source-group-05",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:05:00"
+   }
+  },
+  {
+   "id": "source-06",
+   "dimension": "source_attribution",
+   "subject": "source-user-06",
+   "source_group_id": "source-group-06",
+   "value": "来源用户06确认事实06",
+   "event_time": "2026-09-01 10:06:00",
+   "expect": {
+    "owner": "source-user-06",
+    "source_group_id": "source-group-06",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:06:00"
+   }
+  },
+  {
+   "id": "source-07",
+   "dimension": "source_attribution",
+   "subject": "source-user-07",
+   "source_group_id": "source-group-07",
+   "value": "来源用户07确认事实07",
+   "event_time": "2026-09-01 10:07:00",
+   "expect": {
+    "owner": "source-user-07",
+    "source_group_id": "source-group-07",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:07:00"
+   }
+  },
+  {
+   "id": "source-08",
+   "dimension": "source_attribution",
+   "subject": "source-user-08",
+   "source_group_id": "source-group-08",
+   "value": "来源用户08确认事实08",
+   "event_time": "2026-09-01 10:08:00",
+   "expect": {
+    "owner": "source-user-08",
+    "source_group_id": "source-group-08",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:08:00"
+   }
+  },
+  {
+   "id": "source-09",
+   "dimension": "source_attribution",
+   "subject": "source-user-09",
+   "source_group_id": "source-group-09",
+   "value": "来源用户09确认事实09",
+   "event_time": "2026-09-01 10:09:00",
+   "expect": {
+    "owner": "source-user-09",
+    "source_group_id": "source-group-09",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:09:00"
+   }
+  },
+  {
+   "id": "source-10",
+   "dimension": "source_attribution",
+   "subject": "source-user-10",
+   "source_group_id": "source-group-10",
+   "value": "来源用户10确认事实10",
+   "event_time": "2026-09-01 10:10:00",
+   "expect": {
+    "owner": "source-user-10",
+    "source_group_id": "source-group-10",
+    "trust_level": "verified",
+    "event_time": "2026-09-01 10:10:00"
+   }
+  },
+  {
+   "id": "time-01",
+   "dimension": "event_time",
+   "subject": "time-user-01",
+   "source_group_id": "time-group-01",
+   "value": "时间用户01在09:01确认",
+   "event_time": "2025-01-01 09:01:00",
+   "expect": {
+    "event_time": "2025-01-01 09:01:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-02",
+   "dimension": "event_time",
+   "subject": "time-user-02",
+   "source_group_id": "time-group-02",
+   "value": "时间用户02在09:02确认",
+   "event_time": "2025-02-02 09:02:00",
+   "expect": {
+    "event_time": "2025-02-02 09:02:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-03",
+   "dimension": "event_time",
+   "subject": "time-user-03",
+   "source_group_id": "time-group-03",
+   "value": "时间用户03在09:03确认",
+   "event_time": "2025-03-03 09:03:00",
+   "expect": {
+    "event_time": "2025-03-03 09:03:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-04",
+   "dimension": "event_time",
+   "subject": "time-user-04",
+   "source_group_id": "time-group-04",
+   "value": "时间用户04在09:04确认",
+   "event_time": "2025-04-04 09:04:00",
+   "expect": {
+    "event_time": "2025-04-04 09:04:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-05",
+   "dimension": "event_time",
+   "subject": "time-user-05",
+   "source_group_id": "time-group-05",
+   "value": "时间用户05在09:05确认",
+   "event_time": "2025-05-05 09:05:00",
+   "expect": {
+    "event_time": "2025-05-05 09:05:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-06",
+   "dimension": "event_time",
+   "subject": "time-user-06",
+   "source_group_id": "time-group-06",
+   "value": "时间用户06在09:06确认",
+   "event_time": "2025-06-06 09:06:00",
+   "expect": {
+    "event_time": "2025-06-06 09:06:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-07",
+   "dimension": "event_time",
+   "subject": "time-user-07",
+   "source_group_id": "time-group-07",
+   "value": "时间用户07在09:07确认",
+   "event_time": "2025-07-07 09:07:00",
+   "expect": {
+    "event_time": "2025-07-07 09:07:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-08",
+   "dimension": "event_time",
+   "subject": "time-user-08",
+   "source_group_id": "time-group-08",
+   "value": "时间用户08在09:08确认",
+   "event_time": "2025-08-08 09:08:00",
+   "expect": {
+    "event_time": "2025-08-08 09:08:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-09",
+   "dimension": "event_time",
+   "subject": "time-user-09",
+   "source_group_id": "time-group-09",
+   "value": "时间用户09在09:09确认",
+   "event_time": "2025-09-09 09:09:00",
+   "expect": {
+    "event_time": "2025-09-09 09:09:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "time-10",
+   "dimension": "event_time",
+   "subject": "time-user-10",
+   "source_group_id": "time-group-10",
+   "value": "时间用户10在09:10确认",
+   "event_time": "2025-10-10 09:10:00",
+   "expect": {
+    "event_time": "2025-10-10 09:10:00",
+    "trust_level": "verified"
+   }
+  },
+  {
+   "id": "negation-01",
+   "dimension": "negation",
+   "subject": "negation-user-01",
+   "source_group_id": "negation-group-01",
+   "value": "用户01不偏好辛辣食物",
+   "event_time": "2026-09-01 11:01:00",
+   "expect": {
+    "active_value": "用户01不偏好辛辣食物",
+    "opposite_value": "用户01偏好辛辣食物"
+   }
+  },
+  {
+   "id": "negation-02",
+   "dimension": "negation",
+   "subject": "negation-user-02",
+   "source_group_id": "negation-group-02",
+   "value": "用户02不喝含糖饮料",
+   "event_time": "2026-09-01 11:02:00",
+   "expect": {
+    "active_value": "用户02不喝含糖饮料",
+    "opposite_value": "用户02喝含糖饮料"
+   }
+  },
+  {
+   "id": "negation-03",
+   "dimension": "negation",
+   "subject": "negation-user-03",
+   "source_group_id": "negation-group-03",
+   "value": "用户03不养猫",
+   "event_time": "2026-09-01 11:03:00",
+   "expect": {
+    "active_value": "用户03不养猫",
+    "opposite_value": "用户03养猫"
+   }
+  },
+  {
+   "id": "negation-04",
+   "dimension": "negation",
+   "subject": "negation-user-04",
+   "source_group_id": "negation-group-04",
+   "value": "用户04不住在北京",
+   "event_time": "2026-09-01 11:04:00",
+   "expect": {
+    "active_value": "用户04不住在北京",
+    "opposite_value": "用户04住在北京"
+   }
+  },
+  {
+   "id": "negation-05",
+   "dimension": "negation",
+   "subject": "negation-user-05",
+   "source_group_id": "negation-group-05",
+   "value": "用户05不喜欢早起",
+   "event_time": "2026-09-01 11:05:00",
+   "expect": {
+    "active_value": "用户05不喜欢早起",
+    "opposite_value": "用户05喜欢早起"
+   }
+  },
+  {
+   "id": "negation-06",
+   "dimension": "negation",
+   "subject": "negation-user-06",
+   "source_group_id": "negation-group-06",
+   "value": "用户06不玩恐怖游戏",
+   "event_time": "2026-09-01 11:06:00",
+   "expect": {
+    "active_value": "用户06不玩恐怖游戏",
+    "opposite_value": "用户06玩恐怖游戏"
+   }
+  },
+  {
+   "id": "negation-07",
+   "dimension": "negation",
+   "subject": "negation-user-07",
+   "source_group_id": "negation-group-07",
+   "value": "用户07不吃香菜",
+   "event_time": "2026-09-01 11:07:00",
+   "expect": {
+    "active_value": "用户07不吃香菜",
+    "opposite_value": "用户07吃香菜"
+   }
+  },
+  {
+   "id": "negation-08",
+   "dimension": "negation",
+   "subject": "negation-user-08",
+   "source_group_id": "negation-group-08",
+   "value": "用户08不想公开生日",
+   "event_time": "2026-09-01 11:08:00",
+   "expect": {
+    "active_value": "用户08不想公开生日",
+    "opposite_value": "用户08想公开生日"
+   }
+  },
+  {
+   "id": "negation-09",
+   "dimension": "negation",
+   "subject": "negation-user-09",
+   "source_group_id": "negation-group-09",
+   "value": "用户09不使用语音回复",
+   "event_time": "2026-09-01 11:09:00",
+   "expect": {
+    "active_value": "用户09不使用语音回复",
+    "opposite_value": "用户09使用语音回复"
+   }
+  },
+  {
+   "id": "negation-10",
+   "dimension": "negation",
+   "subject": "negation-user-10",
+   "source_group_id": "negation-group-10",
+   "value": "用户10不收藏剧透",
+   "event_time": "2026-09-01 11:10:00",
+   "expect": {
+    "active_value": "用户10不收藏剧透",
+    "opposite_value": "用户10收藏剧透"
+   }
+  },
+  {
+   "id": "correction-01",
+   "dimension": "correction",
+   "subject": "correction-user-01",
+   "source_group_id": "correction-group-01",
+   "value": "用户01住在旧城01",
+   "corrected_value": "用户01已经搬到新城01",
+   "event_time": "2026-09-01 12:01:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户01已经搬到新城01"
+   }
+  },
+  {
+   "id": "correction-02",
+   "dimension": "correction",
+   "subject": "correction-user-02",
+   "source_group_id": "correction-group-02",
+   "value": "用户02使用旧昵称02",
+   "corrected_value": "用户02现在使用新昵称02",
+   "event_time": "2026-09-01 12:02:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户02现在使用新昵称02"
+   }
+  },
+  {
+   "id": "correction-03",
+   "dimension": "correction",
+   "subject": "correction-user-03",
+   "source_group_id": "correction-group-03",
+   "value": "用户03养旧宠物03",
+   "corrected_value": "用户03现在养新宠物03",
+   "event_time": "2026-09-01 12:03:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户03现在养新宠物03"
+   }
+  },
+  {
+   "id": "correction-04",
+   "dimension": "correction",
+   "subject": "correction-user-04",
+   "source_group_id": "correction-group-04",
+   "value": "用户04的专业是旧专业04",
+   "corrected_value": "用户04的专业改为新专业04",
+   "event_time": "2026-09-01 12:04:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户04的专业改为新专业04"
+   }
+  },
+  {
+   "id": "correction-05",
+   "dimension": "correction",
+   "subject": "correction-user-05",
+   "source_group_id": "correction-group-05",
+   "value": "用户05使用旧时区05",
+   "corrected_value": "用户05现在使用新时区05",
+   "event_time": "2026-09-01 12:05:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户05现在使用新时区05"
+   }
+  },
+  {
+   "id": "correction-06",
+   "dimension": "correction",
+   "subject": "correction-user-06",
+   "source_group_id": "correction-group-06",
+   "value": "用户06喜欢旧颜色06",
+   "corrected_value": "用户06现在喜欢新颜色06",
+   "event_time": "2026-09-01 12:06:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户06现在喜欢新颜色06"
+   }
+  },
+  {
+   "id": "correction-07",
+   "dimension": "correction",
+   "subject": "correction-user-07",
+   "source_group_id": "correction-group-07",
+   "value": "用户07在旧公司07",
+   "corrected_value": "用户07已经加入新公司07",
+   "event_time": "2026-09-01 12:07:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户07已经加入新公司07"
+   }
+  },
+  {
+   "id": "correction-08",
+   "dimension": "correction",
+   "subject": "correction-user-08",
+   "source_group_id": "correction-group-08",
+   "value": "用户08读旧学校08",
+   "corrected_value": "用户08现在读新学校08",
+   "event_time": "2026-09-01 12:08:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户08现在读新学校08"
+   }
+  },
+  {
+   "id": "correction-09",
+   "dimension": "correction",
+   "subject": "correction-user-09",
+   "source_group_id": "correction-group-09",
+   "value": "用户09的设备是旧设备09",
+   "corrected_value": "用户09的设备换为新设备09",
+   "event_time": "2026-09-01 12:09:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户09的设备换为新设备09"
+   }
+  },
+  {
+   "id": "correction-10",
+   "dimension": "correction",
+   "subject": "correction-user-10",
+   "source_group_id": "correction-group-10",
+   "value": "用户10在旧项目10",
+   "corrected_value": "用户10已经转到新项目10",
+   "event_time": "2026-09-01 12:10:00",
+   "expect": {
+    "old_status": "retracted",
+    "active_value": "用户10已经转到新项目10"
+   }
+  },
+  {
+   "id": "scope-01",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-01",
+   "source_group_id": "scope-group-01",
+   "value": "用户01当前群事实",
+   "other_group_id": "scope-other-group-01",
+   "other_group_value": "用户01其他群秘密",
+   "other_subject": "scope-other-user-01",
+   "other_user_value": "其他用户01当前群秘密",
+   "event_time": "2026-09-01 13:01:00",
+   "expect": {
+    "visible": [
+     "用户01当前群事实"
+    ],
+    "hidden": [
+     "用户01其他群秘密",
+     "其他用户01当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-02",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-02",
+   "source_group_id": "scope-group-02",
+   "value": "用户02当前群事实",
+   "other_group_id": "scope-other-group-02",
+   "other_group_value": "用户02其他群秘密",
+   "other_subject": "scope-other-user-02",
+   "other_user_value": "其他用户02当前群秘密",
+   "event_time": "2026-09-01 13:02:00",
+   "expect": {
+    "visible": [
+     "用户02当前群事实"
+    ],
+    "hidden": [
+     "用户02其他群秘密",
+     "其他用户02当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-03",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-03",
+   "source_group_id": "scope-group-03",
+   "value": "用户03当前群事实",
+   "other_group_id": "scope-other-group-03",
+   "other_group_value": "用户03其他群秘密",
+   "other_subject": "scope-other-user-03",
+   "other_user_value": "其他用户03当前群秘密",
+   "event_time": "2026-09-01 13:03:00",
+   "expect": {
+    "visible": [
+     "用户03当前群事实"
+    ],
+    "hidden": [
+     "用户03其他群秘密",
+     "其他用户03当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-04",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-04",
+   "source_group_id": "scope-group-04",
+   "value": "用户04当前群事实",
+   "other_group_id": "scope-other-group-04",
+   "other_group_value": "用户04其他群秘密",
+   "other_subject": "scope-other-user-04",
+   "other_user_value": "其他用户04当前群秘密",
+   "event_time": "2026-09-01 13:04:00",
+   "expect": {
+    "visible": [
+     "用户04当前群事实"
+    ],
+    "hidden": [
+     "用户04其他群秘密",
+     "其他用户04当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-05",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-05",
+   "source_group_id": "scope-group-05",
+   "value": "用户05当前群事实",
+   "other_group_id": "scope-other-group-05",
+   "other_group_value": "用户05其他群秘密",
+   "other_subject": "scope-other-user-05",
+   "other_user_value": "其他用户05当前群秘密",
+   "event_time": "2026-09-01 13:05:00",
+   "expect": {
+    "visible": [
+     "用户05当前群事实"
+    ],
+    "hidden": [
+     "用户05其他群秘密",
+     "其他用户05当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-06",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-06",
+   "source_group_id": "scope-group-06",
+   "value": "用户06当前群事实",
+   "other_group_id": "scope-other-group-06",
+   "other_group_value": "用户06其他群秘密",
+   "other_subject": "scope-other-user-06",
+   "other_user_value": "其他用户06当前群秘密",
+   "event_time": "2026-09-01 13:06:00",
+   "expect": {
+    "visible": [
+     "用户06当前群事实"
+    ],
+    "hidden": [
+     "用户06其他群秘密",
+     "其他用户06当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-07",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-07",
+   "source_group_id": "scope-group-07",
+   "value": "用户07当前群事实",
+   "other_group_id": "scope-other-group-07",
+   "other_group_value": "用户07其他群秘密",
+   "other_subject": "scope-other-user-07",
+   "other_user_value": "其他用户07当前群秘密",
+   "event_time": "2026-09-01 13:07:00",
+   "expect": {
+    "visible": [
+     "用户07当前群事实"
+    ],
+    "hidden": [
+     "用户07其他群秘密",
+     "其他用户07当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-08",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-08",
+   "source_group_id": "scope-group-08",
+   "value": "用户08当前群事实",
+   "other_group_id": "scope-other-group-08",
+   "other_group_value": "用户08其他群秘密",
+   "other_subject": "scope-other-user-08",
+   "other_user_value": "其他用户08当前群秘密",
+   "event_time": "2026-09-01 13:08:00",
+   "expect": {
+    "visible": [
+     "用户08当前群事实"
+    ],
+    "hidden": [
+     "用户08其他群秘密",
+     "其他用户08当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-09",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-09",
+   "source_group_id": "scope-group-09",
+   "value": "用户09当前群事实",
+   "other_group_id": "scope-other-group-09",
+   "other_group_value": "用户09其他群秘密",
+   "other_subject": "scope-other-user-09",
+   "other_user_value": "其他用户09当前群秘密",
+   "event_time": "2026-09-01 13:09:00",
+   "expect": {
+    "visible": [
+     "用户09当前群事实"
+    ],
+    "hidden": [
+     "用户09其他群秘密",
+     "其他用户09当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "scope-10",
+   "dimension": "scope_isolation",
+   "subject": "scope-user-10",
+   "source_group_id": "scope-group-10",
+   "value": "用户10当前群事实",
+   "other_group_id": "scope-other-group-10",
+   "other_group_value": "用户10其他群秘密",
+   "other_subject": "scope-other-user-10",
+   "other_user_value": "其他用户10当前群秘密",
+   "event_time": "2026-09-01 13:10:00",
+   "expect": {
+    "visible": [
+     "用户10当前群事实"
+    ],
+    "hidden": [
+     "用户10其他群秘密",
+     "其他用户10当前群秘密"
+    ]
+   }
+  },
+  {
+   "id": "no-evidence-01",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-01",
+   "source_group_id": "no-evidence-group-01",
+   "value": "无原文断言01",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-02",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-02",
+   "source_group_id": "no-evidence-group-02",
+   "value": "无原文断言02",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-03",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-03",
+   "source_group_id": "no-evidence-group-03",
+   "value": "无原文断言03",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-04",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-04",
+   "source_group_id": "no-evidence-group-04",
+   "value": "无原文断言04",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-05",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-05",
+   "source_group_id": "no-evidence-group-05",
+   "value": "无原文断言05",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-06",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-06",
+   "source_group_id": "no-evidence-group-06",
+   "value": "无原文断言06",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-07",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-07",
+   "source_group_id": "no-evidence-group-07",
+   "value": "无原文断言07",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-08",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-08",
+   "source_group_id": "no-evidence-group-08",
+   "value": "无原文断言08",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-09",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-09",
+   "source_group_id": "no-evidence-group-09",
+   "value": "无原文断言09",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "no-evidence-10",
+   "dimension": "no_evidence",
+   "subject": "no-evidence-user-10",
+   "source_group_id": "no-evidence-group-10",
+   "value": "无原文断言10",
+   "expect": {
+    "trust_level": "legacy_unverified",
+    "trusted_visible": false
+   }
+  },
+  {
+   "id": "replay-01",
+   "dimension": "restart_replay",
+   "subject": "replay-user-01",
+   "source_group_id": "replay-group-01",
+   "value": "重放用户01确认事实",
+   "event_time": "2026-09-01 14:01:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-02",
+   "dimension": "restart_replay",
+   "subject": "replay-user-02",
+   "source_group_id": "replay-group-02",
+   "value": "重放用户02确认事实",
+   "event_time": "2026-09-01 14:02:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-03",
+   "dimension": "restart_replay",
+   "subject": "replay-user-03",
+   "source_group_id": "replay-group-03",
+   "value": "重放用户03确认事实",
+   "event_time": "2026-09-01 14:03:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-04",
+   "dimension": "restart_replay",
+   "subject": "replay-user-04",
+   "source_group_id": "replay-group-04",
+   "value": "重放用户04确认事实",
+   "event_time": "2026-09-01 14:04:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-05",
+   "dimension": "restart_replay",
+   "subject": "replay-user-05",
+   "source_group_id": "replay-group-05",
+   "value": "重放用户05确认事实",
+   "event_time": "2026-09-01 14:05:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-06",
+   "dimension": "restart_replay",
+   "subject": "replay-user-06",
+   "source_group_id": "replay-group-06",
+   "value": "重放用户06确认事实",
+   "event_time": "2026-09-01 14:06:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-07",
+   "dimension": "restart_replay",
+   "subject": "replay-user-07",
+   "source_group_id": "replay-group-07",
+   "value": "重放用户07确认事实",
+   "event_time": "2026-09-01 14:07:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-08",
+   "dimension": "restart_replay",
+   "subject": "replay-user-08",
+   "source_group_id": "replay-group-08",
+   "value": "重放用户08确认事实",
+   "event_time": "2026-09-01 14:08:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-09",
+   "dimension": "restart_replay",
+   "subject": "replay-user-09",
+   "source_group_id": "replay-group-09",
+   "value": "重放用户09确认事实",
+   "event_time": "2026-09-01 14:09:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "replay-10",
+   "dimension": "restart_replay",
+   "subject": "replay-user-10",
+   "source_group_id": "replay-group-10",
+   "value": "重放用户10确认事实",
+   "event_time": "2026-09-01 14:10:00",
+   "expect": {
+    "same_memory_id": true,
+    "active_count": 1
+   }
+  },
+  {
+   "id": "reltime-01",
+   "dimension": "relative_time",
+   "subject": "reltime-user-01",
+   "source_group_id": "reltime-group-01",
+   "value": "时间语义用例01",
+   "event_time": "2026-10-14 11:59:30",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "刚刚（30秒前）",
+   "expect": {
+    "rendered": "2026-10-14 11:59（刚刚）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-02",
+   "dimension": "relative_time",
+   "subject": "reltime-user-02",
+   "source_group_id": "reltime-group-02",
+   "value": "时间语义用例02",
+   "event_time": "2026-10-14 11:35:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "25分钟前",
+   "expect": {
+    "rendered": "2026-10-14 11:35（25分钟前）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-03",
+   "dimension": "relative_time",
+   "subject": "reltime-user-03",
+   "source_group_id": "reltime-group-03",
+   "value": "时间语义用例03",
+   "event_time": "2026-10-14 09:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "3小时前",
+   "expect": {
+    "rendered": "2026-10-14 09:00（3小时前）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-04",
+   "dimension": "relative_time",
+   "subject": "reltime-user-04",
+   "source_group_id": "reltime-group-04",
+   "value": "时间语义用例04",
+   "event_time": "2026-10-14 06:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "6小时前（同日跨半天）",
+   "expect": {
+    "rendered": "2026-10-14 06:00（6小时前）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-05",
+   "dimension": "relative_time",
+   "subject": "reltime-user-05",
+   "source_group_id": "reltime-group-05",
+   "value": "时间语义用例05",
+   "event_time": "2026-10-13 12:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "昨天（整24小时）",
+   "expect": {
+    "rendered": "2026-10-13 12:00（昨天）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-06",
+   "dimension": "relative_time",
+   "subject": "reltime-user-06",
+   "source_group_id": "reltime-group-06",
+   "value": "时间语义用例06",
+   "event_time": "2026-10-12 12:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "2天前",
+   "expect": {
+    "rendered": "2026-10-12 12:00（2天前）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-07",
+   "dimension": "relative_time",
+   "subject": "reltime-user-07",
+   "source_group_id": "reltime-group-07",
+   "value": "时间语义用例07",
+   "event_time": "2026-10-08 12:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "6天前（第7天上界内）",
+   "expect": {
+    "rendered": "2026-10-08 12:00（6天前）",
+    "relative_present": true,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-08",
+   "dimension": "relative_time",
+   "subject": "reltime-user-08",
+   "source_group_id": "reltime-group-08",
+   "value": "时间语义用例08",
+   "event_time": "2026-10-07 12:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "7天前（过界→只留绝对）",
+   "expect": {
+    "rendered": "2026-10-07 12:00:00",
+    "relative_present": false,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-09",
+   "dimension": "relative_time",
+   "subject": "reltime-user-09",
+   "source_group_id": "reltime-group-09",
+   "value": "时间语义用例09",
+   "event_time": "2026-09-01 10:01:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "43天前（远过去→只留绝对）",
+   "expect": {
+    "rendered": "2026-09-01 10:01:00",
+    "relative_present": false,
+    "absolute_preserved": true
+   }
+  },
+  {
+   "id": "reltime-10",
+   "dimension": "relative_time",
+   "subject": "reltime-user-10",
+   "source_group_id": "reltime-group-10",
+   "value": "时间语义用例10",
+   "event_time": "2026-10-15 12:00:00",
+   "fixed_now": "2026-10-14 12:00:00",
+   "note": "未来时间（时钟异常→不描述）",
+   "expect": {
+    "rendered": "2026-10-15 12:00:00",
+    "relative_present": false,
+    "absolute_preserved": true
+   }
+  }
+ ]
+}

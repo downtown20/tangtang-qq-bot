@@ -1,0 +1,54 @@
+// 小糖糖 Syncthing 忽略规则
+// 由 tools/同步记忆.py 管理数据库同步，Syncthing 不直接碰以下文件
+
+// 糖糖数据库（WAL 模式——运行中同步会损坏/丢数据）
+memory.db
+memory.db-wal
+memory.db-shm
+
+// 运行时状态——每台机器各自生成，不同步
+// 2026-10-15 T55-F：文件移进 状态/ 目录，规则按新路径改写。
+// ⚠ 不能写成「状态/」整目录忽略——体检的「状态跟随」清单里有 7 个文件是
+//   **特意要同步**的（.conversation_state.json 私聊/群聊活跃窗口、
+//   .reflection_state.json 反思游标、.fact_extraction_state.json、
+//   .birthday_sent.json、.catch_up_sent.json、.greeting_state.json、
+//   .preferences.json）。目录级忽略会连它们一起挡下 = 笔记本上的糖糖丢状态。
+状态/.tangtang_self.json
+状态/.mood_state.json
+状态/.catch_up_state.json
+状态/.scheduled_tasks.json
+状态/.extraction_state.json
+// 根级旧名字保留为「永不复活」守卫——**这是实测出来的，不是洁癖**：
+// Syncthing 会在规则被移除的瞬间，把对端索引里的旧副本按原 mtime 拉回本地。
+// 2026-10-15 01:30:38 改完 .stignore，01:31:14 就实测到 5 个文件同时冒出来
+// （syncthing.log: "Synced file ... file.name=.tangtang_self.json"，mtime 是
+// 2026-10-13 的旧值）。删掉这几行 = 给它们开一条「会被对端抢着填回来」的路。
+.tangtang_self.json
+.mood_state.json
+.catch_up_state.json
+.scheduled_tasks.json
+.extraction_state.json
+
+// 日志——本机产物（boot=/cid= 都是本机的），同步过去没有读者
+日志/
+
+// 已有冲突文件不再扩散
+*.sync-conflict-*
+
+// 解包时的本地滚动备份，不同步
+memory.db.previous
+
+// ── 一次性产物与临时文件（2026-10-14 T54-B 归置）──
+// 这些只在本机生成、没有同步价值，同步过去只会在对端制造垃圾
+// 注意：_tmp_shots/ 是 tools/_tmp_pixel_ui.py、tools/_tmp_vlm_ui.py 的
+//       默认输出目录，那两个工具不会自己 mkdir，所以目录本身要留着（被忽略即可）
+__pycache__/
+*.pyc
+_tmp_*
+tmp_*.png
+_clip_a*.png
+_tmp_shots/
+.trash/
+.pytest_cache/
+*.bak
+*.bak-*
