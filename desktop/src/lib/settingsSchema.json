@@ -1,0 +1,692 @@
+[
+  {
+    "key": "bot",
+    "title": "机器人设置 — 糖糖的基本身份",
+    "fields": [
+      {
+        "path": "bot.qq_id",
+        "label": "QQ号",
+        "type": "str",
+        "hint": "机器人的QQ号，就是糖糖登录的那个号"
+      },
+      {
+        "path": "bot.owner_qq",
+        "label": "主人QQ",
+        "type": "str",
+        "hint": "主人的QQ号（最高权限，能执行任何命令）"
+      },
+      {
+        "path": "bot.name",
+        "label": "名字",
+        "type": "str",
+        "hint": "机器人的名字，显示在日志里"
+      },
+      {
+        "path": "bot.nicknames",
+        "label": "昵称列表",
+        "type": "list",
+        "hint": "群友叫这些名字糖糖也会回应。一行一个，建议2-5个"
+      }
+    ]
+  },
+  {
+    "key": "llm",
+    "title": "AI模型 — 控制糖糖的「大脑」（亲密模式、困难轮次都跟随此处）",
+    "fields": [
+      {
+        "path": "llm.provider",
+        "label": "提供商",
+        "type": "choice",
+        "hint": "走哪家 API。custom = 自建/中转站（本项目用的是 buddybackend）；换服务商时要同时改下面的 base_url 和密钥"
+      },
+      {
+        "path": "llm.model",
+        "label": "模型",
+        "type": "str",
+        "hint": "模型名"
+      },
+      {
+        "path": "_api_key_hint",
+        "label": "API 密钥",
+        "type": "label",
+        "hint": "🔑 API Key 已迁移至「🔑 密钥管理」分类，在左侧列表底部。"
+      },
+      {
+        "path": "llm.base_url",
+        "label": "接口地址",
+        "type": "str",
+        "hint": "接口地址"
+      },
+      {
+        "path": "llm.max_tokens",
+        "label": "最大Token",
+        "type": "int",
+        "hint": "一次回复「正文 + 思考」**总共**能生成多少 token——两者共用这一个预算。\n"
+      },
+      {
+        "path": "llm.temperature",
+        "label": "温度",
+        "type": "float",
+        "hint": "0=死板 2=疯癫。建议 0.7-1.0。\n"
+      },
+      {
+        "path": "llm.thinking",
+        "label": "思考模式",
+        "type": "choice",
+        "hint": "思考模式。on = 每次生成前先想一轮（更准、更慢、更贵）；off = 直接答；auto = 由模型自己决定"
+      },
+      {
+        "path": "llm.thinking_effort",
+        "label": "思考强度",
+        "type": "choice",
+        "hint": "思考投入档位。low/medium/high 影响想多久——高档在复杂问题上明显更好，但在闲聊上纯属浪费"
+      },
+      {
+        "path": "llm.light_thinking",
+        "label": "后台任务思考",
+        "type": "choice",
+        "hint": "轻量调用（摘要/情绪分类这类小任务）的思考模式。auto = 按任务自动选，on/off 强制开关"
+      },
+      {
+        "path": "llm.tool_loop_limit",
+        "label": "工具循环上限",
+        "type": "int",
+        "hint": "一轮对话里糖糖最多连续调用几次工具（默认 3）。\n"
+      },
+      {
+        "path": "llm.request_timeout",
+        "label": "请求超时（秒）",
+        "type": "int",
+        "hint": "单次 LLM 请求的最长等待，默认 120。低于 5 秒会被当成填错、退回 120。\n"
+      },
+      {
+        "path": "llm.user_id",
+        "label": "请求隔离标识",
+        "type": "str",
+        "hint": "留空即可"
+      }
+    ]
+  },
+  {
+    "key": "personality",
+    "title": "人格 — 糖糖的性格和行为准则（由 role_card.md 管理）",
+    "fields": [
+      {
+        "path": "_rolecard_note",
+        "label": "角色卡",
+        "type": "label",
+        "hint": "💡 糖糖的人格内容已全部迁移至项目根目录的 role_card.md。\n"
+      }
+    ]
+  },
+  {
+    "key": "behavior",
+    "title": "行为 — 控制糖糖什么时候说话、怎么说",
+    "fields": [
+      {
+        "path": "behavior.reply_only_to",
+        "label": "仅回复这些人",
+        "type": "list",
+        "hint": "白名单模式：只回复这里列的QQ号。一行一个QQ号，不限制数量。留空=回复所有人"
+      },
+      {
+        "path": "behavior.testing_mode",
+        "label": "测试模式",
+        "type": "bool",
+        "hint": "开启后拦截所有群消息（只回私聊）。调试用，正常使用请关闭"
+      },
+      {
+        "path": "behavior.active_interjection",
+        "label": "主动插话",
+        "type": "bool",
+        "hint": "糖糖看到感兴趣的话题会主动加入。关闭后只有@或叫名字才回"
+      },
+      {
+        "path": "behavior.private_interjection",
+        "label": "私聊插话",
+        "type": "bool",
+        "hint": "糖糖会主动给私聊用户发关心消息（心理陪伴用户/心情告警优先）。关闭后私聊只被动回复"
+      },
+      {
+        "path": "behavior.interjection_thirst",
+        "label": "插话饥渴度",
+        "type": "float",
+        "hint": "0=沉默 1=话痨。值越高越容易插话。建议 0.3-0.8"
+      },
+      {
+        "path": "behavior.interjection_cooldown",
+        "label": "插话冷却",
+        "type": "int",
+        "hint": "两次插话之间最少间隔多少秒。防止刷屏"
+      },
+      {
+        "path": "behavior.sticker_steal",
+        "label": "自动偷图",
+        "type": "bool",
+        "hint": "开启后糖糖会自动保存群里发的表情包"
+      },
+      {
+        "path": "behavior.welcome_new_members",
+        "label": "入群欢迎",
+        "type": "bool",
+        "hint": "新人入群时自动发送个性化欢迎消息"
+      },
+      {
+        "path": "behavior.welcome_message",
+        "label": "欢迎文案",
+        "type": "str",
+        "hint": "自定义欢迎语，留空让AI自己说。写 [QQ号] 会自动替换成新朋友的QQ号"
+      },
+      {
+        "path": "behavior.autonomous_speech",
+        "label": "自治发言",
+        "type": "bool",
+        "hint": "她能否自己找时机说话（不只是回消息）。关掉后完全被动，主动性归零。"
+      },
+      {
+        "path": "behavior.robot_ids",
+        "label": "机器人自己的号",
+        "type": "list",
+        "hint": "这些号发的消息不当作真人说话（防自问自答）。一行一个 QQ 号。"
+      }
+    ]
+  },
+  {
+    "key": "mood",
+    "title": "情绪 — 糖糖三维心情模型（精力/心情/耐心）",
+    "fields": [
+      {
+        "path": "mood.decay_energy_per_hour",
+        "label": "精力消耗/时",
+        "type": "int",
+        "hint": "每小时自然消耗多少精力。每次回复额外扣1-3点。\n"
+      },
+      {
+        "path": "mood.mood_neutral",
+        "label": "心情中性值",
+        "type": "int",
+        "hint": "心情的自然平衡点，被夸会涨、被骂会跌，空闲时自动向这个值靠拢。\n"
+      },
+      {
+        "path": "mood.decay_mood_per_hour",
+        "label": "心情回归速度",
+        "type": "int",
+        "hint": "心情偏离中性值后，每小时恢复多少。\n"
+      },
+      {
+        "path": "mood.decay_patience_per_hour",
+        "label": "耐心恢复/时",
+        "type": "int",
+        "hint": "每小时自然恢复多少耐心。被连续追问会消耗耐心。\n"
+      },
+      {
+        "path": "mood.energy_high",
+        "label": "精力充沛阈值",
+        "type": "int",
+        "hint": "精力≥此值 → 活泼，回复兴致高。\n"
+      },
+      {
+        "path": "mood.energy_normal",
+        "label": "精力正常阈值",
+        "type": "int",
+        "hint": "精力在[此值,high)之间 → 正常聊天。精力<此值 → 开始变懒。\n"
+      },
+      {
+        "path": "mood.energy_low",
+        "label": "精力低迷阈值",
+        "type": "int",
+        "hint": "精力<此值 → 非常疲惫，能短就短。\n"
+      }
+    ]
+  },
+  {
+    "key": "napcat",
+    "title": "SnowLuma — QQ 协议连接",
+    "fields": [
+      {
+        "path": "napcat.http_url",
+        "label": "HTTP地址",
+        "type": "str",
+        "hint": "SnowLuma 的 HTTP API 地址，默认 http://127.0.0.1:3000"
+      },
+      {
+        "path": "_napcat_token_hint",
+        "label": "连接密钥",
+        "type": "label",
+        "hint": "🔑 SnowLuma Token 在「🔑 密钥管理」分类里——它和 SnowLuma 网页面板里的"
+      }
+    ]
+  },
+  {
+    "key": "memory",
+    "title": "记忆 — 糖糖记住的东西",
+    "fields": [
+      {
+        "path": "memory.db_path",
+        "label": "数据库路径",
+        "type": "str",
+        "hint": "SQLite 数据库文件路径。不要删除这个文件！"
+      },
+      {
+        "path": "memory.short_term_size",
+        "label": "短期记忆条数",
+        "type": "int",
+        "hint": "每个群缓存的最近消息数。建议 100-500：太小记不住上下文，太大浪费内存。默认 250"
+      },
+      {
+        "path": "memory.uncertain_injection",
+        "label": "模糊记忆注入（只影响私聊）",
+        "type": "bool",
+        "hint": "开启后，私聊里除了「她确定记得」的事，还会带出至多 2 条「她模糊记得」的旧事（显示为 💭~ 并附一句留余地的行为契约）。群里恒不注入——那等于把某个人的模糊记忆说给全群听。关掉即回到只看有证据记忆的旧行为。"
+      },
+      {
+        "path": "memory.open_loops_injection",
+        "label": "悬着的事注入（只影响私聊）",
+        "type": "bool",
+        "hint": "私聊里额外注入至多 3 条「对方提过、还没结的事」（带编号、原定时间、问过几次），让她能主动追问。群里恒不注入——把甲的悬事说给全群，错配影响面是全场。关掉即恢复原状。"
+      }
+    ]
+  },
+  {
+    "key": "tasks",
+    "title": "⏰ 提醒可靠性 — ActionPlan 上线与回滚闸门",
+    "fields": [
+      {
+        "path": "tasks.text_action_outbox_enabled",
+        "label": "领取文本任务",
+        "type": "bool",
+        "hint": "关闭后到期纯文本提醒保持 pending，不调用 LLM、不创建新发送计划。安全回滚时先关闭此项。"
+      },
+      {
+        "path": "tasks.media_action_outbox_enabled",
+        "label": "领取媒体任务",
+        "type": "bool",
+        "hint": "统一贴图/语音提醒的 canary 闸门。关闭期间到期的媒体提醒只跳过、不补发；确认新 boot 与 outbox worker 正常后再开启。"
+      },
+      {
+        "path": "tasks.send_outbox_claims_enabled",
+        "label": "发送走队列（可重试）",
+        "type": "bool",
+        "hint": "发送任务进 outbox 队列，可重试、可对账。关掉退回直接发送，出错就丢。同组的「任务可靠性」两个闸门是显式回滚开关。"
+      },
+      {
+        "path": "tasks.manual_retry_generation_enabled",
+        "label": "允许手动重试生成",
+        "type": "bool",
+        "hint": "失败的任务能否由人工触发重新生成。关掉只能等自然重试。"
+      }
+    ]
+  },
+  {
+    "key": "vision",
+    "title": "识图 — 看懂群友发的图片",
+    "fields": [
+      {
+        "path": "llm.vision.enabled",
+        "label": "启用识图",
+        "type": "bool",
+        "hint": "开启后糖糖能看懂图片内容并评价"
+      },
+      {
+        "path": "llm.vision.provider",
+        "label": "识图方式",
+        "type": "choice",
+        "hint": "识图走哪条路。main = 用主模型的视觉能力（不额外花钱）；api = 单独调下面的识图端点；local = 本地模型"
+      },
+      {
+        "path": "llm.vision.model",
+        "label": "API 模型（仅 api 方式）",
+        "type": "str",
+        "hint": "填入你的视觉模型名（OpenAI 兼容格式，与你接入的 API 对应）"
+      },
+      {
+        "path": "_vision_key_hint",
+        "label": "识图密钥",
+        "type": "label",
+        "hint": "🔑 只有「api 方式」需要在「🔑 密钥管理」里填识图 Key。main / local 都不需要。"
+      },
+      {
+        "path": "llm.vision.base_url",
+        "label": "API 地址（仅 api 方式）",
+        "type": "str",
+        "hint": "填入你的 OpenAI 兼容 API 地址（通常以 /v1 结尾）"
+      }
+    ]
+  },
+  {
+    "key": "voice",
+    "title": "语音 — GPT-SoVITS 文字转语音 / 声音克隆",
+    "fields": [
+      {
+        "path": "voice.enabled",
+        "label": "启用语音",
+        "type": "bool",
+        "hint": "开启后糖糖可以把文字转成语音发到群里"
+      },
+      {
+        "path": "voice.provider",
+        "label": "语音引擎",
+        "type": "label",
+        "hint": "GPT-SoVITS（固定）"
+      },
+      {
+        "path": "voice.cache_dir",
+        "label": "缓存目录",
+        "type": "str",
+        "hint": "语音文件缓存位置"
+      },
+      {
+        "path": "voice.voice_lang",
+        "label": "语音语言",
+        "type": "str",
+        "hint": "GPT-SoVITS 合成用的语言代码（zh=中文）。改错会念出乱码音节。"
+      }
+    ]
+  },
+  {
+    "key": "web_search",
+    "title": "搜索 — 糖糖上网查资料",
+    "fields": [
+      {
+        "path": "web_search.enabled",
+        "label": "启用搜索",
+        "type": "bool",
+        "hint": "开启后糖糖会自动搜索网络回答实时问题"
+      },
+      {
+        "path": "web_search.timeout",
+        "label": "超时(秒)",
+        "type": "int",
+        "hint": "搜索请求超时时间。网络不好可以调大"
+      },
+      {
+        "path": "web_search.max_results",
+        "label": "最大结果数",
+        "type": "int",
+        "hint": "每次搜索返回几条结果。太多会干扰回答"
+      }
+    ]
+  },
+  {
+    "key": "image_share",
+    "title": "图片分享 — 糖糖定时发图到群里",
+    "fields": [
+      {
+        "path": "image_share.enabled",
+        "label": "启用分享",
+        "type": "bool",
+        "hint": "开启后糖糖会定时从图库选图发到群里"
+      },
+      {
+        "path": "image_share.interval_minutes",
+        "label": "间隔(分钟)",
+        "type": "float",
+        "hint": "多久发一张图。例如120=每2小时。0=不自动发"
+      },
+      {
+        "path": "image_share.max_per_day",
+        "label": "每日上限",
+        "type": "int",
+        "hint": "每天最多发几张。防止刷屏"
+      },
+      {
+        "path": "image_share.use_local_only",
+        "label": "仅本地图库",
+        "type": "bool",
+        "hint": "只发 share_images/ 里的图，不爬花瓣网"
+      },
+      {
+        "path": "image_share.local_dir",
+        "label": "图库路径",
+        "type": "str",
+        "hint": "本地图片文件夹。默认 ./share_images"
+      },
+      {
+        "path": "image_share.caption",
+        "label": "配文模式",
+        "type": "str",
+        "hint": "random=随机配文 / llm=AI生成配文 / none=不配文"
+      },
+      {
+        "path": "image_share.play_mode",
+        "label": "播放模式",
+        "type": "str",
+        "hint": "random=随机选图 / sequential=按顺序播放"
+      },
+      {
+        "path": "image_share.play_category",
+        "label": "播放分类",
+        "type": "str",
+        "hint": "只播某个文件夹的图。留空=所有。如：美图"
+      },
+      {
+        "path": "image_share.min_width",
+        "label": "最小宽度（像素）",
+        "type": "int",
+        "hint": "比这窄的图不发，避免糊图刷屏。默认 800。"
+      },
+      {
+        "path": "image_share.min_height",
+        "label": "最小高度（像素）",
+        "type": "int",
+        "hint": "比这矮的图不发（长条截图之类）。默认 600。"
+      },
+      {
+        "path": "image_share.groups",
+        "label": "发图到这些群",
+        "type": "list",
+        "hint": "一行一个群号。留空 = 不发（即使上面开关开着）。"
+      }
+    ]
+  },
+  {
+    "key": "daily_report",
+    "title": "每日播报 — 糖糖每天早上发群活跃日报",
+    "fields": [
+      {
+        "path": "daily_report.enabled",
+        "label": "启用播报",
+        "type": "bool",
+        "hint": "开启后每天定时发送群活跃日报"
+      },
+      {
+        "path": "daily_report.time",
+        "label": "播报时间",
+        "type": "str",
+        "hint": "每天几点发送，格式 HH:MM（如 9:00）"
+      },
+      {
+        "path": "daily_report.include_weather",
+        "label": "包含天气",
+        "type": "bool",
+        "hint": "播报中附带当日天气信息"
+      },
+      {
+        "path": "daily_report.include_stats",
+        "label": "包含统计",
+        "type": "bool",
+        "hint": "播报中附带群数据（人数/消息数/记忆数）"
+      },
+      {
+        "path": "daily_report.catchup_minutes",
+        "label": "统计回看多少分钟",
+        "type": "int",
+        "hint": "日报的统计窗口长度，默认 30。改大会把前一天的旧事算进来。"
+      },
+      {
+        "path": "daily_report.groups",
+        "label": "日报发到这些群",
+        "type": "list",
+        "hint": "一行一个群号。留空 = 不发（即使上面开关开着）。"
+      }
+    ]
+  },
+  {
+    "key": "daily_like",
+    "title": "每日定时点赞 — 每天固定给指定的人点赞（每人N次）",
+    "fields": [
+      {
+        "path": "daily_like.enabled",
+        "label": "启用",
+        "type": "bool",
+        "hint": "开启后每天定时给指定的人点赞"
+      },
+      {
+        "path": "daily_like.time",
+        "label": "点赞时间",
+        "type": "str",
+        "hint": "每天几点执行，格式 HH:MM（如 10:00）"
+      },
+      {
+        "path": "daily_like.targets",
+        "label": "目标QQ号",
+        "type": "list",
+        "hint": "每行一个QQ号，糖糖每天会给这些人各点 N 次赞。"
+      },
+      {
+        "path": "daily_like.count_per_person",
+        "label": "每人点赞数",
+        "type": "int",
+        "hint": "每个目标每天点赞的次数（默认10，受QQ限制建议≤20）"
+      }
+    ]
+  },
+  {
+    "key": "image_gen",
+    "title": "AI画图 — 🔒 功能已暂时关闭",
+    "fields": [
+      {
+        "path": "_img_gen_note",
+        "label": "功能状态",
+        "type": "label",
+        "hint": "🔒 AI画图功能已暂时关闭。\n"
+      }
+    ]
+  },
+  {
+    "key": "catch_up",
+    "title": "离线补读 — 她不在的时候发生了什么",
+    "fields": [
+      {
+        "path": "catch_up.enabled",
+        "label": "开启离线补读",
+        "type": "bool",
+        "hint": "她掉线/被限流期间群里发生的事，上线后补读一遍再开口。关掉她就真的不知道那段时间说过什么——这也是「她为什么不知道我刚说的话」最常见的答案。"
+      },
+      {
+        "path": "catch_up.inject_as_context",
+        "label": "补读内容作为背景注入",
+        "type": "bool",
+        "hint": "开：补读内容当作「背景材料」交给她（她知道自己是在看刚才错过的话，不是在实时对话）。关：只记日志，不进上下文——省 token，但她会真的没看见。"
+      },
+      {
+        "path": "catch_up.max_messages",
+        "label": "最多补读多少条",
+        "type": "int",
+        "hint": "一次补读的上限，默认 500。太大她会拿一堆过期消息当现在的对话；太小会漏。"
+      },
+      {
+        "path": "catch_up.max_missed_replies_per_group",
+        "label": "每群最多补几次未回",
+        "type": "int",
+        "hint": "离线期间同一个人连发多条、她一条都没回时，最多补几次回应，默认 3。防上线后一口气刷屏连回。"
+      },
+      {
+        "path": "catch_up.min_gap_minutes",
+        "label": "最短离线多久才补读",
+        "type": "int",
+        "hint": "离开不足这么多分钟就不补（那是正常停顿，不是掉线），默认 3。"
+      },
+      {
+        "path": "catch_up.missed_reply_window_minutes",
+        "label": "未回消息回溯窗口（分钟）",
+        "type": "int",
+        "hint": "只补读最近这么多分钟里没回的消息，默认 60。更早的就别补了——时过境迁再回更怪。"
+      },
+      {
+        "path": "catch_up.summarize_threshold",
+        "label": "超过多少条改为摘要",
+        "type": "int",
+        "hint": "补读消息超过这个条数时，先让她用 LLM 摘要一遍再注入，避免把几百条原文塞进上下文。默认 30。"
+      }
+    ]
+  },
+  {
+    "key": "image_tagging",
+    "title": "图库打标 — 给图片批量生成标签（本地 Ollama / 云端 API）",
+    "fields": [
+      {
+        "path": "image_tagging.provider",
+        "label": "打标方式",
+        "type": "choice",
+        "hint": "off=不启用；ollama=本机 Ollama（免费、离线，要先装好模型）；api=云端视觉 API（不装模型也能用，但要 key）。这决定图库里那个按钮走哪条路。"
+      },
+      {
+        "path": "image_tagging.dir",
+        "label": "图库目录",
+        "type": "str",
+        "hint": "相对项目根；默认 stickers_cg。换目录就是换一套图，标签写在这个目录的 metadata.json 里。"
+      },
+      {
+        "path": "image_tagging.ollama_host",
+        "label": "Ollama 地址",
+        "type": "str",
+        "hint": "本机默认 http://127.0.0.1:11434。跑在另一台机器上时填内网地址。"
+      },
+      {
+        "path": "image_tagging.ollama_model",
+        "label": "Ollama 模型",
+        "type": "str",
+        "hint": "要能看图的多模态模型，先 ollama pull 拉下来。默认 qwen3-vl:8b-instruct-q4_K_M（量化后显存占用小、约 1.5 秒一张）。"
+      },
+      {
+        "path": "image_tagging.api_base",
+        "label": "API 地址",
+        "type": "str",
+        "hint": "OpenAI 兼容的 /v1 根地址，例如 https://dashscope.aliyuncs.com/compatible-mode/v1。程序会拼 /chat/completions。"
+      },
+      {
+        "path": "image_tagging.api_model",
+        "label": "API 模型",
+        "type": "str",
+        "hint": "服务商那边的多模态模型名，例如 qwen-vl-max / gpt-4o-mini。"
+      },
+      {
+        "path": "image_tagging.api_key",
+        "label": "API key",
+        "type": "str",
+        "hint": "建议留空，改在 .env 里写 IMAGE_TAG_API_KEY——config.yaml 会进 git。填了这里就以环境变量优先。"
+      },
+      {
+        "path": "image_tagging.max_side",
+        "label": "送模型前缩到多长边",
+        "type": "int",
+        "hint": "像素。视觉 token 数直接决定耗时和费用，768 是快与准的平衡点；要看清细节可以调到 1024。"
+      },
+      {
+        "path": "image_tagging.timeout_s",
+        "label": "单张超时（秒）",
+        "type": "int",
+        "hint": "本地大模型第一张要加载权重，会慢；300 秒够用。云端 API 可以调到 60。"
+      },
+      {
+        "path": "image_tagging.rename",
+        "label": "打标后按规范改名",
+        "type": "bool",
+        "hint": "改成「体位_暴露_hash.jpg」。文件名会参与她的语义检索（没有 metadata 时的兜底文本），所以默认开；不想动文件名就关掉，标签照样写进 metadata.json。"
+      }
+    ]
+  },
+  {
+    "key": "memory_sync",
+    "title": "记忆同步 — 多设备之间的记忆库",
+    "fields": [
+      {
+        "path": "memory_sync.auto",
+        "label": "自动同步",
+        "type": "bool",
+        "hint": "开启后记忆库的改动会自动同步到其他设备（Syncthing）。只有一台机器跑糖糖的话可以关掉，少一点后台 IO。"
+      }
+    ]
+  }
+]

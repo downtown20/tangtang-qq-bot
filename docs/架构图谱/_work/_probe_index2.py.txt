@@ -1,0 +1,14 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+out = {}
+out['chat_index_max_chat_id'] = q("SELECT MAX(chat_id) FROM chat_index")[0][0]
+out['chat_log_max_id'] = q("SELECT MAX(id) FROM chat_log")[0][0]
+out['chat_index_max_ts'] = q("SELECT MAX(timestamp) FROM chat_index")[0][0]
+out['chat_log_max_ts'] = q("SELECT MAX(timestamp) FROM chat_log")[0][0]
+out['chat_index_recent_7d'] = q("SELECT COUNT(*) FROM chat_index WHERE timestamp >= date('now','localtime','-7 day')")[0][0]
+out['chat_index_private_recent'] = q("SELECT COUNT(*) FROM chat_index ci JOIN chat_log cl ON cl.id=ci.chat_id WHERE COALESCE(cl.group_id,'')='' AND ci.timestamp >= date('now','localtime','-7 day')")[0][0]
+out['today_memories_by_timestamp'] = q("SELECT COUNT(*) FROM memories WHERE timestamp >= date('now','localtime')")[0][0]
+out['quarantined_chat'] = q("SELECT COUNT(*) FROM chat_log WHERE COALESCE(quarantined_at,'')<>''")[0][0]
+print(json.dumps(out, ensure_ascii=False, indent=1))

@@ -1,0 +1,24 @@
+{
+  "target": "agent/protocols.py",
+  "tests": "tests/test_dialog_quality.py",
+  "mutations": [
+    {
+      "name": "M22-背景预算退回 480（记忆块重新被整块淘汰，77% 那个比例会回来）",
+      "old": "BACKGROUND_BUDGET_TOKENS = 900    # 每轮 user message 背景块总预算（≈1250 汉字 / ≈833 真实 tokens）",
+      "new": "BACKGROUND_BUDGET_TOKENS = 480    # 每轮 user message 背景块总预算",
+      "expect_fail": "test_memory_block_survives_default_budget"
+    },
+    {
+      "name": "M22b-预算回到 720（记忆块出现了但被裁到只剩零头——「有块没内容」那种假修）",
+      "old": "BACKGROUND_BUDGET_TOKENS = 900    # 每轮 user message 背景块总预算（≈1250 汉字 / ≈833 真实 tokens）",
+      "new": "BACKGROUND_BUDGET_TOKENS = 720    # 每轮 user message 背景块总预算",
+      "expect_fail": "test_memory_block_survives_default_budget"
+    },
+    {
+      "name": "M23-预算放大成材料堆（1600，回到 2026-08-17 要压下去的「十几个块」形态）",
+      "old": "BACKGROUND_BUDGET_TOKENS = 900    # 每轮 user message 背景块总预算（≈1250 汉字 / ≈833 真实 tokens）",
+      "new": "BACKGROUND_BUDGET_TOKENS = 1600   # 每轮 user message 背景块总预算",
+      "expect_fail": "test_default_budget_covers_memory_but_not_unbounded"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "target": "tools/判据_J1线索回忆.py",
+  "tests": "tests/test_memory_metrics_tools.py",
+  "_about": "第 16 轮：J2 线索化口径的前提是「线索真的是一条线索」。变异必须全红——绿了说明闸门看不出「前缀没剥（问句一半是套话）」「不截断（长句稀释相似度）」。",
+  "mutations": [
+    {
+      "name": "线索前缀不剥（「答应过」留在问句里）",
+      "old": "    for prefix in (\"我答应过\", \"答应过\", \"我答应\", \"答应\",\n                   \"说好\", \"说过\", \"承诺过\", \"承诺\"):",
+      "new": "    for prefix in ():",
+      "expect_fail": "test_cue_text_strips_promise_prefix"
+    },
+    {
+      "name": "线索不截断（长句把 BGE 相似度稀释）",
+      "old": "    return text[:14]",
+      "new": "    return text",
+      "expect_fail": "test_cue_text_truncates_and_handles_empty"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_extraction_open_loop_prompt.py",
+  "_about": "第 14 轮：提取 prompt 的 open_loop 判据。变异必须全红——绿了说明闸门看不出「判据句被删 / event 定义退回过去时丢失 / 合并指令被删 / 真实正例被删 / 反向判据被删」。这些字符串是**真实发给 LLM 的 prompt 内容**，闸门抓的是 prompt 而不是源码注释。",
+  "mutations": [
+    {
+      "name": "删掉「还没发生 → open_loop」判据句（LLM 又会把将来事当 event）",
+      "old": "⚠ **判据只有一个：这件事发生了没有？** 还没发生 → open_loop；已经发生 → event。",
+      "new": "⚠ 判断这件事。",
+      "expect_fail": "test_prompt_tells_llm_unfinished_things_go_to_open_loop"
+    },
+    {
+      "name": "event 定义退回没说「已经发生」",
+      "old": "- event: **已经发生**的生活事件",
+      "new": "- 生活事件",
+      "expect_fail": "test_event_definition_is_limited_to_happened_things"
+    },
+    {
+      "name": "删掉「同一件事只输出一条」（一件事又会被拆成多行）",
+      "old": "**同一件事只输出一条**",
+      "new": "输出条目",
+      "expect_fail": "test_prompt_demands_one_row_per_event"
+    },
+    {
+      "name": "删掉真实数据正例（只剩教科书句）",
+      "old": "✅「明天去学校拿录取通知书」→ open_loop(kind=plan, expected_at=明天)",
+      "new": "✅「我有个计划」→ open_loop",
+      "expect_fail": "test_prompt_carries_real_data_example_not_only_textbook"
+    },
+    {
+      "name": "删掉反向判据（已完成的事会被当没结）",
+      "old": "🚫 不算：已经完成的事——「面试完了」「体检做完了」是普通 event 记忆，不是没结的事",
+      "new": "🚫 不算：已经完成的事",
+      "expect_fail": "test_prompt_keeps_completed_event_as_negative_control"
+    }
+  ]
+}

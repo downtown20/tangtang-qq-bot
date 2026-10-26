@@ -1,0 +1,16 @@
+# -*- coding: utf-8 -*-
+"""只读取证 7：pytest nodeids 是否含 test_reflection_io（游标污染嫌疑）（autonomy-tracer）"""
+import io, os, json, sys
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+ni = os.path.join(root, '.pytest_cache', 'v', 'cache', 'nodeids')
+if os.path.exists(ni):
+    ids = json.load(io.open(ni, encoding='utf-8'))
+    print('nodeids total', len(ids))
+    hits = [i for i in ids if 'reflection' in i]
+    print('reflection-related ids:', hits)
+    print('has test_reflection_io:', any('test_reflection_io' in i for i in ids))
+lf = os.path.join(root, '.pytest_cache', 'v', 'cache', 'lastfailed')
+if os.path.exists(lf):
+    d = json.load(io.open(lf, encoding='utf-8'))
+    print('lastfailed count', len(d))

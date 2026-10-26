@@ -42,13 +42,43 @@ _jinja_env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape
 # 这是一个粗略估算，不需要 100% 精确——预算管理是"约束"而非"精确计算"。
 
 def estimate_tokens(text: str) -> int:
-    """粗略估算文本的 token 数"""
+    """估算文本 token 数——**全系统唯一的预算尺子**。
+
+    **2026-10-25 第二轮自查：旧系数把真实 token 高估了 2.36 倍。**
+
+    取证方式（不是拍脑袋）：把她的真实 system prompt（3000 字符 / 中文 2340 /
+    其他 660）原样发给**同一个模型**，读 `usage.prompt_tokens` = **1926**
+    （含 user「在吗」约 4 tokens）。旧公式 `中文×1.8 + 其他×0.5` 估出
+    **4542**，高估 2.36 倍。
+
+    后果不是「数字难看」，是**内容被白白砍掉**：预算 3000「估算 tokens」
+    实际只装得下约 1271 真实 tokens，于是 `_truncate_text` 从尾部砍掉约 44%
+    的 system prompt（「## 关系」「风格锚」「FOLLOW_UP_PROTOCOL」整段）——
+    她有一半说明书从来没送到过。
+
+    新系数由实测标定（同一模型、四个样本）：
+
+    | 样本 | 中文 | 其他 | 真实 tokens | 真实/字符 |
+    |---|---|---|---|---|
+    | 纯中文 | 192 | 16 | 133 | 0.64 |
+    | 纯英文 | 0 | 405 | 127 | 0.31 |
+    | 中英混合+标点 | 27 | 54 | 75 | 0.93 |
+    | 纯代码 | 0 | 105 | 69 | 0.66 |
+
+    中文取 **0.72**（比实测 0.64 略保守）；其他字符**保留 0.5**
+    （对纯英文仍高估约 1.6 倍——这是安全方向：低估会让预算守不住，
+    比高估危险）。真实 system prompt 复算：0.72×2340 + 0.5×660 = **2015**
+    vs 真实 1926 → +4.6%，落在「略保守」的目标区间内。
+
+    ⚠ 已知的残留误差：符号/换行密集的文本（代码、JSON schema）会被低估
+    （实测纯代码 0.64 倍）。这几类在对话 prompt 里占比低，且低估只会让
+    预算更宽松，不会截掉内容；真要精确计费请读 API 返回的 `usage`。
+    """
     if not text:
         return 0
     chinese_chars = sum(1 for c in text if '一' <= c <= '鿿' or '　' <= c <= '〿')
     other_chars = len(text) - chinese_chars
-    # 中文字 ≈ 1.8 tokens, 英文/标点 ≈ 0.5 tokens per char
-    return int(chinese_chars * 1.8 + other_chars * 0.5)
+    return int(chinese_chars * 0.72 + other_chars * 0.5)
 
 
 @dataclass
@@ -99,10 +129,15 @@ class ContextBuilder:
     """
 
     # Token 预算
+    # 2026-10-23 T2.3：删掉 BUDGET_CONVERSATION = 2500——它**没有任何读者**。
+    # 同组的 CORE/RELEVANT/SUPPLEMENTARY/TOTAL 都有生产用途（:171/:185/:245），
+    # 只有它是旧分层预算布局的遗留：那个布局的唯一消费者 _assemble_with_budget
+    # 本身也零调用（本次一并删除）。⚠ 别把它当成「对话层预算」在未来接回来——
+    # 现在的对话预算走 protocols.fit_backgrounds（1200t 池）与 build() 的 history 段，
+    # 两套预算并存正是当初分层没落地的原因。
     BUDGET_CORE = 1800
     BUDGET_RELEVANT = 800
     BUDGET_SUPPLEMENTARY = 400
-    BUDGET_CONVERSATION = 2500
     BUDGET_TOTAL = 6000
 
     def __init__(self, self_state=None):
@@ -248,9 +283,13 @@ class ContextBuilder:
             # （capability_note 在模板最后——运行模式/语音能力/工具边界）。
             # 2026-08-17 Codex 终审：纠正契约「## 必须遵守」同样不可裁——
             # 旧逻辑只豁免 capability，契约在中间会被截断吃掉（契约可绕过）。
-            # 修复：两个不可裁段先摘出，其余部分截断后按序拼回。
+            # 2026-10-25 自查：**「## 此刻」同样不可裁**——它带日期/星期/时分，
+            # 在 personality_base 的 97% 位置，必被尾部截断吃掉。取证
+            # `turn_traces#67`：「我上一轮说了「10月26号，星期一」，但这个日期
+            # 可能是我编的？我没有查时间」——她连时段词都看不到，只能查或猜。
+            # 一个不知道自己现在几点的存在，谈不上「有活人的时间观念」。
             exempts = []  # [(marker, section_text)]
-            for marker in ("## 必须遵守", "## ⚙️ 当前运行模式"):
+            for marker in ("## 必须遵守", "## ⚙️ 当前运行模式", "## 此刻"):
                 if marker in system_prompt:
                     _head, _sec = system_prompt.split(marker, 1)
                     _m = re.search(r'\n\n## ', _sec)
@@ -341,41 +380,17 @@ class ContextBuilder:
     # ═══════════════════════════════════════
     # 预算管理
     # ═══════════════════════════════════════
-
-    def _assemble_with_budget(
-        self, sections: list[tuple[str, str]], budget: int, report: TokenReport
-    ) -> str:
-        """按优先级组装段落，超出预算时从后往前截断。
-
-        sections: [(name, text), ...] — 按优先级排列（前面的优先级高）
-        """
-        result_parts = []
-        used = 0
-
-        for name, text in sections:
-            if not text:
-                continue
-            tokens = estimate_tokens(text)
-
-            if used + tokens <= budget:
-                result_parts.append(text)
-                used += tokens
-            else:
-                # 超出预算——尝试截断当前段落
-                remaining = budget - used
-                if remaining > 100:  # 至少留 100 tokens 才有意义
-                    truncated = self._truncate_text(text, remaining)
-                    result_parts.append(truncated)
-                    used += estimate_tokens(truncated)
-                    logger.debug(f"📊 截断 {name}: {tokens}t → ~{estimate_tokens(truncated)}t")
-                else:
-                    logger.debug(f"📊 跳过 {name}: 预算不足 (需要{tokens}t, 剩余{remaining}t)")
-                # 已超出预算，后续全部跳过
-                break
-
-            report.sections[name] = tokens
-
-        return "\n".join(part for part in result_parts if part)
+    #
+    # 2026-10-23 T2.3：这里原有的 _assemble_with_budget() 已删除（零调用，实测全仓
+    # 只有定义处一行、0 个调用方）。它是**旧分层预算布局**的唯一消费者，配套的
+    # BUDGET_CONVERSATION 也一并删掉（见上方常量区注释）。
+    #
+    # 为什么删而不是接线：它和 build() 主路径**重复**——build() 自己已经在
+    # :245 用 BUDGET_CORE+RELEVANT+SUPPLEMENTARY 算 budget_limit 并在 :265/:270
+    # 截断 system_prompt；背景块预算另有 protocols.fit_backgrounds 的 1200t 池。
+    # 接进来只会多出**第三套**预算逻辑，而本仓的历史教训正是「同一件事两套逻辑
+    # 各自漂移」（T10/T12/T25/T35/T42）。全项目评估结论同此（见
+    # docs/开发规划/全项目审查历史_合并.md:130「应删除而非接入」）。
 
     @staticmethod
     def _truncate_text(text: str, token_budget: int) -> str:
@@ -383,8 +398,9 @@ class ContextBuilder:
         if estimate_tokens(text) <= token_budget:
             return text
 
-        # 按字符比例估算（1 中文字 ≈ 1.8 tokens）
-        char_limit = int(token_budget / 1.8)
+        # 按字符比例估算（中文 ≈ 0.72 tokens/字——**必须与 `estimate_tokens` 同系数**，
+        # 否则「判超预算」和「算出留多少字符」用两把尺子，截完还是不达标）。
+        char_limit = int(token_budget / 0.72)
         truncated = text[:char_limit]
 
         # 在最后一个完整句子处断开

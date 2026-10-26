@@ -95,6 +95,7 @@ def test_no_hard_truncation_in_source():
     """
     import ast as _ast
     CUT = 100  # 内容量级切片的下限；低于这个是取首字符之类的特判
+    # T2.14：交付链路的扫描面在 tests/test_intimate_reference.py（本文件只管加载侧）
     tree = _ast.parse((ROOT / 'agent' / 'handler.py').read_text(encoding='utf-8'))
     fn = None
     for node in _ast.walk(tree):
@@ -119,9 +120,10 @@ def test_no_hard_truncation_in_source():
 
 def test_slot_budgets_are_declared_and_respected():
     """预算必须声明；超了要能被发现（不是悄悄超）。"""
-    from agent.handler import SEDUCTIVE_SLOT_BUDGETS, SEDUCTIVE_TOTAL_BUDGET
+    # 2026-10-16 T2.14：预算与加载器一起搬到独立模块（单一事实源）
+    from agent.intimate_reference import SLOT_BUDGETS, TOTAL_BUDGET
     total = 0
-    for s, budget in SEDUCTIVE_SLOT_BUDGETS.items():
+    for s, budget in SLOT_BUDGETS.items():
         d = PKG / s
         if not d.is_dir():
             continue
@@ -130,8 +132,8 @@ def test_slot_budgets_are_declared_and_respected():
         total += n
         assert n <= budget, (
             f'槽位 {s} 有 {n} 字，超出预算 {budget} —— 请继续蒸馏（不要调大预算）')
-    assert total <= SEDUCTIVE_TOTAL_BUDGET, (
-        f'注入总量 {total} 字超出总预算 {SEDUCTIVE_TOTAL_BUDGET} —— 请继续蒸馏')
+    assert total <= TOTAL_BUDGET, (
+        f'注入总量 {total} 字超出总预算 {TOTAL_BUDGET} —— 请继续蒸馏')
 
 
 def test_archive_content_is_not_injected():

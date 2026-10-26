@@ -1,0 +1,18 @@
+{
+  "target": "agent/handler.py",
+  "tests": "tests/test_scenario_reference_config.py",
+  "mutations": [
+    {
+      "name": "触发场景写死回 seductive（换场景名 = 范本注入静默失效）",
+      "old": "        raw = self.config.get(\"scenario_reference\") or {}",
+      "new": "        raw = {}",
+      "expect_fail": "test_reads_config"
+    },
+    {
+      "name": "空配置不回退默认（trigger 为空 = 永不触发）",
+      "old": "        if not trigger:\n            trigger = self.DEFAULT_SCENARIO_REFERENCE_TRIGGER",
+      "new": "        if False:\n            trigger = self.DEFAULT_SCENARIO_REFERENCE_TRIGGER",
+      "expect_fail": "test_blank_falls_back"
+    }
+  ]
+}

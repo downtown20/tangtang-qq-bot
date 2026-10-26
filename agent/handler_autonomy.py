@@ -93,23 +93,74 @@ async def _finish_event_async(
 
 
 async def _persist_state_async(owner, key: str, value) -> bool:
-    """兼容旧离线替身，把自治状态写入线程边界。"""
-    async_saver = getattr(owner, "_save_state_kv_async", None)
-    if callable(async_saver):
-        return bool(await async_saver(key, value))
-    saver = getattr(owner, "_save_state_kv", None)
-    if not callable(saver):
-        return False
-    runner = getattr(owner, "_run_store_io", None)
-    if callable(runner):
-        try:
-            return bool(await runner("autonomy.save_state_kv", saver, key, value))
-        except Exception:
-            return False
+    """把自治状态写入线程边界；**失败必须留下可观测事实**（2026-10-23 台账 T66）。
+
+    为什么重写（取证见 T66 记录）：这是 T9 治过的那类病的**第二个作用对象**。
+    T9 修的是 `self_state.save()` 的 7 个调用点；这里是自治状态 kv 的 9 个调用点
+    （`state:auto_uncertain` / `state:auto_cold` / `state:auto_pending` /
+    `state:seek_uncertain` / `state:care_due`），而它们全部是
+    **「重启后必须记得」的主动开口/主动私聊冷却**。
+
+    旧实现的毛病有两层，缺一不可：
+      ① 三处 `except Exception: return False` 把异常吞成布尔，**无日志、无指标**；
+      ② 更致命的是——`_save_state_kv` 的 docstring 明写「返回成功与否——调用方
+         需要区分『内存已切换、落盘失败』（重启后状态分叉），**不再静默吞**」，
+         而**9 个调用点没有一个接收返回值**（实测：赋值 0 处、if 判断 0 处）。
+         也就是说那道「契约」写了但**从来没被消费过**——教训 #12/#14 的形态。
+
+    后果不是抽象的风险：`state:seek_uncertain` 丢了 = 24h 私聊冷却丢失 =
+    CLAUDE.md 教训 #15 记录的事故原样复发（2026-08-16「重启 7 次骚扰同一人 7 次，
+    对方零回复」）。那次修的是「没落盘」，T9 修的是「落盘失败不可见」，
+    这次是**同一条链上最后一个还静默的环**。
+
+    取 fail-open（与 T9 一致）：主动开口/结算主流程不该被持久化失败阻断，
+    否则一次磁盘抖动就让糖糖停止学习；但**必须**记 error 级日志 + 指标计数，
+    让失败可被发现。返回值保留——将来谁要 fail-closed 处理，它在那儿。
+
+    @param owner: Handler 实例（测试里可能是 SimpleNamespace 替身）。
+    @param key: 状态键，进日志用于定位是哪条路径丢的。
+    """
     try:
-        return bool(saver(key, value))
-    except Exception:
+        async_saver = getattr(owner, "_save_state_kv_async", None)
+        if callable(async_saver):
+            ok = bool(await async_saver(key, value))
+        else:
+            saver = getattr(owner, "_save_state_kv", None)
+            if not callable(saver):
+                # 「没有落盘能力」不是「落盘失败」——测试替身会走到这里，
+                # 记 error 会把一个合法降级渲染成故障（假警报会训练人忽略警报，T29）。
+                logger.debug("自治状态无落盘能力（%s）——测试替身或极简实例", key)
+                return False
+            runner = getattr(owner, "_run_store_io", None)
+            if callable(runner):
+                ok = bool(await runner("autonomy.save_state_kv", saver, key, value))
+            else:
+                ok = bool(saver(key, value))
+    except Exception as exc:
+        logger.error(
+            "💾 自治状态落盘异常（%s）：%s: %s——这条冷却/待确认状态不会被记住，"
+            "重启后可能重复打扰同一个人",
+            key, type(exc).__name__, exc,
+        )
+        _note_state_persist_failure(owner)
         return False
+
+    if not ok:
+        logger.error(
+            "💾 自治状态落盘失败（%s）：Store 返回失败——"
+            "这条冷却/待确认状态不会被记住，重启后可能重复打扰同一个人",
+            key,
+        )
+        _note_state_persist_failure(owner)
+    return ok
+
+
+def _note_state_persist_failure(owner) -> None:
+    """落盘失败计数（指标写不进去也不许把主流程带崩——与 T9 同款兜底）。"""
+    try:
+        owner.metrics.incr("autonomy_state_persist_failed")
+    except Exception:
+        logger.debug("autonomy_state_persist_failed 指标记录失败", exc_info=True)
 
 
 async def _set_last_initiative_async(owner, now: float) -> None:
@@ -151,7 +202,13 @@ class AutonomyMixin:
         )
 
     async def _save_state_kv_async(self, key: str, value) -> bool:
-        """把自治状态快照写入 Store worker，避免状态落盘独占事件循环。"""
+        """把自治状态快照写入 Store worker，避免状态落盘独占事件循环。
+
+        2026-10-23 T66：异常不再吞成裸 False——记 error 并计数。
+        这里与模块级 _persist_state_async 是**同一条链的两段**（它优先调用本方法），
+        两段都静默的话，无论走哪条路失败都看不见。重复记一次日志是可接受的：
+        一次失败最多两行，而静默一次就是事故。
+        """
         saver = getattr(self, "_save_state_kv", None)
         if not callable(saver):
             return False
@@ -159,7 +216,12 @@ class AutonomyMixin:
             return bool(await self._run_store_io(
                 "autonomy.save_state_kv", saver, key, value,
             ))
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "💾 自治状态落盘异常（%s）：%s: %s——这条冷却/待确认状态不会被记住",
+                key, type(exc).__name__, exc,
+            )
+            _note_state_persist_failure(self)
             return False
 
     async def _run_extraction_io(
@@ -360,6 +422,18 @@ class AutonomyMixin:
                     "autonomy.cleanup_stale_memories",
                     self.memory.cleanup_stale_memories, days=90,
                 )
+                # 🧵 L5（2026-10-25 第 13 轮）：过期悬事清理——只清「到期 30 天
+                # 且已问过 2 次仍没结果」的，没问过的不许替她放弃。
+                try:
+                    expired = await self._run_store_io(
+                        "autonomy.expire_open_loops",
+                        self.memory.store.expire_open_loops,
+                        days_overdue=30, max_asked=2,
+                    )
+                    if expired:
+                        logger.info("🧵 过期悬事已清理: %d 条", int(expired))
+                except Exception:
+                    logger.warning("🧵 过期悬事清理失败（不影响启动）", exc_info=True)
                 from . import health_check
                 await self._run_store_io(
                     "autonomy.mark_cleanup_ran",
@@ -921,15 +995,21 @@ class AutonomyMixin:
         experiences = self.self_state.self_narrative.recent_experiences
         if not experiences:
             return ""
-        # 随机选一条 30-100 字的日记
-        suitable = [e for e in experiences[-5:] if 30 <= len(e) <= 150]
+        # T2.10（2026-10-16）：**不掷骰子**。旧实现 random.choice(suitable) 是系统替她挑
+        # 「这会儿想起哪件事」——挑哪条、提不提都应该她说了算。改成把候选（最多 3 条）
+        # 一起给她，由她决定提不提、提哪条。
+        # 体积上界：3 条 × 100 字（旧实现 1 条 ≤150 字）——她的小事不该挤掉别人的材料
+        # （背景池 1200t，见 T56/T57）。
+        suitable = [e.strip() for e in experiences[-5:] if 30 <= len(e) <= 150]
         if not suitable:
-            suitable = experiences[-3:]
+            suitable = [e.strip() for e in experiences[-3:] if e.strip()]
         if not suitable:
             return ""
-        fragment = random.choice(suitable)
+        picks = [e[:100] for e in suitable[-3:]]
+        numbered = "".join(f"{i}. {e}\n" for i, e in enumerate(picks, 1))
         self._last_diary_time = now_t
-        return f"\n\n（糖糖突然想起自己最近的一件事：{fragment}。如果和当前话题相关可以自然地分享一下，不相关就不提。）"
+        return (f"\n\n（你自己最近经历了这些事：\n{numbered}"
+                "想提就挑一件自然地说，都不合适就不提——不必硬提，也不要编。）")
 
     def _get_cross_window_context(self, user_id: str, group_id: str) -> str:
         """跨窗口记忆——上次和这个人聊到哪了（BGE 抽取式摘要）"""
@@ -2161,8 +2241,19 @@ class AutonomyMixin:
 
     async def _maybe_synthesize_stale_profiles(self):
         """画像补全：扫描有>10条记忆但无画像或画像 dirty 的用户。
-        每次最多处理 2 人，避免 LLM API 短时间大量调用。"""
+        每次最多处理 2 人，避免 LLM API 短时间大量调用。
+
+        2026-10-15 追加第二趟：**非空 legacy 画像的复活扫描**（每周期最多 3 人）。
+        第一趟只认「notes 为空 / dirty」，于是「有画像但不可信」的人永久冻结——
+        注入门只放行 verified/manual/corrected（防事故，正确），而他们又不进候选，
+        于是永远既不被用、也不被刷新。第二趟把「重合成」这条唯一的复活路径接通；
+        **注入门一个字都没改**，重合成产出 verified 快照才可能被注入，
+        谱系不合法时 `replace_profile_snapshot` 照旧落回 legacy（fail-closed）。
+        实测（2026-10-15）：68 份非空 legacy 里 21 人已有 ≥10 条可信来源记忆，
+        这一趟会把他们逐个捞回来；21 人 ÷ 3 人/周期 ≈ 7 个周期（约 70 分钟）排空，
+        之后回到常态（无候选即不调用 LLM）。"""
         max_per_cycle = 2
+        max_legacy_per_cycle = 3
         processed = 0
         try:
             # notes_dirty 是失败后必须可重试的持久状态，不能只扫描 notes 为空者。
@@ -2175,37 +2266,67 @@ class AutonomyMixin:
             for (qq_id,) in rows:
                 if processed >= max_per_cycle:
                     break
-                if qq_id in self._extracting_users:
-                    continue
-                # 检查是否最近已尝试合成（避免频繁重试）
-                last_attempt = await self._run_store_io(
-                    "profiles.last_attempt", self.memory.store.kv_get,
-                    f"synth_attempt:{qq_id}",
-                )
-                if last_attempt:
-                    try:
-                        from datetime import timedelta
-                        last_dt = datetime.fromisoformat(last_attempt)
-                        if datetime.now() - last_dt < timedelta(hours=6):
-                            continue  # 6小时内试过，跳过
-                    except Exception:
-                        pass
-                person = await self._run_store_io(
-                    "profiles.get_person", self.memory.get_or_create_person, qq_id,
-                )
-                is_dirty = bool(person.get("notes_dirty", 0))
-                reason = "画像待纠正重合成" if is_dirty else "有记忆但无画像"
-                logger.info(f"📝 画像补全触发: {qq_id} {reason}")
-                await self._run_store_io(
-                    "profiles.mark_attempt", self.memory.store.kv_set,
-                    f"synth_attempt:{qq_id}", datetime.now().isoformat(),
-                )
-                task = (self._resynthesize_profile_later(qq_id) if is_dirty
-                        else self._synthesize_profile_task(qq_id))
-                self._safe_task(task, name=f"profile_retry:{qq_id}")
-                processed += 1
+                if await self._try_synthesize_profile_for(qq_id, legacy_pass=False):
+                    processed += 1
+
+            # 第二趟：非空 legacy 画像复活。候选是「空/dirty」的超集，
+            # 但刚刚派发过的人已被 synth_attempt 冷却挡住（不消耗本趟额度）。
+            legacy_done = 0
+            legacy_rows = await self._run_store_io(
+                "profiles.scan_legacy",
+                self.memory.store.get_people_with_memories_gt,
+                min_count=10, empty_notes=True, limit=10,
+                include_dirty=True, legacy_notes=True,
+            )
+            for (qq_id,) in legacy_rows:
+                if legacy_done >= max_legacy_per_cycle:
+                    break
+                if await self._try_synthesize_profile_for(qq_id, legacy_pass=True):
+                    legacy_done += 1
         except Exception as e:
             logger.debug(f"📝 画像补全扫描失败: {e}")
+
+    async def _try_synthesize_profile_for(self, qq_id: str, *, legacy_pass: bool) -> bool:
+        """给一个候选触发画像合成；返回 True 表示本次真的派发了任务。
+
+        两个调用方共用（常态扫描 / legacy 复活扫描）。`legacy_pass` 只改日志措辞，
+        不改行为——两条路径最终都走同一个 `_synthesize_profile_task`，
+        产出物与信任级别完全由 `replace_profile_snapshot` 的谱系判定决定。
+        """
+        if qq_id in self._extracting_users:
+            return False
+        # 检查是否最近已尝试合成（避免频繁重试）
+        last_attempt = await self._run_store_io(
+            "profiles.last_attempt", self.memory.store.kv_get,
+            f"synth_attempt:{qq_id}",
+        )
+        if last_attempt:
+            try:
+                from datetime import timedelta
+                last_dt = datetime.fromisoformat(last_attempt)
+                if datetime.now() - last_dt < timedelta(hours=6):
+                    return False  # 6小时内试过，跳过
+            except Exception:
+                pass
+        person = await self._run_store_io(
+            "profiles.get_person", self.memory.get_or_create_person, qq_id,
+        )
+        is_dirty = bool(person.get("notes_dirty", 0))
+        if is_dirty:
+            reason = "画像待纠正重合成"
+        elif legacy_pass:
+            reason = "legacy 画像复活（有画像但不可信——重合成才有机会变 verified）"
+        else:
+            reason = "有记忆但无画像"
+        logger.info(f"📝 画像补全触发: {qq_id} {reason}")
+        await self._run_store_io(
+            "profiles.mark_attempt", self.memory.store.kv_set,
+            f"synth_attempt:{qq_id}", datetime.now().isoformat(),
+        )
+        task = (self._resynthesize_profile_later(qq_id) if is_dirty
+                else self._synthesize_profile_task(qq_id))
+        self._safe_task(task, name=f"profile_retry:{qq_id}")
+        return True
 
     async def _maybe_daily_metrics_aggregate(self):
         """每日凌晨运行一次聚合查询（M11-M13 需要 SQL 扫描）。
@@ -2307,6 +2428,18 @@ class AutonomyMixin:
                     mark_cleanup_ran,
                     self,
                 )
+            except Exception:
+                pass
+            # 🧵 每日清理：过期悬事（L5，2026-10-25 第 13 轮）——到期 30 天且
+            # 已问过 2 次仍没结果的行标 expired，让真正的近期悬事有注入位。
+            try:
+                expired = await self._run_store_io(
+                    "daily_aggregate.expire_open_loops",
+                    self.memory.store.expire_open_loops,
+                    days_overdue=30, max_asked=2,
+                )
+                if expired:
+                    logger.info("🧵 每日过期悬事已清理: %d 条", int(expired))
             except Exception:
                 pass
             # 🧹 每日清理：闲置短期缓冲（>24h 未活跃的群聊上下文）

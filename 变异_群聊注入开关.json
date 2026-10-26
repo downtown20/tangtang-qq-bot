@@ -1,0 +1,18 @@
+{
+  "target": "agent/scenario_packs.py",
+  "tests": "tests/test_scenario_packs.py",
+  "mutations": [
+    {
+      "name": "群聊开关默认打开（升级就把范本推进群聊，群里没人同意过）",
+      "old": "    \"allow_groups\": False,",
+      "new": "    \"allow_groups\": True,",
+      "expect_fail": "test_allow_groups_defaults_to_false"
+    },
+    {
+      "name": "allow_groups 不参与归一（写了 true 也被覆盖回 false，开关等于假的）",
+      "old": "            pack[\"allow_groups\"] = bool(pack.get(\"allow_groups\", False))",
+      "new": "            pack[\"allow_groups\"] = False",
+      "expect_fail": "test_allow_groups_can_be_enabled"
+    }
+  ]
+}

@@ -348,6 +348,10 @@ class TangTang:
         log_buffer.setLevel(logging.DEBUG)
         logging.getLogger().addHandler(log_buffer)
 
+        # 🏠 会客厅（桌面端真身会话接口）——在 start() 里拉起，这里先占位：
+        # 启动阶段失败（端口被占等）时必须能安全地当它不存在。
+        self.console = None
+
         # atexit 兜底清理——Windows SIGTERM 不可用时的最后防线
         atexit.register(self._atexit_cleanup)
 
@@ -524,6 +528,33 @@ class TangTang:
         except Exception as e:
             logger.warning(f"📬 离线消息补读失败: {e}")
 
+    def _start_console(self):
+        """起「会客厅」本地接口（桌面端的糖糖真身会话，2026-10-24）。
+
+        为什么在 bot 进程内：会客厅要让桌面端看到**同一个糖糖**——同一份记忆、
+        同一套驱动力、同一个关系场。独立进程会分裂状态文件与短期记忆窗口。
+        代价是糖糖没启动时桌面端只能显示引导态。
+
+        失败（端口被占 / 导入异常）一律降级为「没有会客厅」，绝不拖垮 bot：
+        QQ 聊天是主干，观察窗是附加物。
+        """
+        try:
+            from agent.console_api import ConsoleApi
+
+            cfg = (self.config.get("console") or {})
+            self.console = ConsoleApi(
+                self.handler,
+                asyncio.get_running_loop(),
+                host=str(cfg.get("host") or "127.0.0.1"),
+                port=int(cfg.get("port") or 8765),
+                guest_qq=str(cfg.get("guest_qq") or "") or None,
+            )
+            if not self.console.start():
+                self.console = None
+        except Exception:
+            logger.warning("🏠 会客厅启动失败（桌面端将显示未连接）", exc_info=True)
+            self.console = None
+
     async def start(self):
         print(BANNER)
         logger.info("小糖糖正在苏醒...")
@@ -531,6 +562,21 @@ class TangTang:
         logger.info(f"主人QQ：{self.config['bot']['owner_qq']}")
         logger.info(f"LLM：{self.config['llm']['provider']}/{self.config['llm']['model']}")
         logger.info(f"主动插话：{'开' if self.config['behavior']['active_interjection'] else '关'}")
+        logger.info(f"语音：{self.config.get('voice', {}).get('provider', '(未配置)')}"
+                    f"（{'开' if self.config.get('voice', {}).get('enabled', True) else '关'}）")
+
+        # ⚠ 2026-10-15：testing_mode 是**破坏性**开关——打开后非主人的消息被静默丢弃
+        # （群聊在 handle_group_message 里拦、私聊同样）。教训 #11 的原事故就是它
+        # 留在生产配置里、主人一周没发现，而**当时同样没有任何启动警告**。
+        # 教训 #11 的结论是「破坏性 boolean 配置开关必须启动时显式警告」，
+        # 这条警告就是那句话的落地。
+        if bool(self.config.get("behavior", {}).get("testing_mode", False)):
+            logger.warning(
+                "⚠️⚠️ testing_mode = ON：**只有主人**的消息会被处理，"
+                "其他所有人的消息都会被静默丢弃（群里看不到糖糖回话）。"
+                "这不是生产配置——要正常上线，请把 config.yaml 的 "
+                "behavior.testing_mode 改成 false，然后重启。"
+            )
 
         # 启动 WebSocket 服务器
         await self.napcat.start_server()
@@ -538,12 +584,22 @@ class TangTang:
         # 🆕 启动外部服务（使用本地语音时自动启动 TTS）
         await self.handler.start_services()
 
+        # 🏠 会客厅：桌面端的「糖糖真身」会话接口（2026-10-24）
+        self._start_console()
+
         # 保持运行直到被中断
         while self.napcat._running:
             await asyncio.sleep(1)
 
     async def stop(self):
         logger.info("小糖糖去睡觉了...")
+        # 🏠 先关会客厅：停掉 HTTP 线程，避免退出过程中还有请求投进已取消的 loop
+        if getattr(self, "console", None) is not None:
+            try:
+                self.console.stop()
+            except Exception:
+                pass
+            self.console = None
         # 🆕 关闭外部服务
         await self.handler.stop_services()
         # 记录离线时间（用于下次启动补读）

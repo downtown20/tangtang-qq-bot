@@ -1,0 +1,26 @@
+# -*- coding: utf-8 -*-
+"""只读取证 2：mood/tasks/opinion 落盘、digest 最新日期、health 告警（autonomy-tracer）"""
+import io, os, json, sqlite3, sys, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+c = sqlite3.connect(os.path.join(root, 'memory.db'))
+print('daily_digests max date:', c.execute('select max(date), count(*) from daily_digests').fetchone())
+print('journal max date:', c.execute('select max(date), count(*) from tangtang_journal').fetchone())
+print('digest dates:', c.execute('select date, count(*) from daily_digests group by date order by date desc limit 6').fetchall())
+rows = c.execute("select key from kv_store order by key").fetchall()
+print('kv keys total', len(rows))
+ks = [r[0] for r in rows]
+print('state:* keys:', [k for k in ks if k.startswith('state:')])
+print('mood_state present:', 'mood_state' in ks)
+for k in ['state:auto_pending', 'state:auto_cold', 'state:auto_uncertain', 'state:care_due', 'state:seek_uncertain', 'autonomy:last_initiative_time', 'state:quiet_groups', 'state:daily_like_runs', 'health:last_cleanup_date']:
+    v = c.execute('select value from kv_store where key=?', (k,)).fetchone()
+    print(' ', k, '=', (str(v[0])[:160] if v else None))
+print('--- health warns today ---')
+p = os.path.join(root, '日志', 'tangtang.log')
+cnt = collections.Counter()
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        if 'HealthCheck' in line:
+            cnt[line.split('| ')[-1].strip()[:60]] += 1
+for k, v in cnt.most_common(8):
+    print(' ', v, k)

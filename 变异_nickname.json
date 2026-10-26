@@ -1,0 +1,22 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_nickname_sync.py",
+  "_note": "M5 原本想验证「入口同步不会覆盖已有昵称」，实测是假变异——因为那两层保护职责不同：提前 return 省掉多余写，UPDATE 的 AND COALESCE(nickname,'')='' 管并发安全；去掉任一层，行为都不变（纵深防御，不是测试缺口）。已换成净化校验。",
+  "mutations": [
+    {
+      "name": "M1-去掉昵称补写",
+      "old": "            if not stored_nick and nickname:",
+      "new": "            if False:"
+    },
+    {
+      "name": "M4-入口昵称补写不留痕",
+      "old": "                if changed:\n                    self._record_revision(\n                        conn, entity=\"people\", entity_id=qq, qq_id=qq,\n                        op=\"update\", field=\"nickname\", before=\"\", after=clean,\n                        reason=\"昵称补写：消息入口拿到 QQ 昵称，档案里此前为空\",\n                        actor=actor,\n                    )",
+      "new": "                if changed:\n                    pass"
+    },
+    {
+      "name": "M5-入口昵称不做净化",
+      "old": "        clean = _sanitize_display_name(nickname or \"\")",
+      "new": "        clean = str(nickname or \"\")"
+    }
+  ]
+}

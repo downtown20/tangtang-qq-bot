@@ -1,0 +1,37 @@
+# -*- coding: utf-8 -*-
+"""只读取证：反思心跳覆盖 + 体验缓冲构成（autonomy-tracer / task-2）"""
+import io, json, collections, os, sys, sqlite3
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.dirname(os.path.abspath(__file__))
+root = os.path.abspath(os.path.join(root, '..', '..', '..'))
+base = os.path.join(root, '日志')
+for d in ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15']:
+    p = os.path.join(base, 'tangtang.log' if d == '2026-10-15' else 'tangtang.log.' + d)
+    if not os.path.exists(p):
+        print(d, 'missing'); continue
+    hb = 0; hours = set(); first = None; last = None
+    with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if first is None: first = line[:19]
+            last = line[:19]
+            if '反思循环心跳' in line:
+                hb += 1; hours.add(line[11:13])
+    print(d, 'heartbeat=', hb, 'hours=', sorted(hours), 'span=', first, last)
+print('--- buffer composition ---')
+d = json.load(io.open(os.path.join(root, '状态', '.tangtang_self.json'), encoding='utf-8'))
+buf = d.get('experience_buffer') or []
+print('len', len(buf))
+print('types', collections.Counter(e.get('type', '(none)') for e in buf).most_common())
+print('groups', collections.Counter(e.get('group_id', '(none)') for e in buf).most_common(6))
+at = sum(1 for e in buf if e.get('is_at') or e.get('is_name_mention'))
+print('high_value', at, 'others', len(buf) - at)
+print('first', buf[0].get('time'), 'last', buf[-1].get('time'))
+print('--- digest/journal rows ---')
+c = sqlite3.connect(os.path.join(root, 'memory.db'))
+for t in ['daily_digests', 'tangtang_journal']:
+    try:
+        print(t, c.execute('select count(*) from ' + t).fetchone())
+        for r in c.execute('select * from ' + t + ' order by rowid desc limit 3'):
+            print('   ', str(r)[:220])
+    except Exception as e:
+        print(t, 'ERR', e)

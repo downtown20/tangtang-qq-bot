@@ -1,0 +1,30 @@
+{
+  "target": "agent/prompt_overrides.py",
+  "tests": "tests/test_prompt_overrides.py",
+  "mutations": [
+    {
+      "name": "文件头不剥离（YAML 跟着正文进 system prompt，她看到的是 --- 和 name:）",
+      "old": "    _, body = split_front_matter(text)\n    return body if body.strip() else \"\"",
+      "new": "    return text if text.strip() else \"\"",
+      "expect_fail": "test_front_matter_never_leaks_into_prompt"
+    },
+    {
+      "name": "元数据只从代码读（文件里改了 desc 界面不跟着变）",
+      "old": "        group = str(meta.get(\"group\") or group)\n        desc = str(meta.get(\"desc\") or desc)",
+      "new": "        pass",
+      "expect_fail": "test_metadata_is_editable_from_the_file"
+    },
+    {
+      "name": "YAML 坏掉就抛异常（一次手误让她说不出话）",
+      "old": "    except Exception:\n        return {}, body",
+      "new": "    except ZeroDivisionError:\n        return {}, body",
+      "expect_fail": "test_broken_yaml_falls_back_to_body"
+    },
+    {
+      "name": "显式空 origin 不生效（「清空来源标签」永远改不掉）",
+      "old": "        if \"origin\" in meta:",
+      "new": "        if meta.get(\"origin\"):",
+      "expect_fail": "test_blank_origin_in_file_hides_the_tag"
+    }
+  ]
+}

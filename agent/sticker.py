@@ -243,6 +243,21 @@ class StickerManager:
                 break
         return "，".join(tags) if tags else ""
 
+    @staticmethod
+    def _filename_scene_text(filename: str) -> str:
+        """CG 图库的名字 fallback：按 `场景_场景_hash.ext` 命名时取场景段。
+
+        与情绪版同一条纪律（命名即标签）：CG 素材按
+        `tools/抓取CG素材.py` 的规范落库后，即使 metadata.json 丢了，
+        只靠文件名也能被 `[贴图:后入]` 检索到。词表以 cg_scenes 为唯一来源
+        （缺省时本函数返回空串，绝不影响默认图库）。
+        """
+        try:
+            from .cg_scenes import match_tags
+        except Exception:
+            return ""
+        return "，".join(match_tags(filename.replace("_", " ")))
+
     def _semantic_entries(self) -> list[tuple[str, str, str]]:
         """按当前图库顺序返回 (cache_key, text, absolute_path)。"""
         entries = []
@@ -251,9 +266,21 @@ class StickerManager:
             info = self.metadata.get(filename, {})
             if not isinstance(info, dict):
                 continue
+            # 2026-10-16 CG 标签轴：CG 素材的检索文本 = 画面描述 + 场景标签。
+            # 场景标签必须进这里，否则 send_cg_sticker(tag=...) 的 BGE 语义
+            # 路径看不到它（只有向量才认自然语言「从后面来」这类说法）。
+            scene_text = "，".join(
+                str(tag) for tag in (info.get("scene_tags") or []) if str(tag).strip()
+            )
             text = str(info.get("emotion_desc", "") or "").strip()
+            if not text:
+                text = str(info.get("desc", "") or "").strip()
             if not text and info.get("emotions"):
                 text = "，".join(str(emo) for emo in info["emotions"] if str(emo).strip())
+            if not scene_text:
+                scene_text = self._filename_scene_text(filename)
+            if scene_text and scene_text not in text:
+                text = f"{text}，{scene_text}" if text else scene_text
             if not text:
                 text = self._filename_emotion_text(filename)   # 命名即标签 fallback
             if text:
@@ -402,10 +429,17 @@ class StickerManager:
             logger.warning(f"元数据保存失败: {e}")
 
     def _rebuild_index(self):
+        # 2026-10-16 CG 场景标签：`scene_tags` 与 `emotions` 进同一个索引——
+        # 检索面（get_by_emotion / list_by_emotion / count_by_emotion /
+        # match_by_emotion_text 的降级分支）对两个轴一视同仁，
+        # 标签体系与展示方式因此与默认图库完全同构。
         self._emotion_index = {}
         for fname, info in self.metadata.items():
-            for emo in info.get("emotions", []):
-                self._emotion_index.setdefault(emo, []).append(fname)
+            if not isinstance(info, dict):
+                continue
+            for tag in list(info.get("emotions", [])) + list(info.get("scene_tags", [])):
+                if tag:
+                    self._emotion_index.setdefault(tag, []).append(fname)
 
     # ---- 哈希去重 ----
 
@@ -599,6 +633,16 @@ class StickerManager:
         import re
         candidates = classify_emotions(emotion_text)
         candidates.extend(re.findall(r'[\w一-鿿]{2,}', emotion_text))
+        # 2026-10-16 CG 别名收口：「背后位」这类说法不是索引里的键，但它在
+        # cg_scenes 的别名表里有规范名（后入）。没有这一步，LLM 说一次近义词
+        # 就取不到图，而词表里明明登记过——别名表就成了摆设。
+        try:
+            from .cg_scenes import canonical as _canonical_scene
+            scene = _canonical_scene(emotion_text)
+            if scene and scene != emotion_text:
+                candidates.append(scene)
+        except Exception:
+            pass
         paths = []
         for emotion in candidates:
             if emotion in excluded:
@@ -625,6 +669,49 @@ class StickerManager:
             return "（图库中有图片，但暂无可用情绪标签）"
         top = [f"[贴图:{emo}]（{len(files)}张）" for emo, files in ranked[:limit]]
         return "可用的表情包：" + " ".join(top)
+
+    def sticker_tag_summary(self, vocabulary=(), limit: int = 12) -> str:
+        """按词表过滤的标签摘要——CG 图库专用（词表来自 agent/cg_scenes）。
+
+        与 `sticker_keyword_summary` **同一个展示格式、同一份数据源**
+        （`_emotion_index`），只多一层「只列给定词表里的标签」的过滤：
+        默认图库的词表（开心/害羞…）不该出现在 CG 提示词里，CG 的「后入/骑乘」
+        也不该混进默认库摘要——而张数、[贴图:xx] 用法两边完全一致，
+        所以 LLM 学到的是同一套取图方式（任务要求：沿用现有表情包方案）。
+        """
+        if not self._cache:
+            return ""
+        allowed = list(vocabulary) if vocabulary else []
+        tags = [t for t in self._tag_pool() if not allowed or t in allowed]
+        ranked = sorted(
+            ((tag, self._emotion_index.get(tag, [])) for tag in tags),
+            key=lambda item: (len(item[1]), item[0]), reverse=True,
+        )
+        ranked = [(tag, files) for tag, files in ranked if files]
+        if not ranked:
+            # 裸素材（未跑标注工具）：文件名词表命中也能列出来，张数按 cache 现算
+            fallback = []
+            for tag in allowed:
+                hits = [p for p in self._cache
+                        if tag in self._filename_scene_text(Path(p).name)]
+                if hits:
+                    fallback.append((tag, hits))
+            ranked = sorted(fallback, key=lambda item: len(item[1]), reverse=True)
+        if not ranked:
+            return ""
+        top = [f"[贴图:{emo}]（{len(files)}张）" for emo, files in ranked[:limit]]
+        return "可用的CG标签：" + " ".join(top)
+
+    def _tag_pool(self) -> list[str]:
+        """当前图库实际持有素材的标签集合（含文件名 fallback，不含词表空项）。"""
+        tags = set(self._emotion_index)
+        for path in self._cache:
+            name = Path(path).name
+            if name in self.metadata:
+                continue
+            tags.update(self._filename_scene_text(name).split("，"))
+        tags.discard("")
+        return sorted(tags)
 
     # ---- 基础查询 ----
 
@@ -733,28 +820,8 @@ EMOTION_TO_FACE = {
 }
 
 
-def random_qq_face(emotion: str = "") -> str:
-    """返回一个随机 QQ 表情 CQ 码"""
-    if emotion and emotion in EMOTION_TO_FACE:
-        name = random.choice(EMOTION_TO_FACE[emotion])
-    else:
-        name = random.choice(list(QQ_FACES.keys()))
-    face_id = QQ_FACES[name]
-    return f"[CQ:face,id={face_id}]"
-
-
-def get_face_for_text(text: str) -> str | None:
-    """根据文字内容判断情绪，返回合适的表情"""
-    emotion_keywords = {
-        "开心": ["哈哈", "嘻嘻", "笑死", "好笑", "开心", "快乐", "高兴", "不错", "好耶", "太好了"],
-        "害羞": ["害羞", "不好意思", "脸红", "讨厌"],
-        "撒娇": ["贴贴", "抱抱", "想你", "亲", "爱你", "喜欢"],
-        "难过": ["难过", "伤心", "哭", "呜呜", "emo", "烦"],
-        "生气": ["无语", "离谱", "生气", "不爽", "恶心"],
-        "得意": ["嘿嘿", "果然", "我就说", "那当然"],
-        "无奈": ["累了", "栓Q", "随便", "没办法"],
-    }
-    for emotion, keywords in emotion_keywords.items():
-        if any(kw in text for kw in keywords):
-            return random_qq_face(emotion)
-    return None
+# ⚠ 2026-10-16 T2.7：`random_qq_face` 与 `get_face_for_text`（文字→关键词→QQ 表情）
+# **整体删除**。它俩的最后两个调用点是 `handle_poke` 里「50% 概率换成贴图 / 40% 换成
+# face」——那正是本轮删掉的「系统替她选表情」。现在她想要表情就自己写 [贴图:关键词]
+# （走 reply_pipeline 的贴图匹配），系统不再按关键词替她挑脸。
+# 上面的 QQ_FACES / EMOTION_TO_FACE 两张表先留着（纯数据、零行为），要清一起清。

@@ -67,8 +67,23 @@ def test_self_memory_binds_target_original_message_and_provenance(store):
     assert rows[0].evidence_ids == str(source_a)
     formatted = memory._format_self_memories(rows)
     assert "承诺过" in formatted
-    assert "置信度" in formatted
-    assert f"来源 chat_log#{source_a} 群g1" in formatted
+    # 2026-10-25 第十轮：provenance 不再**逐条**打印 chat_log 编号与置信度。
+    # 原因（实测）：那 50 字符前缀 ≈33t/条，而 promise 正文只有 9~20 字，
+    # 5 条共 242t、其中 165t（68%）是元数据，150t 预算下只装得下 2 条——
+    # 代码检索的却是 5 条（`candidates[:5]`），等于每次白跑 3 条。
+    # 真正的 provenance 由三处保证，都比「逐条打印编号」强：
+    #   ① 写入侧 validate_self_memory_source（本测试上半部分断言的绑定）；
+    #   ② 块首「有原始消息支持的自忆」是全块声明，不是逐条重复；
+    #   ③ 读侧 grounded_only=True 只取可信档。
+    assert "有原始消息支持" in formatted   # ② 全块 provenance 声明仍在
+    # ③ 日期仍在（时间感是第 9 轮的修复项）。断「MM-DD 格式」而不断言具体日期：
+    #   这里 remember_self 没传时间戳，timestamp 取建档时刻（now），
+    #   断言字面值会变成「测试跑在哪天就要求哪天」。
+    import re as _re
+    assert _re.search(r"\b\d{2}-\d{2}\b", formatted)
+    assert "群g1" in formatted             # 作用域仍在（哪个群说的）
+    assert "置信度" not in formatted       # 噪音字段不得回归（全库同一值 0.70）
+    assert "chat_log#" not in formatted    # 噪音字段不得回归（无工具可按 id 取回）
 
 
 def test_action_completed_accepts_confirmed_text_reply_and_rejects_bogus_receipt(store):

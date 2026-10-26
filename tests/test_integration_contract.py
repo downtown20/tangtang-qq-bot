@@ -144,6 +144,42 @@ def _references(sources: dict | None = None) -> tuple[dict[str, set[str]], dict[
 _CALLS, _ATTRS, _STRS = _references()
 
 
+def _test_references() -> dict[str, set[str]]:
+    """方法名 → 「在 tests/ 里被属性调用过」的测试文件集合（2026-10-23 T2.2）。
+
+    **为什么需要它**（这是本轮踩出来的一个真错误，写在这里防复发）：
+    零调用闸门的 `_parsed` **不包含 tests/**，所以它报的「零引用」只覆盖生产代码。
+    而 `_pick_private_target` / `_settle_stale_seeks` 各有 4 处测试调用——
+    按「闸门零引用」直接删掉，当场把 8 条测试打成 AttributeError。
+
+    这正是教训 #36 的又一形态：**「工具报的 0 是关于工具的事实，不是关于代码的事实」**。
+    闸门只看生产 ⇒ 它给的答案准确回答了「生产里有没有人调」，而不是
+    「这个方法能不能删」——后者必须再问一句「测试里有人调吗」。
+
+    所以本函数不是证据来源（不改变「是否零引用」的判定），而是**删除前的必查项**：
+    基线条目里凡是「仅测试引用」的，都标出来，免得下一个人照着"零引用"去删。
+    """
+    out: dict[str, set[str]] = {}
+    tests_dir = BASE / "tests"
+    if not tests_dir.is_dir():
+        return out
+    for path in sorted(tests_dir.glob("*.py")):
+        # 闸门自己的文件要排除——基线条目的字符串会把自己写成"有引用"（T2.2 自引用陷阱）
+        if path.name == Path(__file__).name:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute):
+                out.setdefault(node.attr, set()).add(path.name)
+    return out
+
+
+_TEST_REFS = _test_references()
+
+
 def _skill_registered() -> set[tuple[str, str]]:
     """(注册名, 文件)——@register_skill 装饰即接线（按名字分发，无静态调用点）"""
     reg: set[tuple[str, str]] = set()
@@ -168,6 +204,39 @@ ALLOWLIST: dict[tuple[str, str], str] = {
         "CLAUDE.md 七章规定的标准工具函数——新功能中文匹配接线时调用（word_match_any/word_match_score 已按反模式#6 归档）",
     ("agent/platform_receipts.py", "validate_platform_receipt"):
         "ADR-006 纯验证入口——平台回执适配器尚未接入生产路由，feature-off 期间保留契约和回归测试",
+    # ── 2026-10-24 会客厅：HTTP 框架回调，不是「待接线」──
+    # BaseHTTPRequestHandler 由 stdlib 的 handle_one_request() 按 HTTP 动词分发，
+    # 静态分析永远看不到调用者。按「框架回调」登记，理由与上面两条（待接线）不同。
+    ("agent/console_api.py", "do_GET"):
+        "框架回调——stdlib BaseHTTPRequestHandler 按 HTTP 方法名分发，代码里不会有调用点",
+    ("agent/console_api.py", "do_POST"):
+        "框架回调——stdlib BaseHTTPRequestHandler 按 HTTP 方法名分发，代码里不会有调用点",
+    ("agent/console_api.py", "do_DELETE"):
+        "框架回调——stdlib BaseHTTPRequestHandler 按 HTTP 方法名分发，代码里不会有调用点",
+    # ── 2026-10-26 图库打标：桌面端直调 + 测试钩子 ──
+    # `agent/image_tagger.py` 的**生产调用方是 `tools/desktop_bridge.py`**，
+    # 而零调用扫描只覆盖 agent/ 与入口，tools/ 不在它的图里 —— 所以这里登记，
+    # 理由与「框架回调」同类：真的有调用者，只是扫描器看不见。
+    ("agent/image_tagger.py", "load_config"):
+        "桌面端 bridge 直调（tools/ 不在扫描范围）；每次读，改设置立刻生效",
+    ("agent/image_tagger.py", "gallery_dir"):
+        "桌面端 bridge 直调（tools/ 不在扫描范围）",
+    ("agent/image_tagger.py", "metadata_path"):
+        "桌面端 bridge 直调（tools/ 不在扫描范围）",
+    ("agent/image_tagger.py", "scan"):
+        "桌面端 bridge 直调：图库页「还剩多少张没打标」",
+    ("agent/image_tagger.py", "status"):
+        "桌面端 bridge 直调：配置 + 扫描 + 进度合一",
+    ("agent/image_tagger.py", "run"):
+        "桌面端 bridge 直调：图库页「打标」按钮",
+    ("agent/image_tagger.py", "cancel"):
+        "桌面端 bridge 直调：图库页「停止」",
+    ("agent/image_tagger.py", "describe_one"):
+        "桌面端 bridge 直调：设置页「试打一张」（不写 metadata）",
+    ("agent/image_tagger.py", "reset_state_for_tests"):
+        "测试钩子——把模块级进度/缓存清干净；生产代码不该调，静态扫描看不到测试调用",
+    ("agent/console_api.py", "log_message"):
+        "框架回调——BaseHTTPRequestHandler 内部调用的访问日志钩子（本处故意静音）",
 }
 
 
@@ -206,7 +275,6 @@ CLASS_METHOD_BASELINE: dict[tuple[str, str], str] = {
     ('agent/knowledge_index.py', 'get_document'): '仅测试引用',
     ('agent/knowledge_index.py', 'get_chunks'): '仅测试引用',
     ('agent/knowledge_index.py', 'load_semantic_segments'): '仅测试引用',
-    ('agent/memory.py', 'get_memory_stats'): '无任何引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
     ('agent/memory.py', 'mark_extracted'): '无任何引用',
     ('agent/memory.py', 'get_topic_context'): '无任何引用',
     ('agent/metrics.py', 'record_extract_success'): '无任何引用；指标埋点——记忆提取可观测性写好了但无上报点（写了没生效家族）',
@@ -217,7 +285,6 @@ CLASS_METHOD_BASELINE: dict[tuple[str, str], str] = {
     ('agent/metrics.py', 'get_latest'): '无任何引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
     ('agent/mood_tracker.py', 'on_alert'): '无任何引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
     ('agent/perception.py', 'get_weekly_report'): '无任何引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
-    ('agent/personality.py', 'get_mood_style'): '无任何引用',
     ('agent/platform_receipts.py', 'to_evidence'): '仅测试引用；出站回执/终局入口——主人 2026-10-13 拍板当「待接线」留着（P2 可能要用）',
     ('agent/reranker.py', 'last_load_error'): '仅测试引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
     ('agent/scenario.py', 'resolve_private_scenario'): '无任何引用',
@@ -225,8 +292,10 @@ CLASS_METHOD_BASELINE: dict[tuple[str, str], str] = {
     ('agent/scheduler.py', 'add_weekly'): '仅测试引用；定时入口——CronScheduler/DailyReport 生产零使用（上一轮文档已取证）',
     ('agent/self_state.py', 'get_or_create_group_atmosphere'): '无任何引用',
     ('agent/self_state.py', 'update_group_atmosphere'): '无任何引用',
-    ('agent/songs.py', 'search_by_emotion'): '无任何引用',
-    ('agent/songs.py', 'find_section'): '无任何引用',
+    # 2026-10-15：songs.py 的 search_by_emotion / find_section / get_section /
+    # get_default_section 已随「歌词与分段唱歌」整体删除（见 agent/songs.py 模块说明）。
+    # 棘轮自洽：生产侧一删，登记就必须跟着删——否则这里会因为「登记了不存在的方法」报红。
+    # 同理本轮新删的 get_song_audio 取代了 get_section_audio，后者不再登记。
     # 2026-10-15：get_song / songs_with_status 已随生产侧一起归档（消费者是已删的
     # tools/rvc_sing.py 与控制台曲库设置页）。棘轮自洽生效——生产侧一删，本条就会因
     # 「登记了已不存在的方法」报红，逼着把这两条一起删掉，所以这里不留登记。
@@ -244,7 +313,6 @@ CLASS_METHOD_BASELINE: dict[tuple[str, str], str] = {
     ('agent/store.py', 'complete_send_outbox'): '仅测试引用；出站回执/终局入口——主人 2026-10-13 拍板当「待接线」留着（P2 可能要用）',
     ('agent/store.py', 'mark_send_outbox_uncertain'): '仅测试引用；出站回执/终局入口——主人 2026-10-13 拍板当「待接线」留着（P2 可能要用）',
     ('agent/store.py', 'list_proactive_events'): '仅测试引用',
-    ('agent/store.py', 'get_decision_run'): '仅测试引用；出站回执/终局入口——主人 2026-10-13 拍板当「待接线」留着（P2 可能要用）',
     ('agent/store.py', 'record_task_confirmation'): '仅测试引用',
     ('agent/store.py', 'get_task_ordinal_ledger'): '无任何引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
     ('agent/store.py', 'delete_memory_by_id'): '无任何引用',
@@ -262,7 +330,70 @@ CLASS_METHOD_BASELINE: dict[tuple[str, str], str] = {
     ('agent/store.py', 'get_max_chat_id'): '无任何引用',
     ('agent/store.py', 'get_mood_log'): '无任何引用；观察器/健康查询——查询写好了但无消费者（M5 待接定时观察任务 + 缺席告警）',
     ('agent/store.py', 'get_chat_max_ids_by_user'): '无任何引用',
+    # ── 2026-10-24 未闭合事件（open_loops）L1：**分批落地，本批只有存储层** ──
+    # 方案 docs/开发规划/未闭合事件_技术方案_20261024.md 把实施拆成 L1..L5，
+    # L1 只建表+状态机，接线在 L2（提取识别）/L3（注入）/L4（收尾工具）/L5（过期清理）。
+    # 这正是闸门要的「确认为待接线能力」——每接一条线就要删掉对应条目（棘轮）。
+    #
+    # ⚠ 2026-10-25 第 12 轮更正（连同教训 #42）：这里曾写着
+    #   「✅ add_open_loop 已由 L2 接上（handler._persist_extracted_items）」
+    # ——**那是假接线**。`_persist_extracted_items` 生产零调用（本文件
+    # PRIVATE_METHOD_BASELINE 自己就把它登记为 T 类），生产提取早已改走
+    # `Store.complete_extraction_job` → `_apply_extraction_item`。
+    # 结果：open_loops 表 11145 个任务、**0 行**，而闸门还标着"已接"。
+    # 现在真实接线在 `Store._apply_extraction_item` → `_record_open_loop_if_needed`
+    # → `_upsert_open_loop_conn`（同一事务），由
+    # `tests/test_open_loop_live_path.py` 端到端钉住（真跑 complete_extraction_job）。
+    # 这条教训也说明了本闸门的边界：**它只查"符号有没有调用点"，不查
+    # "那个调用点所在的方法可不可达"**——查后者要靠行为测试。
+    #
+    # ✅ 2026-10-25 第 13 轮：读侧三层全部接上，按棘轮删除三条登记：
+    #   · `list_open_loops` → `handler._get_open_loops_context`（私聊每轮注入，limit=3）
+    #   · `resolve_open_loop` → `_build_memory_tools` 的 resolve_open_loop 工具 +
+    #     `_execute_tool` 分支（只给私聊，三条拒绝在 store 侧）
+    #   · `expire_open_loops` → `handler_autonomy._autonomous_loop` 启动清理 +
+    #     每日汇总两处调度（days_overdue=30, max_asked=2）
+    # 行为由 `tests/test_open_loops_injection.py`（26 条）与端到端验证钉住。
     ('agent/ui_anim.py', 'transition_locked'): '无任何引用',
+}
+
+
+# ── 私有方法零调用基线（2026-10-23 T2.2，棘轮式冻结）──
+#
+# 为什么需要它（先说清为什么此前没有）：零调用闸门的类方法扫描一直带
+# not name.startswith('_')，于是**私有方法全在覆盖外**——而 T2 归档的 7 条死代码
+# **全是私有**。闸门没见过它们，等于这条防线只能管一半。
+#
+# T2.2 原登记的处置是「待拍板」：存量 15 条（9 条测试有调用、6 条真候选）。
+# 2026-10-23 按项目宗旨自行决策扩了。理由：闸门的自引用缺陷（基线把自己当引用
+# 证据）已在 T2.2 修好，扩覆盖不再有那个前提障碍；而「删掉的死代码闸门看不见」
+# 是实打实的覆盖率缺口（教训 #37 那一类：验证尺子自己骗人）。
+#
+# 扩完实测 **14 条**（其中 4 条已由 T67 删除，基线现存 10 条）。⚠ **这里踩过一个真错误，写下来防复发**：
+# 第一版按「闸门零引用」判成 14 条全是死代码，直接动手删了 handler_autonomy 的
+# 两条——**当场把 8 条测试打成 AttributeError**。原因是本闸门的 _parsed
+# **不包含 tests/**（见文件头注释：「tests/ 不算，test-only 函数 = 生产死代码」是
+# 刻意的设计）。于是「闸门报零引用」只回答「生产里有没有人调」，**不回答**
+# 「这个方法能不能删」。这正是教训 #36：**工具报的 0 是关于工具的事实，不是关于
+# 代码的事实**。
+#
+# 所以基线分两类，处置完全不同：
+#   D 类（真死）：生产零引用 **且** tests/ 零引用 ⇒ 可以直接删（4 条已由 T67 删除，基线里不再有）。
+#   T 类（仅测试引用，10 条）：生产零引用但测试在调 ⇒ **删要连带改测试**，
+#        属独立任务；其中 _record_task_confirmation_from_platform 根本不是死代码，
+#        是 ADR-006 等接线的公开 API（与 T5 同族）。
+# 判据由 test_dead_class_entries_have_no_test_refs 动态钉住——基线理由若腐烂即红。
+PRIVATE_METHOD_BASELINE: dict[tuple[str, str], str] = {
+    ('agent/handler.py', '_seductive_knowledge'): 'T 类（仅测试引用）——色色范本自 T2.14 起走 intimate_reference+pinned；但**测试仍在测它** ⇒ 删要连带改测试',
+    ('agent/handler.py', '_extract_self_memories'): 'T 类（仅测试引用）——同步版被 _extract_self_memories_async 取代；测试仍调同步版',
+    ('agent/handler.py', '_persist_extracted_items'): 'T 类（仅测试引用）——测试仍在调；生产零调用',
+    ('agent/handler.py', '_analyze_and_index_document'): 'T 类（仅测试引用）——测试仍在调；生产零调用',
+    ('agent/handler.py', '_get_profile_and_recent'): 'T 类（仅测试引用）——测试仍在调；生产零调用',
+    ('agent/handler.py', '_search_people'): 'T 类（仅测试引用）——测试仍在调；与 LLM 工具 search_people 同名不同物（工具走 _execute_tool 分支）',
+    ('agent/handler_autonomy.py', '_pick_private_target'): 'T 类（仅测试引用）——同步版被 _pick_private_target_async 取代；**测试 4 处调同步版**——本轮试删当场打红 4 条',
+    ('agent/handler_autonomy.py', '_settle_stale_seeks'): 'T 类（仅测试引用）——同步版被 _settle_stale_seeks_async 取代；**测试 4 处调同步版**——本轮试删当场打红 4 条',
+    ('agent/personalization.py', '_load_sent_today'): 'T 类（仅测试引用）——唯一生产调用点用 _load_sent_today_async；测试仍调同步版',
+    ('agent/store.py', '_record_task_confirmation_from_platform'): 'T 类（仅测试引用）——**ADR-006 迟到确认 API**（有 _capability 能力令牌保护），**测试 11 处调用**；生产未接线（与 T5 同族）⇒ 这是等接线不是死代码',
 }
 
 
@@ -276,11 +407,26 @@ def _agent_public_functions():
                 yield f, node.lineno, node.name
 
 
-def _class_public_methods(sources: dict | None = None):
-    """(文件, 行号, 类名, 方法名)——agent/ 类里的公共方法（不以 _ 开头）。
+def _is_private_method_name(name: str) -> bool:
+    """私有方法（_foo）但**排除 dunder**（__init__/__repr__ 等框架钩子）。
 
-    2026-10-13 P3：零调用闸门此前只走 `_agent_public_functions()`（模块级），
+    2026-10-23 T2.2：dunder 由解释器/框架调用，静态引用集里天生看不到调用点，
+    纳入闸门只会产生几十条无法消除的噪声（T2.2 记录实测 69 条）。
+    """
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
+def _class_public_methods(sources: dict | None = None, *, include_private: bool = False):
+    """(文件, 行号, 类名, 方法名)——agent/ 类里的方法。
+
+    2026-10-13 P3：零调用闸门此前只走 _agent_public_functions()（模块级），
     类方法完全不在覆盖内。这是审计说的「闸门有覆盖率上限」元根因。
+
+    2026-10-23 T2.2（台账「私有方法扩覆盖待拍板」——按项目宗旨自行决策扩了）：
+    include_private=True 时连私有方法一起扫（排除 dunder）。为什么必须扩：
+    T2 归档的 7 条死代码**全是私有**，而当时的闸门从头到尾没见过它们——
+    「删掉的死代码闸门看不见」等于这条防线只管一半。T2.2 的自引用缺陷
+    （基线把自己当引用证据）当时已先修好，所以现在扩是安全的。
     """
     srcs = sources if sources is not None else _parsed
     for f in sorted(srcs):
@@ -290,16 +436,25 @@ def _class_public_methods(sources: dict | None = None):
             if not isinstance(cls, ast.ClassDef):
                 continue
             for node in cls.body:
-                if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        and not node.name.startswith("_")):
-                    yield f, node.lineno, cls.name, node.name
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if node.name.startswith("_"):
+                    if include_private and _is_private_method_name(node.name):
+                        yield f, node.lineno, cls.name, node.name
+                    continue
+                yield f, node.lineno, cls.name, node.name
 
 
-def _zero_ref_class_methods(sources: dict | None = None) -> list[tuple[str, int, str, str]]:
-    """真正零引用的公共类方法。
+def _zero_ref_class_methods(sources: dict | None = None, *,
+                            include_private: bool = False
+                            ) -> list[tuple[str, int, str, str]]:
+    """真正零引用的类方法（默认只公共；include_private=True 时含私有，排除 dunder）。
 
     **不做**基线剔除——基线剔除是闸门（测试）的事，扫描器只报事实，
     这样「基线是否失效」才可被独立检验。技能注册/ALLOWLIST 视为已接线。
+
+    2026-10-23 T2.2：私有方法与公共方法用**完全同一套证据模型**（属性 + 字符串，
+    不吃裸名）。理由是同一批理由——私有方法也不可能靠裸标识符被调用到。
     """
     srcs = sources if sources is not None else _parsed
     # 2026-10-14（台账 T2.3）：**不吃裸名调用证据**。
@@ -313,7 +468,7 @@ def _zero_ref_class_methods(sources: dict | None = None) -> list[tuple[str, int,
     # 模块级函数**就是**靠裸名调用的。
     _calls, attrs, strs = _references(srcs)
     out: list[tuple[str, int, str, str]] = []
-    for f, lineno, cls, name in _class_public_methods(srcs):
+    for f, lineno, cls, name in _class_public_methods(srcs, include_private=include_private):
         if (name, f) in _REG or (f, name) in ALLOWLIST:
             continue
         if attrs.get(name) or strs.get(name):
@@ -425,8 +580,17 @@ class TestZeroCallerGate:
             + "\n".join(dead))
 
     def test_allowlist_entries_still_exist(self):
-        """ALLOWLIST 条目过期即失效——函数删了，登记也必须删"""
+        """ALLOWLIST 条目过期即失效——函数删了，登记也必须删。
+
+        2026-10-24：ALLOWLIST **同时服务两个扫描器**——`_zero_ref_class_methods`
+        里有 `(f, name) in ALLOWLIST`（类方法），而这条存在性检查原先只看
+        `_agent_public_functions()`（模块级）。于是登记在 ALLOWLIST 里的**类方法**
+        （会客厅的 HTTP 框架回调 `do_GET/do_POST/do_DELETE/log_message`）会被
+        误报「登记了不存在的函数」。`登记了但检查器看不见` 正是教训 #30 的同族
+        （检查器本身在骗人），所以两边口径必须一致。
+        """
         existing = {(f, n) for f, _, n in _agent_public_functions()}
+        existing |= {(f, n) for f, _lineno, _cls, n in _class_public_methods()}
         stale = [f"{f} :: {n}" for (f, n) in ALLOWLIST if (f, n) not in existing]
         assert not stale, "ALLOWLIST 登记了不存在的函数——函数已归档，删除对应登记：\n" + "\n".join(stale)
 
@@ -891,6 +1055,7 @@ class TestConversationDecisionContract:
     LLM_SEND_FUNCS = [
         (HANDLER, "handle_group_increase"),    # 入群欢迎
         (HANDLER, "handle_friend_request"),    # 好友申请打招呼
+        (HANDLER, "handle_poke"),              # T2.7：被戳回应改由 LLM 生成
         (HANDLER, "_execute_natural_action"),  # pm/群发言 LLM 生成
         ("agent/handler_commands.py", "_generate_and_send"),  # /说
         # /传话现在走统一 send_actions helper，非 LLM 生成路径；
@@ -1250,10 +1415,8 @@ CLASS_UPPER_MEMBER_BASELINE: set[tuple[str, str]] = {
     # 保留理由：删 check_trigger 要连带删 handler.py:3596 的调用点与大段分支，
     # 属 T2 第二档「需确认再动」的范围，不在 T3.3（只扩闸门）里做。
     ("agent/personality.py", "TRIGGERS"),
-    # ContextBuilder.BUDGET_CONVERSATION = 2500：同一组的 CORE/RELEVANT/
-    # SUPPLEMENTARY/TOTAL 都有生产用途（L171/L185/L245），只有它没有——
-    # 是旧布局的遗留常量。
-    ("agent/context_builder.py", "BUDGET_CONVERSATION"),
+    # 2026-10-23 T2.3：BUDGET_CONVERSATION 已删除（连同它唯一的消费者
+    # _assemble_with_budget）。原白名单条目随之移除——基线只许变小。
     # ── MoodEvent 三个零发射成员（审计 P2 点名）──
     # mood.py:49-60 的注释已写明：正向事件留给「LLM 自报标签回灌」接线，
     # 而 IDLE_RECOVERY / REPEATED_QUESTIONS / TALKING_TOO_MUCH 不在那五条里。
@@ -1513,3 +1676,185 @@ class TestClassMethodGate:
         found2 = {(f, n) for f, _, _, n in _zero_ref_class_methods(wired)}
         assert ("agent/__planted__.py", "snapshot") not in found2, (
             "属性调用 c.snapshot() 没被认出来——闸门被改瞎了")
+
+
+class TestMoodStyleTrapStaysDeleted:
+    """T63（2026-10-23）：PersonalityEngine.get_mood_style 已删除，不许复活。
+
+    它是一段**零引用的陷阱**：从 7 条写死的心情文案里 random.choice 抽一条
+    （"今天心情超好，说话甜度+50%！" 之类）。当前它没有任何调用方，所以不是缺陷；
+    但谁把它接进 system prompt，就等于**让系统随机捏造她的心情**——而心情的真值
+    在 agent/mood.py 的三维模型里（energy/valence/arousal），不是一张文案表。
+
+    这正是 CLAUDE.md 教训 #9/#10 的形态（系统替 LLM 做决定）+ 本仓反复踩的
+    「写了但接不上」的另一面：**接不上时它是死的，一旦被接上就是错的**。
+    所以处置是**删除**而不是登记待接线——保留一个「看起来能用」的随机心情源，
+    下一个人接手时几乎必然把它接进去（T2.1 记录里「待接线能力」的清单已经够长）。
+
+    ⚠ **不要「恢复」它**。真要给她心情，读 mood.py 的真实状态。
+    """
+
+    def test_get_mood_style_is_gone(self):
+        from agent.personality import PersonalityEngine
+        assert not hasattr(PersonalityEngine, "get_mood_style"), (
+            "get_mood_style 复活了。它是「系统随机捏造心情」的陷阱——"
+            "心情真值在 agent/mood.py 的三维模型里，不要用写死的文案表。")
+
+    def test_personality_does_not_import_random(self):
+        """random 随该方法一起消失；它若回来，说明有人又在人格层掷骰子。"""
+        src = _parsed["agent/personality.py"]
+        imported = set()
+        for node in ast.walk(src):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    imported.add(a.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        assert "random" not in imported, (
+            "agent/personality.py 又 import 了 random——人格层不许掷骰子"
+            "（教训 #9/#10：系统不替 LLM 做决定）。")
+
+class TestLegacyLayeredBudgetStaysDeleted:
+    """T2.3（2026-10-23）：旧分层预算的残留已删，不许复活。
+
+    `_assemble_with_budget` 零调用（全仓 0 个调用方），`BUDGET_CONVERSATION` 零读者
+    （同组 CORE/RELEVANT/SUPPLEMENTARY/TOTAL 都有生产用途）。两者是**同一套没落地的
+    旧预算布局**——删掉它们不是风格问题：留着的话，下一个要实现「对话预算」的人
+    会把它接进来，那时项目就有**第三套**预算逻辑（build() 的 budget_limit、
+    protocols.fit_backgrounds 的 1200t 池、再加上它），而本仓的历史教训正是
+    「同一件事两套逻辑各自漂移」（T10/T12/T25/T35/T42）。
+
+    全项目评估结论同此：docs/开发规划/全项目审查历史_合并.md:130「应删除而非接入」。
+    """
+
+    def test_assemble_with_budget_is_gone(self):
+        from agent.context_builder import ContextBuilder
+        assert not hasattr(ContextBuilder, "_assemble_with_budget"), (
+            "_assemble_with_budget 复活了。它零调用，且与 build() 的预算逻辑重复——"
+            "要加预算请改 build() 或 fit_backgrounds，不要另立第三套。")
+
+    def test_budget_conversation_is_gone(self):
+        from agent.context_builder import ContextBuilder
+        assert not hasattr(ContextBuilder, "BUDGET_CONVERSATION"), (
+            "BUDGET_CONVERSATION 复活了。它没有任何读者——"
+            "对话预算走 build() 的 history 段与 fit_backgrounds 的池子。")
+
+    def test_no_third_budget_authority_in_context_builder(self):
+        """结构闸门：ContextBuilder 里「预算」只许有一套入口。
+
+        判据取「类里有多少个方法名/常量名同时含 budget 与 assemble」——
+        出现第二个「分段组装预算」实现即红。
+        """
+        src = _parsed["agent/context_builder.py"]
+        offenders = []
+        for node in ast.walk(src):
+            if isinstance(node, ast.ClassDef) and node.name == "ContextBuilder":
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        if "assemble" in child.name.lower() and "budget" in child.name.lower():
+                            offenders.append(child.name)
+        assert not offenders, (
+            "ContextBuilder 又出现了「分段组装 + 预算」方法：" + ", ".join(offenders) +
+            "\n本仓已有两套预算（build() 的 budget_limit / fit_backgrounds 的 1200t 池），"
+            "第三套必然漂移（T10/T12/T25/T35/T42 同族）。")
+
+class TestPrivateMethodGate:
+    """H. 私有方法零调用闸门（2026-10-23 T2.2，棘轮式）。
+
+    T2 归档的 7 条死代码**全是私有**，而当时闸门的扫描条件带
+    `not name.startswith('_')` ⇒ 私有方法全在覆盖外，闸门从头到尾没见过它们。
+    这是审计说的「闸门有覆盖率上限」的最后一个缺口（T3.3 已补枚举成员）。
+
+    三条测试分工：
+      ① test_no_new_dead_private_methods —— 闸门本体（基线外新增 → 红）；
+      ② test_private_baseline_entries_are_still_valid —— 防基线腐烂；
+      ③ test_gate_sees_a_planted_dead_private_method —— **阳性对照**。
+    ③ 是「闸门必须能红」的机器化（教训 #30/#37）——没有它，①② 可能从上线起恒绿。
+    """
+
+    def test_no_new_dead_private_methods(self):
+        found = {(f, n) for f, _, _, n in _zero_ref_class_methods(include_private=True)
+                 if _is_private_method_name(n)}
+        new = sorted(found - set(PRIVATE_METHOD_BASELINE))
+        assert not new, (
+            "以下 agent/ 私有方法零引用，且不在基线内——\n"
+            + "\n".join("  %s :: %s" % (f, n) for f, n in new)
+            + "\n处理：接线，或删除（同步版被 _async 取代是最常见的一类）；"
+            "确认为待接线能力才登记进 PRIVATE_METHOD_BASELINE 并写明理由。"
+            "\n**不要**为了变绿去扩大基线——基线只许变小。")
+
+    def test_private_baseline_entries_are_still_valid(self):
+        """基线只许变小：方法被删、或已被接线，都必须把条目删掉。"""
+        existing = {(f, n) for f, _, _, n in _class_public_methods(include_private=True)}
+        found = {(f, n) for f, _, _, n in _zero_ref_class_methods(include_private=True)}
+        gone = sorted(k for k in PRIVATE_METHOD_BASELINE if k not in existing)
+        assert not gone, ("基线里有已被删除的私有方法，请在 PRIVATE_METHOD_BASELINE 里删掉：\n"
+                          + "\n".join("  %s :: %s" % (f, n) for f, n in gone))
+        wired = sorted(k for k in PRIVATE_METHOD_BASELINE if k in existing and k not in found)
+        assert not wired, ("这些私有方法已经接线了，请从基线里删掉（棘轮只许变小）：\n"
+                           + "\n".join("  %s :: %s" % (f, n) for f, n in wired))
+
+    def test_gate_sees_a_planted_dead_private_method(self):
+        """**阳性对照**：种一个真死私有方法进去，闸门必须抓到它。"""
+        src = chr(10).join([
+            "class C:",
+            "    def _live(self):",
+            "        return 1",
+            "    def _dead(self):",
+            "        return 2",
+            "    ",
+            "c = object()",
+            "c._live()",
+        ])
+        planted = {"agent/__planted_private__.py": ast.parse(src)}
+        found = {(f, n) for f, _, _, n in _zero_ref_class_methods(
+            planted, include_private=True)}
+        assert ("agent/__planted_private__.py", "_dead") in found, (
+            "私有零引用方法没被闸门抓到——扩覆盖是假的")
+        assert ("agent/__planted_private__.py", "_live") not in found, (
+            "被属性调用的私有方法被误判成零引用——闸门会制造假红")
+
+    def test_dead_class_entries_have_no_test_refs(self):
+        """**D 类条目必须真的没有任何测试引用**（2026-10-23 T2.2 踩坑后的闸门）。
+
+        为什么需要这一条：第一版基线把 14 条全标成"死代码"，而其中 10 条在 tests/
+        里**有真实调用**——照"零引用"直接删，当场打红 8 条测试。本闸门的 _parsed
+        不含 tests/，所以它报的零引用只覆盖生产代码。
+
+        两个方向都钉：
+          · 标 D（真死）的，tests/ 里必须确实没有引用 —— 否则它是「仅测试引用」，
+            标错会诱导后人删掉被测试守护的方法；
+          · 标 T（仅测试引用）的，tests/ 里必须确实有引用 —— 否则它其实可以直接删，
+            标错会让死代码永久冻结（棘轮只许变小，标错了就永远清不掉）。
+        基线理由若因测试改名/删除而腐烂，这条会红。
+        """
+        wrong_d = []
+        wrong_t = []
+        for (f, name), reason in PRIVATE_METHOD_BASELINE.items():
+            has_test_ref = bool(_TEST_REFS.get(name))
+            is_dead_class = reason.startswith("D 类")
+            if is_dead_class and has_test_ref:
+                wrong_d.append("%s :: %s %s" % (f, name, sorted(_TEST_REFS[name])))
+            if (not is_dead_class) and (not has_test_ref):
+                wrong_t.append("%s :: %s" % (f, name))
+        assert not wrong_d, (
+            "这些条目标了「D 类（真死）」但 tests/ 里有调用——照它删会打红测试：\n  "
+            + "\n  ".join(wrong_d)
+            + "\n改标 T 类（仅测试引用）并写明是哪个测试在调。")
+        assert not wrong_t, (
+            "这些条目标了「T 类（仅测试引用）」但 tests/ 里已经没人调了——"
+            "它们现在可以直接删：\n  " + "\n  ".join(wrong_t))
+
+    def test_dunder_methods_are_not_gated(self):
+        """dunder 必须排除：__init__ 之类由解释器/框架调用，静态引用看不到。"""
+        src = ast.parse(chr(10).join([
+            "class C:",
+            "    def __init__(self):",
+            "        self.x = 1",
+        ]))
+        planted = {"agent/__planted_dunder__.py": src}
+        found = {(f, n) for f, _, _, n in _zero_ref_class_methods(
+            planted, include_private=True)}
+        assert ("agent/__planted_dunder__.py", "__init__") not in found, (
+            "dunder 被纳入闸门了——会产出几十条无法消除的噪声")
+

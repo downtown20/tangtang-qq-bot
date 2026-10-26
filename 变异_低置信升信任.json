@@ -1,0 +1,24 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_legacy_promotion_confidence.py",
+  "mutations": [
+    {
+      "name": "M19-置信度门槛失效（0.5 的小说情节/玩笑照旧被升成 verified——mem#25510 那类复发）",
+      "old": "                if float(confidence or 0) < LEGACY_PROMOTION_MIN_CONFIDENCE:\n                    return False",
+      "new": "                if False:\n                    return False",
+      "expect_fail": "test_low_confidence_is_not_promoted"
+    },
+    {
+      "name": "M20-门槛过严（0.8）：把常规默认置信度 0.7 的正常记忆也挡在门外",
+      "old": "                if float(confidence or 0) < LEGACY_PROMOTION_MIN_CONFIDENCE:\n                    return False",
+      "new": "                if float(confidence or 0) < 0.8:\n                    return False",
+      "expect_fail": "test_at_threshold_accepted"
+    },
+    {
+      "name": "M21-门槛挪出 legacy 分支（「已 verified 补证据」也被挡，回归）",
+      "old": "            is_legacy = old_trust not in trusted_levels\n            if is_legacy:",
+      "new": "            is_legacy = old_trust not in trusted_levels\n            if float(confidence or 0) < 0.7:\n                return False\n            if is_legacy:",
+      "expect_fail": "test_already_verified_refill_not_blocked_by_confidence"
+    }
+  ]
+}

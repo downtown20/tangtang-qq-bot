@@ -1,0 +1,14 @@
+# -*- coding: utf-8 -*-
+"""只读取证 12：pytest 运行中反复改写反思游标（autonomy-tracer）"""
+import io, os, sys, datetime, time
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+p = os.path.join(root, '状态', '.reflection_state.json')
+prev = None
+for i in range(14):
+    mt = os.path.getmtime(p)
+    txt = io.open(p, encoding='utf-8').read().strip()
+    mark = 'CHANGED' if prev is not None and mt != prev else ''
+    print(datetime.datetime.now().strftime('%H:%M:%S'), datetime.datetime.fromtimestamp(mt).strftime('%H:%M:%S.%f'), txt, mark)
+    prev = mt
+    time.sleep(5)

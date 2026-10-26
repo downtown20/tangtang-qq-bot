@@ -1,0 +1,1176 @@
+/* ═══════════════════════════════════════════════════════════════
+   记忆演化史（MemoryHistory）—— 版本链 + 主题演化 + 断链
+
+   主视觉是「一条时间线」：左侧竖线 + 圆点（当前版实心 accent，
+   历史版空心），版本正文里用 inline diff 把「怎么变的」直接画出来。
+   颜色/圆角/字号全部走 tokens.css，深浅主题自动翻转；
+   diff 的绿底/删除线用半透明叠加，两套主题都够对比。
+   类名统一 mh- 前缀。
+   ═══════════════════════════════════════════════════════════════ */
+
+.mh-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* actor 分类色（变更流水用）：工具/合成/去重/命令/系统/未标注 */
+  --mh-tool: var(--accent);
+  --mh-synth: #7c63f0;
+  --mh-dedup: #0891b2;
+  --mh-command: var(--warn);
+  --mh-system: var(--label-tertiary);
+  --mh-unknown: var(--error);
+}
+
+:root[data-theme='dark'] .mh-root {
+  --mh-synth: #a99bff;
+  --mh-dedup: #4dd0e1;
+}
+
+/* ── 顶部统计条 ── */
+.mh-summary {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  padding: 7px 12px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l1);
+}
+
+.mh-sum-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-sum-item + .mh-sum-item {
+  border-left: 0.5px solid var(--border-l2);
+}
+
+.mh-sum-item:first-child {
+  padding-left: 0;
+}
+
+.mh-sum-label {
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+.mh-sum-num {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.mh-sum-info {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--label-caption);
+  cursor: help;
+}
+
+.mh-sum-info:hover {
+  color: var(--label-secondary);
+}
+
+.mh-refresh {
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+}
+
+.mh-refresh:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.mh-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── 错误 / 加载 / 空态 ── */
+.mh-error {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--error-soft);
+  border: 0.5px solid rgba(236, 19, 19, 0.25);
+  color: var(--error);
+  font-size: var(--fs-12);
+}
+
+.mh-error-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.mh-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  font-size: var(--fs-13);
+  color: var(--label-tertiary);
+}
+
+.mh-spin {
+  animation: mh-spin 0.9s linear infinite;
+}
+
+@keyframes mh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 主体滚动区 ── */
+.mh-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  width: 100%;
+  max-width: 1000px;
+  padding-bottom: 14px;
+}
+
+.mh-empty-line {
+  padding: 10px 2px;
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-caption);
+}
+
+/* ── 版本链卡 ── */
+.mh-chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mh-chain {
+  border: 0.5px solid var(--border-l1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  overflow: hidden;
+}
+
+.mh-chain-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+  padding: 9px 12px;
+  border-bottom: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-2);
+}
+
+.mh-chain-kind {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.mh-chain-span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-chain-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-chain-merged-badge {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ── 版本时间线 ── */
+.mh-versions {
+  position: relative;
+  margin: 0;
+  padding: 4px 12px 8px 30px;
+  list-style: none;
+}
+
+/* 左侧贯穿竖线 */
+.mh-versions::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 14px;
+  bottom: 16px;
+  width: 1px;
+  background: var(--border-l2);
+}
+
+.mh-version {
+  position: relative;
+  padding: 7px 0;
+}
+
+.mh-version + .mh-version {
+  border-top: 0.5px dashed var(--border-l1);
+}
+
+/* 圆点：当前版实心 accent，历史版空心 */
+.mh-dot {
+  position: absolute;
+  left: -17px;
+  top: 13px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--bg-module);
+  border: 1.5px solid var(--border-l4);
+}
+
+.mh-dot.is-current {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.mh-version-main {
+  min-width: 0;
+}
+
+.mh-version-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.mh-vnum {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.mh-vtime {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-vorigin {
+  flex: none;
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+/* 重要度：固定 10 个点位，实心数 = importance */
+.mh-imp {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+}
+
+.mh-imp i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--border-l4);
+}
+
+.mh-imp i.is-on {
+  background: var(--accent);
+}
+
+/* 状态徽章 */
+.mh-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 6px;
+  height: 16px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-2);
+  color: var(--label-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mh-badge.is-ok {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+.mh-badge.is-sup {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.mh-badge.is-bad {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+/* 其它状态（历史枚举里没覆盖到的值）：保持中性灰，别给错语义 */
+.mh-badge.is-plain {
+  background: var(--bg-module);
+  color: var(--label-tertiary);
+}
+
+:root[data-theme='dark'] .mh-badge.is-ok {
+  color: var(--success);
+}
+
+:root[data-theme='dark'] .mh-badge.is-sup {
+  color: var(--warn);
+}
+
+.mh-detail-btn {
+  flex: none;
+  margin-left: auto;
+  padding: 0 5px;
+  height: 16px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+.mh-detail-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+/* ── 版本正文 + inline diff ── */
+.mh-version-text {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: 1.75;
+  color: var(--label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.mh-version-text p {
+  margin: 0;
+}
+
+/* 新增片段：绿底（半透明，深浅主题都够对比） */
+.mh-add {
+  background: rgba(34, 197, 94, 0.18);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* 删掉的片段：删除线 + 红灰底，读的时候能看出「上一版这里是另一句」 */
+.mh-del {
+  background: rgba(236, 19, 19, 0.08);
+  color: var(--label-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: rgba(236, 19, 19, 0.45);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+:root[data-theme='dark'] .mh-add {
+  background: rgba(34, 197, 94, 0.24);
+}
+
+:root[data-theme='dark'] .mh-del {
+  background: rgba(242, 90, 90, 0.16);
+  text-decoration-color: rgba(242, 90, 90, 0.6);
+}
+
+.mh-expand {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.mh-expand:hover {
+  background: var(--accent-soft);
+}
+
+/* ── 并入的兄弟节点（N→1 的证据） ── */
+.mh-merged {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-l2);
+}
+
+.mh-merged-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px 1px 2px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+.mh-merged-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--label-secondary);
+}
+
+.mh-caret {
+  flex: none;
+  color: var(--label-caption);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.mh-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.mh-merged-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mh-merged-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 7px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-2);
+  border: 0.5px solid var(--border-l1);
+}
+
+.mh-merged-key {
+  flex: none;
+  font-size: 10px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.mh-merged-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+  user-select: text;
+}
+
+.mh-merged-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 折叠区（主题演化 / 断链） ── */
+.mh-section {
+  margin-top: 14px;
+  border: 0.5px solid var(--border-l1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-layer-2);
+  overflow: hidden;
+}
+
+.mh-section-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.mh-section-head:hover {
+  background: var(--bg-hover);
+}
+
+.mh-section-title {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.mh-section-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 主题演化 ── */
+.mh-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 10px 10px;
+}
+
+.mh-group {
+  border: 0.5px solid var(--border-l1);
+  border-radius: var(--radius-xs);
+  background: var(--bg-module);
+  overflow: hidden;
+}
+
+.mh-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.mh-group-head:hover {
+  background: var(--bg-hover);
+}
+
+.mh-group-key {
+  flex: none;
+  font-size: var(--fs-11);
+  font-weight: 500;
+  color: var(--label-secondary);
+}
+
+.mh-group-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-group-note {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+.mh-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 2px 9px 8px;
+  list-style: none;
+}
+
+.mh-group-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  border-top: 0.5px solid var(--border-l1);
+}
+
+.mh-group-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-group-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+  user-select: text;
+}
+
+/* ── 断链区 ── */
+.mh-orphans {
+  padding: 0 10px 10px;
+}
+
+.mh-orphan-note {
+  margin: 2px 0 8px;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
+  background: rgba(245, 158, 11, 0.1);
+  border: 0.5px solid rgba(245, 158, 11, 0.3);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-secondary);
+}
+
+.mh-orphan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mh-orphan-item {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 0.5px solid var(--border-l1);
+}
+
+.mh-orphan-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-orphan-key {
+  flex: none;
+  min-width: 48px;
+  font-size: 10px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.mh-orphan-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+  user-select: text;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   变更流水（memory_revisions）
+   与版本链并列但口径不同：这里是「写操作的事实记录」，用 actor 颜色
+   和 before→after 的 diff 直接回答「谁把什么改成了什么」。
+   ═══════════════════════════════════════════════════════════════ */
+
+.mh-section-note {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--label-caption);
+  white-space: nowrap;
+}
+
+.mh-rev-body {
+  padding: 0 10px 10px;
+}
+
+/* 作为主体第一个区块：顶部不留额外间距（下面接版本链的 caption） */
+.mh-revisions {
+  margin-top: 0;
+}
+
+/* 口径说明：一句话讲清「流水只有 2026-10-24 之后」 */
+.mh-rev-note {
+  margin: 0 0 8px;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  border: 0.5px solid var(--border-l1);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--label-secondary);
+}
+
+.mh-rev-empty {
+  padding: 10px 0 6px;
+  font-size: var(--fs-11);
+  line-height: 1.65;
+  color: var(--label-caption);
+}
+
+.mh-rev-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+.mh-rev-total b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.mh-rev-range {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 谁在改她的记忆：分布条 + 标签组 ── */
+.mh-rev-actors {
+  margin-bottom: 8px;
+}
+
+.mh-rev-actor-head {
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.mh-rev-actor-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border-l2);
+}
+
+.mh-rev-actor-bar i {
+  display: block;
+  height: 100%;
+  background: var(--mh-system);
+}
+
+.mh-rev-actor-bar i + i {
+  border-left: 0.5px solid var(--bg-layer-2);
+}
+
+.mh-rev-actor-bar i.is-tool {
+  background: var(--mh-tool);
+}
+
+.mh-rev-actor-bar i.is-synth {
+  background: var(--mh-synth);
+}
+
+.mh-rev-actor-bar i.is-dedup {
+  background: var(--mh-dedup);
+}
+
+.mh-rev-actor-bar i.is-command {
+  background: var(--mh-command);
+}
+
+.mh-rev-actor-bar i.is-unknown {
+  background: var(--mh-unknown);
+}
+
+.mh-rev-actor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.mh-actor-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  font-size: 10px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+.mh-actor-chip b {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mh-actor-chip.is-tool {
+  color: var(--mh-tool);
+}
+
+.mh-actor-chip.is-synth {
+  color: var(--mh-synth);
+}
+
+.mh-actor-chip.is-dedup {
+  color: var(--mh-dedup);
+}
+
+.mh-actor-chip.is-command {
+  color: var(--mh-command);
+}
+
+.mh-actor-chip.is-system {
+  color: var(--mh-system);
+}
+
+.mh-actor-chip-name {
+  white-space: nowrap;
+}
+
+/* 来源未标注：数据质量信号，用警示色，不许藏 */
+.mh-actor-chip.is-unknown {
+  color: var(--error);
+  background: var(--error-soft);
+  border-color: rgba(236, 19, 19, 0.25);
+  font-weight: 600;
+}
+
+/* ── 操作类型（次一级） ── */
+.mh-rev-ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.mh-rev-ops-label {
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+.mh-op-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l1);
+  font-size: 10px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+.mh-op-chip b {
+  font-family: var(--font-mono);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 流水行 ── */
+.mh-rev-list {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mh-rev-item {
+  padding: 8px 0;
+  border-top: 0.5px solid var(--border-l1);
+}
+
+.mh-rev-item:first-child {
+  border-top: none;
+}
+
+.mh-rev-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.mh-rev-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* actor 徽章：分类色只染文字，unknown 才带底色告警 */
+.mh-actor {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  font-size: 10px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+.mh-actor.is-tool {
+  color: var(--mh-tool);
+}
+
+.mh-actor.is-synth {
+  color: var(--mh-synth);
+}
+
+.mh-actor.is-dedup {
+  color: var(--mh-dedup);
+}
+
+.mh-actor.is-command {
+  color: var(--mh-command);
+}
+
+.mh-actor.is-system {
+  color: var(--mh-system);
+}
+
+.mh-actor.is-unknown {
+  color: var(--error);
+  background: var(--error-soft);
+  border-color: rgba(236, 19, 19, 0.25);
+  font-weight: 600;
+}
+
+.mh-rev-target {
+  font-size: 10px;
+  color: var(--label-secondary);
+}
+
+.mh-rev-id {
+  margin-left: 2px;
+  font-family: var(--font-mono);
+  color: var(--label-caption);
+}
+
+.mh-rev-op {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-module);
+  color: var(--label-secondary);
+  font-size: 10px;
+}
+
+.mh-rev-field {
+  font-size: 10px;
+  color: var(--accent);
+}
+
+/* ── before → after ── */
+.mh-rev-values {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin-top: 5px;
+  font-size: var(--fs-11);
+  line-height: 1.65;
+}
+
+.mh-rev-before {
+  padding: 0 3px;
+  border-radius: 2px;
+  background: rgba(236, 19, 19, 0.08);
+  color: var(--label-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: rgba(236, 19, 19, 0.45);
+  word-break: break-word;
+  user-select: text;
+}
+
+.mh-rev-after {
+  padding: 0 3px;
+  border-radius: 2px;
+  background: rgba(34, 197, 94, 0.16);
+  color: var(--label-primary);
+  word-break: break-word;
+  user-select: text;
+}
+
+.mh-rev-arrow {
+  flex: none;
+  color: var(--label-caption);
+}
+
+/* 展开后长文本块级显示，保留换行 */
+.mh-rev-values.is-open .mh-rev-before,
+.mh-rev-values.is-open .mh-rev-after {
+  display: block;
+  width: 100%;
+  white-space: pre-wrap;
+}
+
+.mh-rev-same {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: var(--fs-11);
+  line-height: 1.65;
+  color: var(--label-secondary);
+  word-break: break-word;
+  user-select: text;
+}
+
+.mh-rev-expand {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.mh-rev-expand:hover {
+  background: var(--accent-soft);
+}
+
+/* delete：整行 JSON 快照折叠，不摊在卡片上 */
+.mh-rev-snapshot {
+  margin-top: 5px;
+}
+
+.mh-rev-json-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px 1px 2px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+.mh-rev-json-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-secondary);
+}
+
+.mh-rev-pre {
+  margin: 5px 0 0;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  border: 0.5px solid var(--border-l1);
+  background: var(--bg-base);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--label-secondary);
+  white-space: pre;
+  user-select: text;
+}
+
+.mh-rev-reason {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--label-caption);
+  word-break: break-word;
+}
+
+/* 区块内的小尺寸加载/错误（不占满整屏） */
+.mh-center.is-inline {
+  flex: none;
+  min-height: 64px;
+  font-size: var(--fs-12);
+}
+
+.mh-error.is-inline {
+  margin: 0 0 8px;
+}
+
+/* 版本链的分区标题：显式标出「这是另一套口径」 */
+.mh-block-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 14px 0 7px;
+}
+
+.mh-block-caption-title {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.mh-block-caption-note {
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+/* ── 窄窗口：版本头折行，时间线内缩 ── */
+@media (max-width: 900px) {
+  .mh-versions {
+    padding-left: 24px;
+  }
+  .mh-versions::before {
+    left: 13px;
+  }
+  .mh-dot {
+    left: -15px;
+  }
+  .mh-merged-item {
+    grid-template-columns: auto 1fr;
+  }
+  .mh-merged-time {
+    display: none;
+  }
+  .mh-group-item,
+  .mh-orphan-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .mh-group-time,
+  .mh-orphan-time {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mh-spin {
+    animation: none;
+  }
+}

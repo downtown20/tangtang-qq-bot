@@ -1,0 +1,18 @@
+
+import re, glob, os, sys, collections
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+root = r"D:\qq-小糖糖\日志"
+pat = re.compile(r"\| (WARNING|ERROR) \| (🩺.*)")
+seen = collections.OrderedDict()
+for p in sorted(glob.glob(os.path.join(root, "*"))):
+    with open(p, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = pat.search(line)
+            if not m: continue
+            msg = m.group(2).strip()
+            key = re.sub(r"\d+", "N", msg)[:130]
+            if key not in seen:
+                seen[key] = (os.path.basename(p), msg[:220])
+for k,(f,s) in seen.items():
+    print(f"[{f}] {s}")
+print("---- total distinct health warns:", len(seen))

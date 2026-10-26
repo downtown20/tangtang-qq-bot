@@ -1,0 +1,629 @@
+/* ═══════════════════════════════════════════════════════════════
+   群管理（场景 + 黑名单 合并页）
+   底色 / 描边 / 圆角 / 字号全部走 tokens.css；类名统一 gm- 前缀，
+   避免和 cs-（会客厅）/ sb-（侧栏）/ tr-（回合回放）撞。
+   ═══════════════════════════════════════════════════════════════ */
+
+.gm-page {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.gm-count {
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 撑开剩余高度，让底部操作条在内容不满一屏时也贴着底 */
+.gm-spacer {
+  flex: 1 0 auto;
+}
+
+/* ── 顶部提示条 ─────────────────────────────────────────── */
+
+.gm-saved {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 0.5px solid rgba(34, 197, 94, 0.3);
+  color: var(--label-primary);
+}
+
+:root[data-theme='dark'] .gm-saved {
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.gm-saved-icon {
+  flex: none;
+  color: var(--success);
+}
+
+.gm-saved-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.gm-restart {
+  flex: none;
+}
+
+.gm-error-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.gm-error-close {
+  flex: none;
+  margin-left: auto;
+  color: inherit;
+}
+
+.gm-retry {
+  flex: none;
+  margin-left: auto;
+}
+
+/* 页面内二次确认（不用 window.confirm）。
+   吸顶：右键的群可能在列表很下面，确认条必须在视野里，否则「点了没反应」。 */
+.gm-confirm {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: rgba(245, 158, 11, 0.14);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 0.5px solid rgba(245, 158, 11, 0.32);
+  color: var(--label-primary);
+}
+
+:root[data-theme='dark'] .gm-confirm {
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.gm-confirm-icon {
+  flex: none;
+  color: var(--warn);
+}
+
+.gm-confirm-text {
+  flex: 1;
+  min-width: 220px;
+}
+
+.gm-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* 危险动作的主按钮（黑名单 / 清除配置） */
+.gm-btn-danger {
+  background: var(--error);
+  color: #fff;
+}
+
+.gm-btn-danger:hover:not(:disabled) {
+  background: #c91111;
+}
+
+/* ── 加载骨架 ───────────────────────────────────────────── */
+
+.gm-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 18px 4px;
+  font-size: var(--fs-13);
+  color: var(--label-tertiary);
+}
+
+.gm-skeleton-row {
+  height: 44px;
+  margin: 10px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  animation: gm-pulse 1.4s ease-in-out infinite;
+}
+
+.gm-skeleton-row:last-child {
+  margin-bottom: 16px;
+}
+
+@keyframes gm-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── 群列表 ─────────────────────────────────────────────── */
+
+.gm-list-panel {
+  margin-bottom: 26px;
+}
+
+/* 群列表自己滚（2026-10-26 主人：「前端的群列表不能滑动导致只能看到前面的群」）。
+ *
+ * 之前整页滚：群一多，列表尾部就被下面的「场景目标」面板顶出视野，
+ * 而滚动条长在 `.page` 上，看不出是列表还能滚。
+ *
+ * 用 `.panel.gm-list-panel`（0,2,0）压过 `.panel { overflow: hidden }`（0,1,0）——
+ * 同特异性时靠加载顺序决定胜负，那是运气不是设计。
+ * 高度用 vh 而不是 `calc(100vh - 430px)`：430 这个数绑死了头部/操作条的高度，
+ * 换一版布局就错，而错法是「列表突然变得很矮」这种没人会怀疑的地方。 */
+.panel.gm-list-panel {
+  max-height: min(46vh, 560px);
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 滚动条在深色底上要看得见——「能滚」和「不能滚」要肉眼可辨 */
+.panel.gm-list-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel.gm-list-panel::-webkit-scrollbar-thumb {
+  background: var(--border-l3);
+  border-radius: 4px;
+}
+
+.panel.gm-list-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--label-tertiary);
+}
+
+.gm-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 18px;
+  min-height: 58px;
+  position: relative;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.gm-group + .gm-group {
+  border-top: 1px solid var(--border-l1);
+}
+
+.gm-group:hover {
+  background: var(--bg-hover);
+}
+
+.gm-group.is-confirming {
+  background: var(--error-soft);
+  box-shadow: inset 2px 0 0 var(--error);
+}
+
+.gm-group-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.gm-group-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gm-group-name {
+  font-size: var(--fs-14);
+  font-weight: 500;
+  line-height: 20px;
+  word-break: break-all;
+}
+
+.gm-group-meta {
+  margin-top: 3px;
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-group-warn {
+  margin-top: 4px;
+  font-size: var(--fs-11);
+  color: var(--warn);
+}
+
+.gm-group-hint {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.gm-group:hover .gm-group-hint {
+  opacity: 1;
+}
+
+/* 徽章 */
+.gm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-11);
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.gm-badge.is-muted {
+  background: var(--bg-module);
+  color: var(--label-tertiary);
+}
+
+.gm-badge.is-scenario {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.gm-badge.is-danger {
+  background: rgba(236, 19, 19, 0.1);
+  color: var(--error);
+}
+
+:root[data-theme='dark'] .gm-badge.is-danger {
+  background: var(--error-soft);
+}
+
+/* ── 空态 ───────────────────────────────────────────────── */
+
+.gm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 0;
+  font-size: var(--fs-13);
+  color: var(--label-tertiary);
+}
+
+.gm-empty svg {
+  color: var(--label-caption);
+}
+
+.gm-empty-hint {
+  font-size: var(--fs-12);
+  color: var(--label-caption);
+}
+
+/* ── 场景目标 ───────────────────────────────────────────── */
+
+.gm-targets {
+  width: 100%;
+  max-width: 900px;
+}
+
+.gm-desc {
+  margin: -2px 0 14px;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--label-tertiary);
+}
+
+/* 分组切换（真按钮，不做成 tab 组件） */
+.gm-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 14px;
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-md);
+}
+
+.gm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 9px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.gm-tab:hover {
+  color: var(--label-primary);
+}
+
+.gm-tab.is-active {
+  background: var(--bg-base);
+  color: var(--label-primary);
+  box-shadow: var(--shadow-lv1);
+}
+
+.gm-tab-count {
+  font-size: var(--fs-11);
+  font-weight: 400;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-tab.is-active .gm-tab-count {
+  color: var(--label-tertiary);
+}
+
+.gm-group-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.gm-group-picker label {
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+}
+
+.gm-group-picker select {
+  min-width: 220px;
+  max-width: 100%;
+}
+
+.gm-picker-hint {
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+}
+
+.gm-inline-warn {
+  font-size: var(--fs-12);
+  color: var(--warn);
+}
+
+/* ── 目标列表 ───────────────────────────────────────────── */
+
+.gm-target-panel {
+  margin-bottom: 12px;
+}
+
+.gm-target-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.gm-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.gm-target-row + .gm-target-row {
+  border-top: 1px solid var(--border-l1);
+}
+
+.gm-target-row:hover {
+  background: var(--bg-hover);
+}
+
+.gm-qq {
+  flex: none;
+  width: 118px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-target-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-target-name.is-unknown {
+  color: var(--label-caption);
+}
+
+.gm-target-row select {
+  flex: none;
+  width: 190px;
+}
+
+.gm-target-del {
+  flex: none;
+  color: var(--label-tertiary);
+}
+
+.gm-target-del:hover {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+.gm-target-empty {
+  padding: 20px 16px;
+  font-size: var(--fs-13);
+  color: var(--label-tertiary);
+  text-align: center;
+}
+
+/* 添加行 */
+.gm-add-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-l2);
+}
+
+.gm-add-row input {
+  width: 160px;
+}
+
+.gm-add-row select {
+  width: 190px;
+}
+
+.gm-target-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 12px;
+  font-size: var(--fs-12);
+  color: var(--error);
+}
+
+/* ── 批量粘贴 ───────────────────────────────────────────── */
+
+.gm-batch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.gm-batch-toggle:hover,
+.gm-batch-toggle.is-open {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.gm-batch {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.gm-batch-hint {
+  margin: 0 0 10px;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  color: var(--label-tertiary);
+}
+
+.gm-batch textarea {
+  width: 100%;
+  min-height: 96px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.65;
+}
+
+.gm-batch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.gm-batch-tip {
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.gm-issues {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+  background: rgba(245, 158, 11, 0.08);
+  border: 0.5px solid rgba(245, 158, 11, 0.28);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.gm-issues li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.gm-issues li + li {
+  margin-top: 4px;
+}
+
+.gm-issues svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warn);
+}
+
+/* ── 底部操作条（吸底） ─────────────────────────────────── */
+
+.gm-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 26px -32px 0;
+  padding: 13px 32px;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-l2);
+  box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme='dark'] .gm-footer {
+  box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.3);
+}
+
+.gm-footer-info {
+  min-width: 0;
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.gm-unsaved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-12);
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.gm-dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}

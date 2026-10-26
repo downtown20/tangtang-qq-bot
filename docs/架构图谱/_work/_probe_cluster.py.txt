@@ -1,0 +1,14 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+out = {}
+out['fact_cluster_cursor_kv'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'fact_cluster_last_chat_id:%'")[0][0]
+out['fact_cluster_retry_kv'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'fact_cluster_retry:%'")[0][0]
+out['episodes_by_day'] = q("SELECT date(time_start) d, COUNT(*) FROM episodes GROUP BY d ORDER BY d DESC LIMIT 6")
+out['episodes_max_time'] = q("SELECT MAX(time_start) FROM episodes")[0][0]
+out['cluster_facts_max'] = q("SELECT MAX(id) FROM cluster_facts")[0][0]
+out['fact_clusters_max'] = q("SELECT MAX(id) FROM fact_clusters")[0][0]
+out['kv_fact_cluster_cursor_vals'] = q("SELECT key, value FROM kv_store WHERE key LIKE 'fact_cluster_last_chat_id:%' ORDER BY CAST(value AS INTEGER) DESC LIMIT 4")
+out['chat_log_max'] = q("SELECT MAX(id) FROM chat_log")[0][0]
+print(json.dumps(out, ensure_ascii=False, indent=1))

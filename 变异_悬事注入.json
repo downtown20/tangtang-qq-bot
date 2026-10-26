@@ -1,0 +1,31 @@
+{
+  "target": "agent/protocols.py",
+  "tests": "tests/test_open_loops_injection.py",
+  "_about": "第 13 轮 L3：悬着的事渲染。变异必须全红——绿了说明闸门看不出「丢了 id / 丢了问过次数 / 到期算错 / 优先级被降」。",
+  "mutations": [
+    {
+      "name": "渲染不带 #id（她调不了收尾工具）",
+      "old": "        head = f\"- #{loop_id} {topic}\" if loop_id else f\"- {topic}\"",
+      "new": "        head = f\"- {topic}\"",
+      "expect_fail": "test_line_carries_id_topic_and_when"
+    },
+    {
+      "name": "不告诉她问过几次（重复追问）",
+      "old": "        asked_text = f\"——已问过 {asked} 次\" if asked else \"——还没问过\"",
+      "new": "        asked_text = \"\"",
+      "expect_fail": "test_overdue_is_reported_as_days_past"
+    },
+    {
+      "name": "逾期天数不再提示",
+      "old": "                    if delta > 0:\n                        when += f\"，已过 {delta} 天\"",
+      "new": "                    if False:\n                        when += f\"，已过 {delta} 天\"",
+      "expect_fail": "test_overdue_is_reported_as_days_past"
+    },
+    {
+      "name": "优先级被降到默认 9（会被旧记忆挤掉）",
+      "old": "    \"悬着的事\": 5,",
+      "new": "    \"悬着的事\": 9,",
+      "expect_fail": "test_priority_registered"
+    }
+  ]
+}

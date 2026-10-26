@@ -1,0 +1,350 @@
+/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?   妯″瀷鍒囨崲鍣?鈥斺€?灏哄/缁撴瀯閫愭潯瀵归綈 DSH 鐨?model-selection 瀹㈡埛绔細
+   tmp_dsh_ui/_out/model_select_css.txt锛?8 鏉¤鍒欙級
+     路 trigger  height 28px / padding 0 4px 0 8px / gap 4 / font 13
+     路 triggerEffort  caption 鑹?+ flex-shrink:1000锛堢┖闂翠笉澶熷厛琚帇鎺夛級
+     路 menu     position:fixed / z 1100 / padding 4 / max-height min(360px, 100vh-96px)
+     路 option   min-height 34 / radius md / padding 5px 7px
+     路 cell     height 34 / padding 0 8px / cellValue 鍙冲榻?tertiary
+   鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
+.msw-root {
+  position: relative;
+  /* 鍏抽敭锛氫笉鑳借 trigger 鐨?max-width 鐢ㄧ櫨鍒嗘瘮鈥斺€旂埗鍏冪礌瀹藉害鏈韩鏄?shrink-to-fit锛?     鐧惧垎姣斾細閫€鍖栨垚 0锛宭abel 琚帇鎴?"dee鈥?銆侱SH 鐢?45cqw锛岃繖閲岀敤鍥哄畾涓婇檺銆?*/
+  flex: none;
+  min-width: 0;
+  max-width: 360px;
+}
+
+.msw-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  max-width: 360px;
+  min-width: 0;
+  padding: 0 4px 0 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--label-secondary);
+  font-size: var(--fs-13);
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.msw-trigger-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msw-trigger:hover {
+  background: var(--bg-hover);
+}
+
+.msw-trigger-icon {
+  flex: none;
+  color: var(--label-caption);
+}
+
+.msw-trigger-effort {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-caption);
+}
+
+.msw-chevron {
+  flex: none;
+  color: var(--label-caption);
+  transition: transform 0.12s var(--ease);
+}
+
+.msw-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+/* 鈹€鈹€ 娴眰鑿滃崟 鈹€鈹€ */
+.msw-menu {
+  position: fixed;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: min(268px, 100vw - 32px);
+  max-width: min(420px, 100vw - 32px);
+  max-height: min(360px, 100vh - 96px);
+  padding: 4px;
+  background: var(--menu-bg);
+  -webkit-backdrop-filter: var(--menu-blur);
+  backdrop-filter: var(--menu-blur);
+  border: 0.5px solid var(--border-l3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-prominent);
+  color: var(--label-primary);
+  overflow: hidden;
+  animation: msw-in 0.12s var(--ease);
+}
+
+@keyframes msw-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 鎼滅储琛岋細鏃犺竟妗嗛€忔槑搴?*/
+.msw-search-row {
+  flex-shrink: 0;
+  margin: 2px 0 3px;
+  position: relative;
+}
+
+.msw-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: var(--radius-md);
+  border: 0 solid transparent;
+  background: transparent;
+  color: var(--label-caption);
+}
+
+.msw-search:focus-within {
+  background: var(--bg-hover);
+  box-shadow: none;
+}
+
+.msw-search input {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: var(--fs-12);
+  color: var(--label-primary);
+}
+
+.msw-search input::placeholder {
+  color: var(--label-caption);
+}
+
+.msw-search-clear {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  color: var(--label-secondary);
+}
+
+.msw-search-clear:hover {
+  background: var(--bg-hover);
+}
+
+.msw-groups {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.msw-option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-width: 100%;
+  min-height: 34px;
+  padding: 5px 7px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: none;
+  outline: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.msw-option:hover:not(:disabled),
+.msw-option:focus-visible {
+  background: var(--bg-hover);
+}
+
+.msw-option.is-selected {
+  background: transparent;
+}
+
+.msw-option:disabled {
+  color: var(--label-caption);
+  cursor: default;
+}
+
+.msw-option-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.msw-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--label-primary);
+}
+
+.msw-model-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  line-height: 15px;
+  color: var(--label-tertiary);
+}
+
+.msw-check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 14px;
+  color: var(--label-primary);
+}
+
+.msw-divider {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--border-l2);
+  flex: none;
+}
+
+/* 浜岀骇 cell锛氭爣绛?+ 鍊?+ 绠ご */
+.msw-cell {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--label-primary);
+  text-align: left;
+  font-size: var(--fs-13);
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.msw-cell:hover:not(:disabled),
+.msw-cell:focus-visible {
+  background: var(--bg-hover);
+}
+
+.msw-cell:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.msw-cell-label {
+  flex: none;
+  white-space: nowrap;
+}
+
+.msw-cell-value {
+  flex: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--label-tertiary);
+}
+
+.msw-cell-chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--menu-icon);
+}
+
+/* 浜岀骇闈㈡澘澶?*/
+.msw-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+  flex: none;
+}
+
+.msw-back {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--label-secondary);
+}
+
+.msw-back:hover {
+  background: var(--bg-hover);
+}
+
+.msw-subhead-model {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-caption);
+  font-size: var(--fs-11);
+}
+
+/* 鐘舵€佹潯 */
+.msw-status,
+.msw-empty {
+  padding: 8px;
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--label-tertiary);
+}
+
+.msw-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 3px;
+  padding: 6px 7px;
+  border-radius: var(--radius-md);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: var(--fs-11);
+  line-height: 16px;
+}
+
+.msw-busy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 8px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  border-top: 1px solid var(--border-l2);
+}

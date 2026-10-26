@@ -1,0 +1,819 @@
+/* ═══════════════════════════════════════════════════════════════
+   「糖糖状态」面板样式（2026-10-25 第 45 轮）
+
+   视觉规格沿用本目录 tokens：
+     · 面板底 --bg-layer-2 → 区块 --bg-layer-3 → 内衬 --bg-base
+     · 0.5px 描边、圆角走 --radius-xs/sm/md、数字一律等宽
+     · 颜色语义只有三类：绿=充足/好、琥珀=偏低/要注意、红=急躁
+       （中性数据一律用 --label-*，不要满屏上色——那是仪表盘噪音）
+
+   两种密度：
+     · .is-panel  会客厅右侧窄栏（约 320px）→ 情绪卡竖排
+     · .is-full   概览页宽版 → 情绪卡三列
+   同一套类名、只差密度，保证两处看到的是同一个东西。
+   ═══════════════════════════════════════════════════════════════ */
+
+.sp-panel {
+  --sp-ok: var(--success);
+  --sp-warn: var(--warn);
+  --sp-bad: var(--error);
+  --sp-ok-fg: #15803d;
+  --sp-warn-fg: #b45309;
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+:root[data-theme='dark'] .sp-panel {
+  --sp-ok-fg: #4ade80;
+  --sp-warn-fg: #fbbf24;
+}
+
+.sp-panel.is-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+}
+
+.sp-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+/* ── 工具行：运行时长 + 刷新 ─────────────────────────────────── */
+
+.sp-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sp-toolbar-note {
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--label-tertiary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.sp-refresh:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+/* ── ① 结论层：一句话 ────────────────────────────────────────── */
+
+.sp-headline {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 9px 11px 9px 13px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+.sp-headline::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--sp-tone, var(--label-tertiary));
+}
+
+.sp-headline.is-calm {
+  --sp-tone: var(--sp-ok);
+  background: color-mix(in srgb, var(--sp-ok) 5%, var(--bg-layer-3));
+}
+
+.sp-headline.is-low {
+  --sp-tone: var(--sp-warn);
+  background: color-mix(in srgb, var(--sp-warn) 6%, var(--bg-layer-3));
+}
+
+.sp-headline.is-busy {
+  --sp-tone: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-layer-3));
+}
+
+.sp-headline-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--sp-tone, var(--label-tertiary));
+}
+
+.sp-headline-main {
+  min-width: 0;
+}
+
+.sp-headline-text {
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--label-secondary);
+}
+
+.sp-headline-text b {
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.sp-headline-sep {
+  color: var(--border-l4);
+}
+
+.sp-headline-sub {
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--label-tertiary);
+}
+
+/* ── 区块通用 ────────────────────────────────────────────────── */
+
+.sp-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sp-sec-meta {
+  padding-top: 10px;
+  border-top: 0.5px solid var(--border-l2);
+}
+
+.sp-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 15px;
+}
+
+.sp-sec-icon {
+  flex: none;
+  color: var(--label-caption);
+}
+
+.sp-sec-title {
+  flex: none;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--label-secondary);
+}
+
+.sp-sec-note {
+  flex: none;
+  font-size: 9.5px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-sec-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.sp-sec-action:hover {
+  text-decoration: underline;
+}
+
+.sp-empty {
+  padding: 6px 0;
+  font-size: 10.5px;
+  color: var(--label-caption);
+}
+
+/* ── 数值条（情绪 / 驱动力 / 关系共用一根） ─────────────────── */
+
+.sp-bar {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-layer-4);
+  overflow: hidden;
+}
+
+.sp-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--label-tertiary);
+  transition: width var(--dur-base) var(--ease);
+}
+
+.sp-bar-fill.is-energy {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sp-warn) 70%, transparent), var(--accent));
+}
+
+.sp-bar-fill.is-mood {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 50%, transparent), var(--sp-ok));
+}
+
+.sp-bar-fill.is-patience {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 45%, transparent), var(--accent));
+}
+
+.sp-bar-fill.is-drive {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, transparent), var(--accent));
+}
+
+.sp-bar-fill.is-relation {
+  background: var(--accent);
+}
+
+/* ── ② 情绪三卡 ─────────────────────────────────────────────── */
+
+.sp-mood {
+  display: grid;
+  gap: 6px;
+}
+
+/* 窄栏：一行一卡（横排每卡不足 100px，档位词会折行） */
+.sp-panel.is-panel .sp-mood {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 宽版：三列 */
+.sp-panel.is-full .sp-mood {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sp-mood-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 9px 8px;
+  border-radius: var(--radius-xs);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-3);
+}
+
+.sp-mood-card.is-low {
+  border-color: color-mix(in srgb, var(--sp-warn) 30%, transparent);
+}
+
+.sp-mood-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sp-mood-label {
+  font-size: 10.5px;
+  color: var(--label-tertiary);
+}
+
+.sp-mood-tier {
+  font-size: 10px;
+  color: var(--label-secondary);
+}
+
+.sp-mood-card.is-low .sp-mood-tier {
+  color: var(--sp-warn-fg);
+}
+
+.sp-mood-card.is-high .sp-mood-tier {
+  color: var(--sp-ok-fg);
+}
+
+.sp-mood-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-18);
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-mood-full {
+  margin-left: 1px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--label-caption);
+}
+
+.sp-mood-hint {
+  margin: 1px 0 0;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--label-caption);
+}
+
+/* ── ② 驱动力排序条 ─────────────────────────────────────────── */
+
+.sp-drives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-drive {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px 6px;
+  border-radius: var(--radius-xs);
+  border: 0.5px solid transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.sp-drive:hover {
+  background: var(--bg-hover);
+}
+
+.sp-drive.is-dominant {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+}
+
+.sp-drive.is-urgent:not(.is-dominant) {
+  border-color: color-mix(in srgb, var(--sp-warn) 26%, transparent);
+}
+
+.sp-drive-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sp-drive-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--label-secondary);
+}
+
+.sp-drive.is-dominant .sp-drive-label {
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.sp-drive-flame {
+  flex: none;
+  color: var(--accent);
+}
+
+.sp-drive-val {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-tag {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 14px;
+  background: var(--bg-layer-4);
+  color: var(--label-tertiary);
+}
+
+.sp-tag.is-urgent {
+  color: var(--sp-warn-fg);
+  background: color-mix(in srgb, var(--sp-warn) 16%, transparent);
+}
+
+.sp-tag.is-muted {
+  opacity: 0.7;
+}
+
+.sp-tag.is-dim {
+  color: var(--label-tertiary);
+}
+
+.sp-drive-hint {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--label-caption);
+}
+
+.sp-dominant {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-4);
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--label-secondary);
+}
+
+.sp-dominant b {
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.sp-dominant-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+/* ── ③ 关系场：堆叠条 + 图例 + 排行 ─────────────────────────── */
+
+.sp-stack {
+  display: flex;
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-layer-4);
+}
+
+.sp-stack-seg {
+  display: block;
+  height: 100%;
+}
+
+.sp-stack-seg.is-close {
+  background: var(--accent);
+}
+
+.sp-stack-seg.is-familiar {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.sp-stack-seg.is-other {
+  background: color-mix(in srgb, var(--label-tertiary) 45%, transparent);
+}
+
+.sp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+.sp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-legend-item i {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--label-tertiary);
+}
+
+.sp-legend-item.is-close i {
+  background: var(--accent);
+}
+
+.sp-legend-item.is-familiar i {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.sp-legend-item.is-other i {
+  background: color-mix(in srgb, var(--label-tertiary) 45%, transparent);
+}
+
+.sp-rels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 关系行是**按钮**（点一下展开 QQ / 段位）——可操作，不是纯展示 */
+.sp-rel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px 22px 12px;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 5px;
+  border-radius: var(--radius-xs);
+  text-align: left;
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+/* 宽版关系条：名字列限宽、条自适应变长——否则 760px 里名字占掉 500px，
+   比例条挤成一根短棍，看不出关系强弱 */
+.sp-panel.is-full .sp-rel {
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr) 26px 12px;
+}
+
+.sp-rel:hover {
+  background: var(--bg-hover);
+}
+
+.sp-rel.is-open {
+  background: var(--bg-layer-4);
+}
+
+.sp-rel-name {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-rel-bar {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--bg-layer-4);
+  overflow: hidden;
+}
+
+.sp-rel-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.sp-rel-val {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-rel-caret {
+  color: var(--label-caption);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.sp-rel-caret.is-open {
+  transform: rotate(180deg);
+}
+
+.sp-rel-detail {
+  grid-column: 1 / -1;
+  padding: 2px 0 3px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* ── ③ 记忆 ─────────────────────────────────────────────────── */
+
+.sp-mem-total {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.sp-mem-total b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-mem-total span {
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+.sp-mem-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.sp-mem-link:hover {
+  text-decoration: underline;
+}
+
+.sp-memos {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.sp-memo {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--bg-layer-3);
+}
+
+.sp-memo-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.sp-memo-meta {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 9.5px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-memo-imp {
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg-layer-4);
+}
+
+/* ── ③ 自我叙事 ─────────────────────────────────────────────── */
+
+.sp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sp-quote {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-xs);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--bg-layer-3);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sp-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.sp-more:hover {
+  text-decoration: underline;
+}
+
+.sp-sub-title {
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--label-caption);
+}
+
+.sp-value-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sp-value-chip {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-layer-4);
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--label-secondary);
+}
+
+/* ── ③ 最近经历：时间轴 ─────────────────────────────────────── */
+
+.sp-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-left: 1px solid var(--border-l3);
+}
+
+.sp-tl-item {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.sp-tl-dot {
+  position: absolute;
+  left: -13px;
+  top: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 0 2px var(--bg-layer-2);
+}
+
+.sp-tl-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-tl-time {
+  flex: none;
+  font-size: 9.5px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 模型 / 上一回合 ────────────────────────────────────────── */
+
+.sp-kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.sp-kv > span {
+  flex: none;
+  color: var(--label-tertiary);
+}
+
+.sp-kv > b {
+  min-width: 0;
+  font-weight: 500;
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-turn {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 宽版（概览页）稍微放大一点字号，但保持同一套节奏 ───────── */
+
+.sp-panel.is-full .sp-sec-title {
+  font-size: var(--fs-12);
+}
+
+.sp-panel.is-full .sp-mood-value {
+  font-size: var(--fs-24);
+  line-height: 26px;
+}
+
+.sp-panel.is-full .sp-quote,
+.sp-panel.is-full .sp-memo-text,
+.sp-panel.is-full .sp-tl-text {
+  font-size: var(--fs-12);
+  line-height: 18px;
+}

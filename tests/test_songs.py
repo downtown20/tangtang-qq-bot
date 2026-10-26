@@ -1,29 +1,33 @@
 """
-测试曲库声音版本解析（2026-08-14）
+测试曲库的声音版本解析（2026-08-14；2026-10-15 随歌词删除而收缩）
+
 每首歌有两种声音：tangtang=糖糖声线（songs/audio/）/ original=原声（covers/separated/*_FINAL.{wav,mp3}）
 
 版本令牌 2026-10-15 由 rvc 改名为 tangtang（翻唱链删除后 rvc 已名不副实）；
-旧值 rvc 保留兼容——agent/songs.py:369 的判据只看 original，其余一律糖糖声线。
+旧值 rvc 保留兼容——agent/songs.py 的判据只看 original，其余一律糖糖声线。
 
 .wav 是开发机上的无损源；.mp3 是发布包里的转码形态（2026-09-19 起）——
 唱歌走 CQ:record，QQ 侧本来就会转成 SILK 低码率语音编码，存无损是白背 1.5G。
 两种后缀都要认，否则用户下完包会发现 40 首歌的「原声」不存在。
+
+⚠ 2026-10-15：**歌词与分段唱歌已整体删除**。本文件原先还测 `get_section_audio`
+的段落参数与「有歌词/无歌词」两种条目形态——那些用例连同被测代码一起删了。
+现在曲库的输入只有音频文件，条目形态只有一种。
 """
 
 import pytest
 from pathlib import Path
-from agent.songs import SongLibrary
+
+from agent.songs import FULL_SECTION, SongLibrary
 
 
 @pytest.fixture
 def song_lib(tmp_path):
-    """构建迷你曲库：
+    """构建迷你曲库（只有音频，没有歌词文件）：
     songs/
       audio/勇气.wav                        ← 糖糖声线
       covers/separated/勇气_FINAL.wav       ← 原声
-      covers/separated/小鸟_FINAL.wav       ← 只有原声（无歌词无糖糖声线，如 SAKURA 场景）
-      勇气.txt（有歌词+分段）
-      晴天.txt（只有歌词，两种音频都没有）
+      covers/separated/小鸟_FINAL.wav       ← 只有原声（还没有糖糖声线版）
     """
     songs_dir = tmp_path / "songs"
     (songs_dir / "audio").mkdir(parents=True)
@@ -31,41 +35,43 @@ def song_lib(tmp_path):
     (songs_dir / "audio" / "勇气.wav").write_bytes(b"TANGTANG")
     (songs_dir / "covers" / "separated" / "勇气_FINAL.wav").write_bytes(b"ORIGINAL")
     (songs_dir / "covers" / "separated" / "小鸟_FINAL.wav").write_bytes(b"ORIGINAL2")
-    (songs_dir / "勇气.txt").write_text(
-        "梁静茹\n[副歌]\n我们都需要勇气\n来面对流言蜚语\n", encoding="utf-8"
-    )
-    (songs_dir / "晴天.txt").write_text(
-        "周杰伦\n[主歌1]\n故事的小黄花\n从出生那年就飘着\n", encoding="utf-8"
-    )
     return SongLibrary(str(songs_dir))
 
 
 class TestSongVersions:
     def test_tangtang_version_returns_audio_dir(self, song_lib):
-        path = song_lib.get_section_audio("勇气", "副歌", "tangtang")
+        path = song_lib.get_song_audio("勇气", "tangtang")
         assert Path(path).name == "勇气.wav"
         assert "separated" not in path
 
     def test_original_version_returns_final(self, song_lib):
-        path = song_lib.get_section_audio("勇气", "副歌", "original")
+        path = song_lib.get_song_audio("勇气", "original")
         assert Path(path).name == "勇气_FINAL.wav"
 
     def test_default_version_is_tangtang(self, song_lib):
-        path = song_lib.get_section_audio("勇气", "副歌")
-        assert Path(path).name == "勇气.wav"
+        assert Path(song_lib.get_song_audio("勇气")).name == "勇气.wav"
 
     def test_original_missing_returns_empty(self, song_lib):
         """没有原声的歌 → original 返回空字符串（播放层会降级到另一版）"""
-        assert song_lib.get_section_audio("晴天", "主歌1", "original") == ""
+        (song_lib.songs_dir / "audio" / "只有糖糖.wav").write_bytes(b"T")
+        song_lib.reload()
+        assert song_lib.get_song_audio("只有糖糖", "original") == ""
+        assert Path(song_lib.get_song_audio("只有糖糖", "tangtang")).name == "只有糖糖.wav"
+
+    def test_tangtang_missing_falls_back_to_original(self, song_lib):
+        """只有原声的歌取「糖糖声线」时退回原声——比没有声音好"""
+        assert Path(song_lib.get_song_audio("小鸟", "tangtang")).name == "小鸟_FINAL.wav"
 
     def test_final_only_song_discovered(self, song_lib):
-        """只有 FINAL 原声的歌（如 SAKURA）也必须进曲库、算有音频"""
+        """只有 FINAL 原声的歌也必须进曲库、算有音频"""
         assert "小鸟" in song_lib.list_songs()
         assert song_lib.has_any_audio("小鸟")
-        # 两种 version 都解析到 FINAL（只有这一版）
         for version in ("tangtang", "original"):
-            path = song_lib.get_section_audio("小鸟", "完整", version)
-            assert Path(path).name == "小鸟_FINAL.wav"
+            assert Path(song_lib.get_song_audio("小鸟", version)).name == "小鸟_FINAL.wav"
+
+    def test_song_without_any_audio_is_not_listed(self, song_lib):
+        """只有歌词没有音频的时代结束了——现在「在曲库里」就等于「有文件」"""
+        assert song_lib.list_songs_with_audio() == sorted(song_lib.list_songs())
 
 
 class TestOriginalMp3:
@@ -73,7 +79,7 @@ class TestOriginalMp3:
 
     发布包里原声是转码后的 mp3，不是 wav。只认 .wav 的话，用户下完包会发现
     40 首歌的原声"不存在"——而 sing 工具还在对 LLM 承诺「说原声就放原唱」，
-    用户点了只会静默降级放糖糖声线（agent/handler.py:10239 的降级分支）。
+    用户点了只会静默降级放糖糖声线（_send_song_section 的降级分支）。
     """
 
     @pytest.fixture
@@ -85,40 +91,68 @@ class TestOriginalMp3:
         (songs_dir / "audio" / "勇气.wav").write_bytes(b"TANGTANG")
         (songs_dir / "covers" / "separated" / "勇气_FINAL.mp3").write_bytes(b"MP3")
         (songs_dir / "covers" / "separated" / "小鸟_FINAL.mp3").write_bytes(b"MP3")
-        (songs_dir / "勇气.txt").write_text(
-            "梁静茹\n[副歌]\n我们都需要勇气\n", encoding="utf-8")
         return SongLibrary(str(songs_dir))
 
     def test_mp3_original_resolves(self, mp3_lib):
-        path = mp3_lib.get_section_audio("勇气", "副歌", "original")
-        assert Path(path).name == "勇气_FINAL.mp3"
+        assert Path(mp3_lib.get_song_audio("勇气", "original")).name == "勇气_FINAL.mp3"
 
     def test_mp3_only_song_is_discovered_and_playable(self, mp3_lib):
         assert "小鸟" in mp3_lib.list_songs()
         assert mp3_lib.has_any_audio("小鸟")
         for version in ("tangtang", "original"):
-            path = mp3_lib.get_section_audio("小鸟", "完整", version)
-            assert Path(path).name == "小鸟_FINAL.mp3"
+            assert Path(mp3_lib.get_song_audio("小鸟", version)).name == "小鸟_FINAL.mp3"
 
     def test_legacy_rvc_token_still_resolves_to_tangtang_voice(self, song_lib):
         """旧令牌 rvc 必须仍然解析到糖糖声线（改名不改语义的回归闸门）。
 
         2026-10-15 版本令牌改名 rvc → tangtang，但历史持久化记录（turn_actions /
-        出站回执）里存的还是旧值。agent/songs.py:369 的判据刻意写成「只看
+        出站回执）里存的还是旧值。`get_song_audio` 的判据刻意写成「只看
         original，其余一律糖糖声线」，所以旧值照旧可用。
-        这条用例防的是后人把判据改成 version == "tangtang"——那样旧记录会静默
+        这条用例防的是后人把判据改成 `version == "tangtang"`——那样旧记录会静默
         降级放原声：用户点了糖糖声线却听到原唱，而且不报错。
         """
-        legacy = song_lib.get_section_audio("勇气", "副歌", "rvc")
-        assert legacy == song_lib.get_section_audio("勇气", "副歌", "tangtang")
+        legacy = song_lib.get_song_audio("勇气", "rvc")
+        assert legacy == song_lib.get_song_audio("勇气", "tangtang")
         assert Path(legacy).name == "勇气.wav"
 
     def test_wav_wins_when_both_present(self, song_lib):
         """开发机上 wav 与 mp3 同时存在时取无损那份（顺序不能反）"""
         sep = song_lib.songs_dir / "covers" / "separated"
         (sep / "勇气_FINAL.mp3").write_bytes(b"MP3")
-        path = song_lib.get_section_audio("勇气", "副歌", "original")
-        assert Path(path).name == "勇气_FINAL.wav"
+        assert Path(song_lib.get_song_audio("勇气", "original")).name == "勇气_FINAL.wav"
+
+
+class TestSearchWithoutLyrics:
+    """歌名匹配（歌词搜索那两步已随歌词字段删除）"""
+
+    def test_exact_and_substring(self, song_lib):
+        assert song_lib.search("勇气")["title"] == "勇气"
+        assert song_lib.search("勇")["title"] == "勇气"
+
+    def test_reverse_containment(self, song_lib):
+        assert song_lib.search("那首勇气啊")["title"] == "勇气"
+
+    def test_miss_returns_none(self, song_lib):
+        assert song_lib.search("完全不存在的歌名zzz") is None
+
+    def test_lyrics_are_no_longer_indexed(self, song_lib):
+        """同目录放一个歌词 txt 也不会进入曲库——歌词能力已删除。
+
+        这条是**删除的守卫**：如果有人把 `songs/*.txt` 的加载加回来，
+        这里会立刻多出一首歌（txt 的 stem 是「歌词」），断言随之报红。
+        """
+        (song_lib.songs_dir / "歌词.txt").write_text("某人\n[副歌]\n一句词\n", encoding="utf-8")
+        song_lib.reload()
+        assert "歌词" not in song_lib.list_songs()
+
+
+def test_full_section_constant_is_the_only_section_token():
+    """播放层仍在用「完整」这个段落值（ActionPlan payload 的兼容键）。
+
+    它不是「分段唱歌」的残留能力，而是**已持久化记录的兼容值**：
+    payload["section"] 参与 derive_action_id，改掉它会换掉所有 sing 子动作的 id。
+    """
+    assert FULL_SECTION == "完整"
 
 
 # ═══════════════════════════════════════════════════════

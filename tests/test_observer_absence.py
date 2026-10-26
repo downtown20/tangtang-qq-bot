@@ -92,10 +92,23 @@ class TestAbsenceDetection:
         assert r['status'] == 'error', r
         assert '缺席' in r['message']
 
-    def test_never_run_in_warmup_is_not_an_alert(self):
+    def test_never_run_in_warmup_is_not_an_alert(self, monkeypatch):
         '''Cold start: not yet run is expected, not a fault.'''
+        # 2026-10-15 T56：原先这条断言挂在**测试进程的真实存活时间**上——
+        # hc._in_warmup() 读 time.monotonic() - hc._PROCESS_START，WARMUP_SECONDS=600。
+        # 于是「全套测试跑过 10 分钟」会把它变成假红（本机负载高时整套要 20 分钟）：
+        # 20:35 那一轮 3025 passed 里唯一一条 FAILED 就是它，而单跑本文件 19 passed。
+        # 现在把「进程刚起」钉死，并补一条阴性对照——证明这条真在测暖机逻辑，
+        # 而不只是测「None 会返回 ok」这一条分支。
+        monkeypatch.setattr(hc, '_PROCESS_START', time.monotonic())
         r = self._check(None)
-        assert r['status'] == 'ok'
+        assert r['status'] == 'ok', r
+
+        # 阴性对照：同一个输入（从未跑过），但进程已过暖机期 → 必须报出来
+        monkeypatch.setattr(hc, '_PROCESS_START',
+                            time.monotonic() - hc.WARMUP_SECONDS - 60)
+        assert self._check(None)['status'] == 'warn', (
+            '过了暖机期仍把「从未运行」当预期——观测盲区永远不会被发现')
 
     def test_unparseable_timestamp_warns(self):
         r = self._check('not-a-number')

@@ -25,13 +25,14 @@ from .inbound_event import (
     persist_inbound_message,
     serialize_segments,
 )
+from .tuning import tuning_float
 
 logger = logging.getLogger("糖糖.Batcher")
 
-BATCH_WINDOW = 2.0  # 秒
+BATCH_WINDOW = tuning_float("batch_window", 2.0)  # 秒
 
 
-AT_DEBOUNCE = 1.5  # @消息防抖窗口（秒）——等待该时长后处理最后一条@
+AT_DEBOUNCE = tuning_float("at_debounce", 1.5)  # @消息防抖窗口（秒）——等待该时长后处理最后一条@
 
 # 2026-08-28 任务A：批处理合并视图的标记键——handler 见该键即跳过 log_chat
 # （合并文本只作 LLM 视图，绝不写成单一用户 chat_log 事实行）
@@ -72,38 +73,44 @@ class MessageBatcher:
         """@消息防抖——不合并内容，只防止同一群短时间内多次@产生多次LLM调用。
         多人同时@糖糖 → 取消前一次等待，只处理最后一条。
 
+        ⚠ 2026-10-15 修复（运行图谱审计）：这里原来把 `loop.create_future()` 存进
+        `_at_timers` 当「取消令牌」，而**真正计时的 Task 没有任何字段持有**
+        （`asyncio.create_task(...)` 的返回值被丢弃）。于是 `prev.cancel()`
+        取消的是一个从未被 await 的 Future，计时 Task 照跑不误——
+        「多人同时 @ 只处理最后一条」这条承诺**从未成立**：N 个人同时 @
+        会在 1.5 秒后各自重入一次 handle_group_message，产生 N 次 LLM 回合。
+        字段的类型声明本来就是 `dict[str, asyncio.Task]`（见 __init__），
+        是赋值那行写错了对象。
+
+        修法：把 create_task 的返回值本身存进字段——取消令牌与执行体必须是同一个东西。
+
         Returns: True=已拦截（前一条被取消），False=正常处理（当前这条到期了该处理）
         """
-        # 取消之前的防抖计时器（前一条被后一条替代）
+        # 取消之前的防抖计时器（前一条被后一条替代）——存的必须是 Task 本身
         prev = self._at_timers.pop(group_id, None)
         if prev:
             prev.cancel()
-
-        # 创建新计时器
-        loop = asyncio.get_event_loop()
-        future = loop.create_future()
-        self._at_timers[group_id] = future  # type: ignore
 
         async def _wait_then_process():
             try:
                 await asyncio.sleep(AT_DEBOUNCE)
             except asyncio.CancelledError:
                 return
-            self._at_timers.pop(group_id, None)
+            # 只回收自己那一格：期间可能有更新的 @ 把它替换掉了，
+            # 那时该格的属主已经换人，不能替新属主清理（否则新版失去取消句柄）。
+            if self._at_timers.get(group_id) is asyncio.current_task():
+                self._at_timers.pop(group_id, None)
             msg["_debounced"] = True
             await self.h.handle_group_message(msg)
 
-        # 启动但不等待——调用方 return，让 NapCat 知道消息已被消费
-        asyncio.create_task(_wait_then_process())
+        # 启动但不等待——调用方 return，让 NapCat 知道消息已被消费。
+        # 句柄必须存进 _at_timers：这是「取消前一次」唯一能生效的前提。
+        self._at_timers[group_id] = asyncio.create_task(
+            _wait_then_process(), name=f"at_debounce:{group_id}",
+        )
 
         # 总是返回 True——@消息永远走防抖路径
         return True
-
-    async def _cancel_at_timer(self, group_id: str):
-        """取消指定群的@防抖计时器"""
-        timer = self._at_timers.pop(group_id, None)
-        if timer:
-            timer.cancel()
 
     # ═══════════════════════════════════════
     # 内部

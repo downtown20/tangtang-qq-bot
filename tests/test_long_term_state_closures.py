@@ -397,3 +397,57 @@ def test_feedback_budget_keeps_source_reply_and_reaction():
     assert "feedback#7" in fitted[0][1]
     assert "糖糖原话开始" in fitted[0][1]
     assert "用户反应开始" in fitted[0][1]
+
+
+def test_legacy_profile_enters_the_resurrection_pass(store):
+    """非空 legacy 画像必须能被重合成捞回来（2026-10-15 修的死角）。
+
+    修前：候选扫描只认「notes 为空」和「dirty」——有画像但不可信的人两头不靠：
+    既不被注入（`memory.active_notes` 只放行 verified/manual/corrected，这是防事故的、
+    正确），也永远不会被重合成刷新（这是死角，不对）。查库实测 68 份非空 legacy
+    里有 21 人已有 ≥10 条记忆，本该在这一趟被捞回来。
+
+    ⚠ 这个修复**不放宽注入门**：接通的是「重合成」这条唯一复活路径，
+    产出物是否可信仍由 `replace_profile_snapshot` 的谱系判定说了算。
+    """
+    from agent.memory import MemorySystem
+    from agent.handler_autonomy import AutonomyMixin
+
+    memory = MemorySystem(store=store)
+    store.get_or_create_person("legacy-user", "老画像")
+    store.update_person("legacy-user", notes="很久以前合成的画像")
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE people SET notes_trust_level=? WHERE qq_id=?",
+            ("legacy_unverified", "legacy-user"),
+        )
+        conn.commit()
+    for i in range(11):
+        store.insert_memory("legacy-user", "fact", f"有效事实{i}", confidence=0.9)
+
+    # 阳性对照：旧口径（不带 legacy_notes）看不见他——证明这道扫描确实在拦东西
+    old_scan = store.get_people_with_memories_gt(
+        min_count=10, empty_notes=True, limit=10, include_dirty=True,
+    )
+    assert "legacy-user" not in [row[0] for row in old_scan]
+    new_scan = store.get_people_with_memories_gt(
+        min_count=10, empty_notes=True, limit=10, include_dirty=True, legacy_notes=True,
+    )
+    assert "legacy-user" in [row[0] for row in new_scan]
+
+    class Harness(AutonomyMixin):
+        pass
+
+    handler = Harness()
+    handler.memory = memory
+    handler._extracting_users = set()
+    handler._resynthesize_profile_later = AsyncMock()
+    handler._synthesize_profile_task = AsyncMock()
+    handler._safe_task = lambda coro, name="": asyncio.create_task(coro)
+
+    async def run():
+        await handler._maybe_synthesize_stale_profiles()
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+    handler._synthesize_profile_task.assert_awaited_once_with("legacy-user")

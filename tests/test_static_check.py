@@ -31,6 +31,23 @@ BASE = Path(__file__).resolve().parent.parent
 SCRIPT = BASE / "tools" / "静态检查.py"
 
 
+def _run_capture(args: list[str]) -> subprocess.CompletedProcess:
+    """跑子进程并把**两端都钉死为 UTF-8**（子进程 PYTHONIOENCODING + 父进程 encoding=）。
+
+    为什么必须两端都钉（2026-10-16 T2.9 实测）：本仓在 Windows 上，父进程默认按
+    locale(GBK) 解子进程输出；而子进程一旦从环境里继承了 `PYTHONIOENCODING=utf-8`
+    （某些 shell / CI 包装会注入），中文输出就是「UTF-8 字节被按 GBK 读」——
+    `扫描文件数 = N` 变成乱码，正则匹配不到 → **假红**。反过来若子进程被注入 latin-1，
+    它连中文都打不出来（UnicodeEncodeError）→ 也红。两边都钉住，才与外部环境无关。
+
+    ⚠ 不要退回 `text=True` 就走——那等于让判据依赖跑测试的人当时的环境变量。
+    """
+    import os
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    return subprocess.run(args, cwd=BASE, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env)
+
+
 def _load_module():
     spec = importlib.util.spec_from_file_location("static_check_under_test", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
@@ -98,12 +115,25 @@ def test_collect_matches_independent_glob():
 
 
 def test_gate_runs_and_reports_the_scanned_count():
-    out = subprocess.run([sys.executable, str(SCRIPT)],
-                         cwd=BASE, capture_output=True, text=True, errors="replace")
+    out = _run_capture([sys.executable, str(SCRIPT)])
     assert out.returncode == 0, f"闸门报红：{out.stdout[-400:]}"
     m = re.search(r"扫描文件数 = (\d+)", out.stdout)
     assert m, f"输出里没有文件数 —— 无法发现闸门缩水：{out.stdout[:300]}"
     assert int(m.group(1)) == _expected_file_count()
+
+
+def test_child_output_survives_a_hostile_ambient_encoding(monkeypatch):
+    """阳性对照：外部注入 `PYTHONIOENCODING=latin-1` 时闸门仍然可读。
+
+    没有这一步，`_run_capture` 里那句 env 钉死就是「写了但从没生效」——它本来就不会报错
+    （本仓教训 #30 同族）。把 env 钉死去掉，本测试立刻红：latin-1 下子进程连「扫描文件数」
+    这四个字都打不出来。
+    """
+    monkeypatch.setenv("PYTHONIOENCODING", "latin-1")
+    out = _run_capture([sys.executable, str(SCRIPT)])
+    assert out.returncode == 0, f"子进程在自己打不出中文时报红：{out.stderr[-300:]}"
+    assert re.search(r"扫描文件数 = (\d+)", out.stdout), \
+        "中文判据在恶意编码环境下读不到了 —— 说明两端钉死没生效"
 
 
 def test_docs_point_at_the_script_not_a_bare_glob():

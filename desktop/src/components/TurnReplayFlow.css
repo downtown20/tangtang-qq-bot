@@ -1,0 +1,1108 @@
+/* ═══════════════════════════════════════════════════════════════
+   一条消息的流程图谱（2026-10-25 第 17 轮 二次整改）
+
+   视觉规格沿用本目录 tokens：
+     · 抽屉底 --bg-layer-2 → 卡片 --bg-layer-3 → 内衬 --bg-base
+     · 0.5px 描边、圆角走 --radius-xs/sm/md、数字一律等宽
+     · 状态色只有三档语义：绿=正常 / 黄=打折 / 红=异常，
+       外加灰=未触发。**灰不是红**——把「没调工具」标红会让人去修不存在的 bug。
+
+   类名统一 fg- 前缀（flow graph），与旧的 tr- 前缀分开：
+   这套是「图谱」，不是上一版的时间轴，混名会让人以为只是换了颜色。
+   ═══════════════════════════════════════════════════════════════ */
+
+.fg-graph {
+  /* 三档语义色 + 未触发灰。文字色单独一套，因为 #22c55e 当正文看不清 */
+  --fg-ok: var(--success);
+  --fg-warn: var(--warn);
+  --fg-err: var(--error);
+  --fg-skip: var(--label-tertiary);
+  --fg-ok-fg: #15803d;
+  --fg-warn-fg: #b45309;
+  --fg-err-fg: var(--error);
+  --fg-skip-fg: var(--label-tertiary);
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+:root[data-theme='dark'] .fg-graph {
+  --fg-ok-fg: #4ade80;
+  --fg-warn-fg: #fbbf24;
+}
+
+/* ── ① 体检横幅 ─────────────────────────────────────────────── */
+
+.fg-verdict {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 13px 11px 15px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-md);
+  background: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+/* 左侧一条状态色竖条：一眼看出这条回放整体健不健康 */
+.fg-verdict::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--fg-tone);
+}
+
+.fg-verdict.is-ok {
+  --fg-tone: var(--fg-ok);
+  background: color-mix(in srgb, var(--fg-ok) 5%, var(--bg-layer-3));
+}
+
+.fg-verdict.is-warn {
+  --fg-tone: var(--fg-warn);
+  background: color-mix(in srgb, var(--fg-warn) 6%, var(--bg-layer-3));
+}
+
+.fg-verdict.is-error {
+  --fg-tone: var(--fg-err);
+  background: color-mix(in srgb, var(--fg-err) 6%, var(--bg-layer-3));
+}
+
+.fg-verdict-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.fg-verdict-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--fg-tone);
+}
+
+.fg-verdict-text {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: -0.1px;
+  color: var(--label-primary);
+}
+
+.fg-verdict-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.fg-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-11);
+  line-height: 16px;
+  background: var(--bg-layer-4);
+  color: var(--label-secondary);
+}
+
+.fg-stat b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.fg-stat.is-ok {
+  color: var(--fg-ok-fg);
+  background: color-mix(in srgb, var(--fg-ok) 13%, transparent);
+}
+
+.fg-stat.is-warn {
+  color: var(--fg-warn-fg);
+  background: color-mix(in srgb, var(--fg-warn) 15%, transparent);
+}
+
+.fg-stat.is-error {
+  color: var(--fg-err-fg);
+  background: color-mix(in srgb, var(--fg-err) 13%, transparent);
+}
+
+.fg-stat.is-skip {
+  color: var(--fg-skip-fg);
+}
+
+/* 出问题的站：一行一个，点了跳过去 */
+.fg-broken {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 0.5px solid var(--border-l2);
+  padding-top: 8px;
+}
+
+.fg-broken-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  color: var(--label-secondary);
+  font-size: var(--fs-11);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.fg-broken-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.fg-broken-idx {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+.fg-broken-label {
+  flex: none;
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.fg-broken-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.fg-broken-tag.is-warn {
+  color: var(--fg-warn-fg);
+  background: color-mix(in srgb, var(--fg-warn) 15%, transparent);
+}
+
+.fg-broken-tag.is-error {
+  color: var(--fg-err-fg);
+  background: color-mix(in srgb, var(--fg-err) 13%, transparent);
+}
+
+.fg-broken-arrow {
+  flex: none;
+  margin-left: auto;
+  color: var(--label-caption);
+}
+
+.fg-broken-note {
+  margin: 0 0 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-l2);
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--label-tertiary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── 怎么看这张图 ───────────────────────────────────────────── */
+
+.fg-howto {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--label-tertiary);
+}
+
+.fg-howto b {
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+/* ── ② 缩略图谱：9 个节点横向排开 ─────────────────────────────── */
+
+.fg-mini {
+  display: flex;
+  align-items: flex-start;
+  padding: 9px 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-md);
+  background: var(--bg-layer-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fg-mini::-webkit-scrollbar {
+  display: none;
+}
+
+.fg-mini-node {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 78px;
+  padding: 2px 0;
+  border-radius: var(--radius-xs);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.fg-mini-node:hover {
+  background: var(--bg-hover);
+}
+
+.fg-mini-dot {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--bg-layer-4);
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.fg-mini-node.is-ok .fg-mini-dot {
+  color: var(--fg-ok-fg);
+  background: color-mix(in srgb, var(--fg-ok) 15%, transparent);
+}
+
+.fg-mini-node.is-warn .fg-mini-dot {
+  color: var(--fg-warn-fg);
+  background: color-mix(in srgb, var(--fg-warn) 18%, transparent);
+}
+
+.fg-mini-node.is-error .fg-mini-dot {
+  color: #fff;
+  background: var(--fg-err);
+}
+
+.fg-mini-node.is-skip .fg-mini-dot {
+  color: var(--label-tertiary);
+  background: transparent;
+  border: 1px dashed var(--border-l4);
+}
+
+.fg-mini-label {
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 13px;
+  color: var(--label-tertiary);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fg-mini-node.is-error .fg-mini-label {
+  color: var(--fg-err-fg);
+}
+
+.fg-mini-seg {
+  flex: 1 1 auto;
+  min-width: 6px;
+  height: 1px;
+  margin-top: 12px;
+  background: var(--border-l3);
+}
+
+/* ── 工具栏：站数 / 参数数 / 一键展开 ─────────────────────────── */
+
+.fg-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 -2px;
+}
+
+.fg-toolbar-count {
+  font-size: 10.5px;
+  color: var(--label-caption);
+}
+
+.fg-toolbar-btn {
+  padding: 3px 9px;
+  border: 0.5px solid var(--border-l3);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--label-secondary);
+  background: var(--bg-layer-3);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.fg-toolbar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+/* ── ③ 泳道分组 ─────────────────────────────────────────────── */
+
+.fg-track {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fg-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.fg-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.fg-group-name {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-4);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--label-secondary);
+}
+
+.fg-group-hint {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--label-caption);
+}
+
+.fg-group-rule {
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 1px;
+  background: repeating-linear-gradient(
+    to right,
+    var(--border-l3) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.fg-group-n {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+.fg-stations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── 站点：左竖轴 + 右卡片 ───────────────────────────────────── */
+
+.fg-station {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 9px;
+  position: relative;
+  padding-bottom: 9px;
+}
+
+.fg-station:last-child {
+  padding-bottom: 0;
+}
+
+.fg-node {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-top: 11px;
+}
+
+/* 竖轴：从本站顶部连到下一站 → 视觉上是一条连续的流程线 */
+.fg-node::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: -9px;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--border-l3);
+}
+
+/* 组首站不往上画（上面是分组标题） */
+.fg-station.is-group-first .fg-node::before {
+  top: 22px;
+}
+
+/* 末站不往下画（下面是空白） */
+.fg-station:last-child .fg-node::before {
+  bottom: calc(100% - 22px);
+}
+
+.fg-node-dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--bg-layer-2);
+  color: var(--fg-tone);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--fg-tone) 50%, transparent);
+}
+
+.fg-station.is-skip .fg-node-dot {
+  color: var(--fg-skip);
+  background: var(--bg-layer-2);
+  box-shadow: none;
+  border: 1px dashed var(--border-l4);
+}
+
+/* ── 状态色（一套变量驱动全站） ─────────────────────────────── */
+
+.fg-station.is-ok {
+  --fg-tone: var(--fg-ok);
+  --fg-tone-fg: var(--fg-ok-fg);
+}
+
+.fg-station.is-warn {
+  --fg-tone: var(--fg-warn);
+  --fg-tone-fg: var(--fg-warn-fg);
+}
+
+.fg-station.is-error {
+  --fg-tone: var(--fg-err);
+  --fg-tone-fg: var(--fg-err-fg);
+}
+
+.fg-station.is-skip {
+  --fg-tone: var(--fg-skip);
+  --fg-tone-fg: var(--fg-skip-fg);
+}
+
+/* ── 卡片 ───────────────────────────────────────────────────── */
+
+.fg-card {
+  min-width: 0;
+  padding-bottom: 10px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-layer-3);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.fg-station.is-error .fg-card {
+  border-color: color-mix(in srgb, var(--fg-err) 38%, transparent);
+  background: color-mix(in srgb, var(--fg-err) 4%, var(--bg-layer-3));
+}
+
+.fg-station.is-warn .fg-card {
+  border-color: color-mix(in srgb, var(--fg-warn) 30%, transparent);
+}
+
+.fg-station.is-skip .fg-card {
+  border-style: dashed;
+  border-color: var(--border-l3);
+  background: transparent;
+}
+
+/* 头行：序号 / 标题 / 耗时 / 状态灯 / 折叠箭头 —— 整行是按钮 */
+.fg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px 10px 6px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  text-align: left;
+  color: var(--label-primary);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.fg-head:hover {
+  background: var(--bg-hover);
+}
+
+.fg-idx {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--label-caption);
+}
+
+.fg-label {
+  flex: none;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  color: var(--label-primary);
+}
+
+.fg-station.is-error .fg-label {
+  color: var(--fg-err-fg);
+}
+
+.fg-ms {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+/* 状态灯：图标 + 两个字 */
+.fg-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 15px;
+  font-weight: 500;
+  color: var(--label-secondary);
+  background: var(--bg-layer-4);
+}
+
+.fg-pill.is-ok {
+  color: var(--fg-ok-fg);
+  background: color-mix(in srgb, var(--fg-ok) 13%, transparent);
+}
+
+.fg-pill.is-warn {
+  color: var(--fg-warn-fg);
+  background: color-mix(in srgb, var(--fg-warn) 16%, transparent);
+}
+
+.fg-pill.is-error {
+  color: #fff;
+  background: var(--fg-err);
+}
+
+.fg-pill.is-skip {
+  color: var(--label-tertiary);
+  background: transparent;
+  border: 1px dashed var(--border-l3);
+}
+
+.fg-head-caret {
+  flex: none;
+  color: var(--label-caption);
+}
+
+/* 折叠箭头（本文件到处用） */
+.fg-caret {
+  flex: none;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.fg-caret.is-open {
+  transform: rotate(90deg);
+}
+
+/* 「这站干什么」：永远可见 —— 折叠成清单时它就是那一行 */
+.fg-role {
+  margin: 0;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--label-secondary);
+}
+
+/* 「这一轮实际发生了什么」：结论，整张卡的视觉重心 */
+.fg-did {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 10px 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--fg-tone) 9%, transparent);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--label-primary);
+}
+
+.fg-did-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--fg-tone);
+}
+
+.fg-station.is-skip .fg-did {
+  background: var(--bg-layer-4);
+}
+
+.fg-station.is-skip .fg-did-icon {
+  color: var(--label-caption);
+}
+
+/* 「判断依据」：小一号，缩进在结论下面 —— 用 secondary 而不是 tertiary，
+   因为这是主人明确要求「逻辑是什么样的」的那一行，不该淡到看不清 */
+.fg-logic {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 10px 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--label-secondary);
+}
+
+.fg-logic-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-layer-4);
+  font-size: 9.5px;
+  line-height: 15px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+.fg-logic-text {
+  min-width: 0;
+}
+
+/* ── 摘要键值对 ─────────────────────────────────────────────── */
+
+.fg-kvs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 3px 12px;
+  margin: 8px 10px 0;
+}
+
+.fg-kv {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.fg-kv > span {
+  flex: none;
+  color: var(--label-tertiary);
+}
+
+.fg-kv > b {
+  min-width: 0;
+  font-weight: 500;
+  color: var(--label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 背景块表格（她这轮拿到了哪些材料） ──────────────────────── */
+
+.fg-blocks-wrap {
+  margin: 9px 10px 0;
+}
+
+.fg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--label-tertiary);
+}
+
+.fg-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fg-legend-item i {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--label-tertiary);
+}
+
+.fg-legend-item.is-kept i {
+  background: var(--fg-ok);
+}
+
+.fg-legend-item.is-trunc i {
+  background: var(--fg-warn);
+}
+
+.fg-legend-item.is-drop i {
+  background: var(--fg-err);
+  opacity: 0.7;
+}
+
+.fg-blocks {
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  background: var(--bg-layer-2);
+}
+
+.fg-blocks-head,
+.fg-block-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px 66px 52px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.fg-blocks-head {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--label-caption);
+  background: var(--bg-layer-3);
+  border-bottom: 0.5px solid var(--border-l2);
+}
+
+.fg-block {
+  border-bottom: 0.5px solid var(--border-l2);
+}
+
+.fg-block:last-child {
+  border-bottom: 0;
+}
+
+.fg-block-row {
+  width: 100%;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: left;
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.fg-block-row:not(:disabled):hover {
+  background: var(--bg-hover);
+}
+
+.fg-block-row:disabled {
+  cursor: default;
+}
+
+.fg-block-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--label-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fg-caret-space {
+  flex: none;
+  width: 10px;
+}
+
+.fg-block-prio,
+.fg-block-tok {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-block-status {
+  justify-self: start;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  line-height: 15px;
+  background: var(--bg-layer-4);
+  color: var(--label-secondary);
+}
+
+.fg-block.is-kept .fg-block-status {
+  color: var(--fg-ok-fg);
+  background: color-mix(in srgb, var(--fg-ok) 14%, transparent);
+}
+
+.fg-block.is-truncated .fg-block-status {
+  color: var(--fg-warn-fg);
+  background: color-mix(in srgb, var(--fg-warn) 16%, transparent);
+}
+
+.fg-block.is-dropped .fg-block-status {
+  color: var(--fg-err-fg);
+  background: color-mix(in srgb, var(--fg-err) 12%, transparent);
+}
+
+.fg-block.is-dropped .fg-block-label {
+  color: var(--label-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-l4);
+}
+
+.fg-block-preview {
+  margin: 0;
+  padding: 7px 9px 8px 20px;
+  border-top: 0.5px dashed var(--border-l2);
+  background: var(--bg-base);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
+/* ── 记忆条目（她这一轮想起来的） ────────────────────────────── */
+
+.fg-entries-wrap {
+  margin: 9px 10px 0;
+}
+
+.fg-entries-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: 10px;
+  color: var(--label-caption);
+}
+
+.fg-entries-n {
+  font-family: var(--font-mono);
+}
+
+.fg-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 9px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fg-entries li {
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--label-secondary);
+  word-break: break-word;
+}
+
+/* ── 全部参数（每个都带一句解释） ────────────────────────────── */
+
+.fg-params {
+  margin: 9px 10px 0;
+}
+
+.fg-params-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 0.5px solid var(--border-l3);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.fg-params-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.fg-params-n {
+  font-family: var(--font-mono);
+  color: var(--label-caption);
+}
+
+.fg-params-body {
+  margin-top: 6px;
+  padding: 2px 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-2);
+}
+
+.fg-param {
+  padding: 6px 0;
+  border-bottom: 0.5px dashed var(--border-l2);
+}
+
+.fg-param:last-child {
+  border-bottom: 0;
+}
+
+.fg-param-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.fg-param-k {
+  flex: none;
+  max-width: 47%;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.fg-param-v {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 参数解释：比参数本身小一号、灰一档 —— 需要时看，不需要时不挡路 */
+.fg-param-doc {
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--label-caption);
+}
+
+.fg-param.is-kept .fg-param-v,
+.fg-param.is-truncated .fg-param-v {
+  color: var(--label-primary);
+}
+
+/* ── 说明（为什么空 / 为什么异常） ─────────────────────────────
+   刻意**不用**彩色底：`did` 已经是那一格的结论块，再给 note 一个同色大块
+   会让同一站出现两个「重点」，反而看不出哪个是结论。这里用左侧细线和
+   小一号字，读作「补充原因」。 */
+
+.fg-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 9px 10px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-l3);
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--label-tertiary);
+}
+
+.fg-note svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--label-caption);
+}
+
+.fg-station.is-warn .fg-note {
+  border-left-color: color-mix(in srgb, var(--fg-warn) 45%, transparent);
+}
+
+.fg-station.is-warn .fg-note svg {
+  color: var(--fg-warn-fg);
+}
+
+.fg-station.is-error .fg-note {
+  border-left-color: color-mix(in srgb, var(--fg-err) 45%, transparent);
+}
+
+.fg-station.is-error .fg-note svg {
+  color: var(--fg-err-fg);
+}
+
+/* ── 交给下一站什么（环节之间如何配合） ─────────────────────── */
+
+.fg-carries {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 9px 10px 0;
+  padding-top: 8px;
+  border-top: 0.5px dashed var(--border-l2);
+}
+
+.fg-carries-icon {
+  flex: none;
+  color: var(--label-caption);
+}
+
+.fg-carries-label {
+  flex: none;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: var(--label-caption);
+}
+
+.fg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fg-chip {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-layer-4);
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--label-secondary);
+}
+
+/* ── 空状态 ─────────────────────────────────────────────────── */
+
+.fg-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 12px;
+  border: 0.5px dashed var(--border-l3);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  color: var(--label-tertiary);
+}
+
+/* ── 窄屏：缩略图谱只留序号，站点卡片收窄 ───────────────────── */
+
+@media (max-width: 780px) {
+  .fg-mini-node {
+    width: 46px;
+  }
+
+  .fg-mini-label {
+    display: none;
+  }
+
+  .fg-kvs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fg-blocks-head,
+  .fg-block-row {
+    grid-template-columns: minmax(0, 1fr) 40px 58px 48px;
+  }
+}

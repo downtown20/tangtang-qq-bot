@@ -1,0 +1,141 @@
+/* ═══════════════════════════════════════════════════════════════
+   设计 token — 对齐 DeepSeek Harness 桌面端（视觉参考：实际运行截图）
+   要点：DSH 当前是「浅色主区 + 深色侧边栏」；设置/卡片/列表都走浅色。
+   token 名沿用 DSH 的语义层（--dsw-alias-*），值取自
+   docs/开发规划/DSH_UI_调研_20261023.md 与实机截图校准。
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  /* ── 侧边栏：两套主题都保持深色（品牌区） ── */
+  --sidebar-bg: #141416;
+  --sidebar-bg-elevated: #26262a;
+  --sidebar-hover: #ffffff14;
+  --sidebar-active: #ffffff1f;
+  --sidebar-text: #e9eaec;
+  --sidebar-text-dim: #9a9ca1;
+  --sidebar-text-faint: #6d6f74;
+  --sidebar-border: #ffffff12;
+
+  /* ── 主区：浅色（默认） ── */
+  --bg-base: #ffffff;
+  --bg-layer-2: #ffffff;
+  --bg-layer-3: #f5f6f7;
+  --bg-module: #f5f6f7;
+  --bg-hover: rgba(38, 49, 72, 0.06);
+  --bg-active: rgba(38, 49, 72, 0.1);
+  --bg-mask: rgba(0, 0, 0, 0.32);
+
+  --border-l1: #0000000a;
+  --border-l2: #0000001a;
+  --border-l3: #0000001f;
+  --border-l4: #00000029;
+
+  --label-primary: #0f1115;
+  --label-secondary: #61666b;
+  --label-tertiary: #81858c;
+  --label-caption: #adb2b8;
+
+  /* 主按钮＝反色填充（浅色下是黑底白字） */
+  --brand-primary: #0f1115;
+  --brand-primary-hover: #43454a;
+  --accent: #4176e6;
+  --accent-soft: rgba(65, 118, 230, 0.12);
+  --success: #22c55e;
+  --warn: #f59e0b;
+  --error: #ec1313;
+  --error-soft: rgba(236, 19, 19, 0.08);
+
+  /* 圆角（DSH 六档） */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-panel: 28px;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
+    "Liberation Mono", Menlo, Courier, monospace;
+
+  /* 字号 */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-16: 16px;
+  --fs-18: 18px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+
+  /* 结构尺寸 */
+  --titlebar-h: 40px;
+  --sidebar-w: 260px;
+  --sidebar-collapsed-w: 56px;
+  --content-min-w: 400px;
+  --settings-panel-w: 800px;
+  --settings-nav-w: 188px;
+  --settings-nav-item-h: 40px;
+
+  /* 阴影（浅色下更克制） */
+  --shadow-lv1: 0 2px 4px 0 #0000000d;
+  --shadow-lv2: 0 4px 12px 0 #00000005, 0 2px 8px 0 #0000000a;
+  --shadow-lv3: 0 0 1px 0 #0003, 0 0 4px 0 #00000005, 0 12px 32px 0 #00000014;
+  --elevation-stroke: 0 0 0 0.5px var(--border-l4);
+  --elevation-prominent: 0 0 1px #0003, 0 3px 8px #0000000a, 0 0 20px #0000000d;
+
+  /* 浮层菜单：DSH 的 specific-menu 是半透明玻璃（浅 #f8f9fa94 / 深 #43454a73）。
+     这里把不透明度调高一点：Electron 里 backdrop-filter 在浅色主区上几乎看不出模糊，
+     0.58 的透明度会让底下的 composer 文字透出来，反而显脏。 */
+  --menu-bg: rgba(252, 253, 254, 0.96);
+  --menu-blur: blur(32px) saturate(160%);
+  --menu-icon: var(--label-caption);
+
+  /* 动效 */
+  --dur-fast: 0.1s;
+  --dur-base: 0.2s;
+  --dur-slow: 0.3s;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --focus-ring: 0 0 0 2px var(--accent);
+}
+
+/* 深色主题（DSH dark alias） */
+:root[data-theme="dark"] {
+  --bg-base: #151517;
+  --bg-layer-2: #2c2c2e;
+  --bg-layer-3: #353638;
+  --bg-module: #353638;
+  --bg-hover: #ffffff14;
+  --bg-active: #ffffff24;
+  --bg-mask: #00000080;
+
+  --border-l1: #ffffff0f;
+  --border-l2: #ffffff1f;
+  --border-l3: #ffffff29;
+  --border-l4: #ffffff33;
+
+  --label-primary: #f9fafb;
+  --label-secondary: #cfd3d6;
+  --label-tertiary: #adb2b8;
+  --label-caption: #81858c;
+
+  --brand-primary: #f9fafb;
+  --brand-primary-hover: #ebeef2;
+  --accent: #7aaaff;
+  --accent-soft: rgba(122, 170, 255, 0.14);
+  --error: #f25a5a;
+  --error-soft: rgba(242, 90, 90, 0.12);
+
+  --sidebar-bg: #0f0f11;
+  --sidebar-bg-elevated: #232326;
+  --sidebar-border: #ffffff14;
+
+  --menu-bg: rgba(58, 60, 64, 0.94);
+  --menu-icon: #9a9ca1;
+
+  --elevation-prominent: 0 0 0 0.5px var(--border-l4), 0 3px 8px #0000000a,
+    0 0 20px #0000000d;
+}

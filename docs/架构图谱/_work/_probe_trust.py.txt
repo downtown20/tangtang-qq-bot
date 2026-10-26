@@ -1,0 +1,18 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s,*a: c.execute(s,*a).fetchall()
+out = {}
+out['active_by_trust'] = q("SELECT COALESCE(trust_level,'<null>'), COUNT(*) FROM memories WHERE COALESCE(status,'active')='active' GROUP BY 1 ORDER BY 2 DESC")
+out['injectable_active'] = q("SELECT COUNT(*) FROM memories WHERE COALESCE(status,'active')='active' AND COALESCE(trust_level,'legacy_unverified') IN ('verified','manual','corrected')")
+out['active_by_origin_trust'] = q("SELECT COALESCE(origin,'?'), COALESCE(trust_level,'?'), COUNT(*) FROM memories WHERE COALESCE(status,'active')='active' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 12")
+out['users_with_injectable'] = q("SELECT COUNT(DISTINCT qq_id) FROM memories WHERE COALESCE(status,'active')='active' AND COALESCE(trust_level,'legacy_unverified') IN ('verified','manual','corrected')")[0][0]
+out['users_total_mem'] = q("SELECT COUNT(DISTINCT qq_id) FROM memories")[0][0]
+out['people_with_injectable_notes'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>'' AND COALESCE(notes_trust_level,'x') IN ('verified','manual','corrected') AND COALESCE(notes_dirty,0)=0")[0][0]
+out['people_with_any_notes'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>''")[0][0]
+out['people_with_any_mem'] = q("SELECT COUNT(*) FROM people p WHERE EXISTS(SELECT 1 FROM memories m WHERE m.qq_id=p.qq_id)")[0][0]
+out['people_zero_chats'] = q("SELECT COUNT(*) FROM people WHERE total_chats=0")[0][0]
+out['rel_summary_users'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(relationship_summary,'')<>''")[0][0]
+out['chat_log_by_group_share'] = q("SELECT CASE WHEN COALESCE(group_id,'')='' THEN 'private' ELSE 'group' END, COUNT(*) FROM chat_log WHERE COALESCE(is_bot_reply,0)=0 GROUP BY 1")
+out['people_rel_never'] = q("SELECT COUNT(*) FROM people WHERE total_chats>=80 AND COALESCE(relationship_summary,'')=''")
+print(json.dumps(out, ensure_ascii=False, indent=1))

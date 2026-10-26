@@ -1,0 +1,8 @@
+# -*- coding: utf-8 -*-
+import io, os, sys, datetime, time
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+p = os.path.join(root, '状态', '.reflection_state.json')
+for i in range(3):
+    print(datetime.datetime.now(), 'mtime', datetime.datetime.fromtimestamp(os.path.getmtime(p)), 'content', io.open(p, encoding='utf-8').read().strip())
+    time.sleep(4)

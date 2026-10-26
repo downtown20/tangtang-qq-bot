@@ -882,7 +882,8 @@ class CommandRouter:
             await self._run_store_io(
                 "command.memory.delete", 
                 self.handler.memory.store.delete_memories_for_user,
-                user_id,
+                user_id, actor="command:/记忆 清空",
+                reason="用户主动命令：清空关于自己的记忆",
             )
             return "关于你的记忆已清空..."
 
@@ -941,6 +942,8 @@ class CommandRouter:
             # 支持 "3月15日" 或 "3-15" 格式
             ok = await self._run_store_io(
                 "command.birthday.set", store.set_birthday, user_id, date_str,
+                actor="command:/生日 设置",
+                reason=f"用户主动设置生日：{date_str}",
             )
             if ok:
                 return f"🎂 糖糖记住了！你的生日是 {date_str}～到时候糖糖会在群里祝你生日快乐的！"
@@ -1406,7 +1409,11 @@ class CommandRouter:
     async def _sing_in_group(self, group_id: str, song: dict, *, action_source_id: str):
         """后台让糖糖在群里唱一首歌（主人遥控 /唱歌 命令）"""
         try:
-            sing_prompt = self.handler.songs.build_sing_prompt(song)
+            sing_prompt = self.handler.songs.build_sing_prompt(
+                song,
+                voice_available=(self.handler.voice_enabled
+                                 and not self.handler._is_voice_blocked(group_id)),
+            )
             system_prompt = self.handler.personality.build_system_prompt(
                 relationship=Relationship.FAMILIAR,
                 minimal=True,  # 2026-08-17：遥控唱歌只背身份+风格锚

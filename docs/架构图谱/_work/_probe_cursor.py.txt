@@ -1,0 +1,27 @@
+# -*- coding: utf-8 -*-
+"""只读取证 11：反思游标被谁改写——对照 pytest 缓存与日志（autonomy-tracer）"""
+import io, os, sys, datetime, json
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+print('now', datetime.datetime.now())
+for rel in ['.pytest_cache/v/cache/nodeids', '.pytest_cache/v/cache/lastfailed',
+            '状态/.reflection_state.json', '状态/.tangtang_self.json', '状态/.conversation_state.json']:
+    fp = os.path.join(root, rel)
+    print(' ', rel, datetime.datetime.fromtimestamp(os.path.getmtime(fp)) if os.path.exists(fp) else 'missing')
+print()
+print('--- 今日 03:1x 与 13:05 附近有无 糖糖.Reflection 日志 ---')
+p = os.path.join(root, '日志', 'tangtang.log')
+hits = []
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        if '糖糖.Reflection' in line or '开始反思整合' in line or '反思完成' in line:
+            hits.append(line.rstrip()[:170])
+print('糖糖.Reflection 行数:', len(hits))
+for h in hits[:20]: print('  ', h)
+print()
+print('--- 03:14:30-03:16:30 全部日志行 ---')
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        t = line[11:19]
+        if '03:14:30' <= t <= '03:16:30':
+            print('  ', line.rstrip()[:160])

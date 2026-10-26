@@ -459,6 +459,13 @@ def test_group_member_write_does_not_block_event_loop():
         def has_chat_event(self, *_args, **_kwargs):
             return False
 
+        def touch_person_nickname(self, *_args, **_kwargs):
+            # 2026-10-24 P0：群入口新增的昵称同步（只补空、不覆盖）。
+            # 真实 Store 有这个方法；极简 mock 必须跟得上真实接口，否则
+            # 入口会 AttributeError——这条测试就是抓到它的地方，别靠
+            # getattr 兜底把这种"mock 与真实接口脱节"藏起来。
+            return False
+
     class Memory:
         def __init__(self):
             self.store = SlowStore()

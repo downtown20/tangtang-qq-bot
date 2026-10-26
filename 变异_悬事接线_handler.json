@@ -1,0 +1,37 @@
+{
+  "target": "agent/handler.py",
+  "tests": "tests/test_open_loops_injection.py",
+  "_about": "第 13 轮 L3/L4 接线：开关 / 查询上限 / 私聊注入 / 工具只在私聊 / outcome 校验。变异必须全红。",
+  "mutations": [
+    {
+      "name": "开关失效（关着也注入）",
+      "old": "        if not bool(cfg.get(\"open_loops_injection\", False)):\n            return \"\"",
+      "new": "        if False:\n            return \"\"",
+      "expect_fail": "test_disabled_by_config"
+    },
+    {
+      "name": "注入位从 3 变成 5（挤占预算）",
+      "old": "                user_id, limit=3,",
+      "new": "                user_id, limit=5,",
+      "expect_fail": "test_limit_is_three"
+    },
+    {
+      "name": "注入块干脆不加进背景池（写侧白接）",
+      "old": "        open_loops_ctx = await self._get_open_loops_context(user_id)\n        if open_loops_ctx:\n            backgrounds.append((\"悬着的事\", open_loops_ctx))",
+      "new": "        open_loops_ctx = await self._get_open_loops_context(user_id)  # 变异：不注入",
+      "expect_fail": "test_private_path_injects_open_loops"
+    },
+    {
+      "name": "群里也给她这个工具（看不到材料却可调编号）",
+      "old": "        # 只给私聊：L3 注入也只在私聊。群里给她这个工具、却看不到材料，\n        # 等于让她凭空调一个不存在的编号（「发明能力」是第 8/9 轮反复踩的坑）。\n        if not is_group:",
+      "new": "        # 变异：群聊也给\n        if True:",
+      "expect_fail": "test_tool_absent_in_group"
+    },
+    {
+      "name": "outcome 不再校验（乱写也能落库）",
+      "old": "            if outcome not in (\"asked\", \"resolved\", \"dropped\"):\n                return \"(outcome 只能是 asked / resolved / dropped)\"",
+      "new": "            if False:\n                return \"(outcome 只能是 asked / resolved / dropped)\"",
+      "expect_fail": "test_bad_outcome_is_rejected_without_side_effect"
+    }
+  ]
+}

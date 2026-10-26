@@ -1,0 +1,36 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_self_memory_budget.py",
+  "mutations": [
+    {
+      "name": "M-SB1-整行退回旧格式（前缀加回 置信度+来源 两列，第 10 轮修之前的原样）",
+      "old": "            lines.append(f\"  💭 {labels.get(key, key)} {day}{where} {v[:80]}\")",
+      "new": "            lines.append(f\"  💭 [{labels.get(key, key)} | {day} | 置信度0.70 | 来源 chat_log#无 私聊] {v[:80]}\")",
+      "expect_fail": "test_noise_fields_do_not_come_back"
+    },
+    {
+      "name": "M-SB2-只加回来源编号（体积 116t→约156t，超出 150t 预算即掉条数）",
+      "old": "            lines.append(f\"  💭 {labels.get(key, key)} {day}{where} {v[:80]}\")",
+      "new": "            lines.append(f\"  💭 {labels.get(key, key)} {day}{where} 来源 chat_log#无 {v[:80]}\")",
+      "expect_fail": "test_five_self_memories_survive_150t_truncation"
+    },
+    {
+      "name": "M-SB3-条数上限 5 改回 2（等价于旧格式在 150t 下的实际容量）",
+      "old": "        for m in selected[:5]:\n            if hasattr(m, \"value\"):",
+      "new": "        for m in selected[:2]:\n            if hasattr(m, \"value\"):",
+      "expect_fail": "test_five_self_memories_survive_150t_truncation"
+    },
+    {
+      "name": "M-SB4-丢掉群作用域（群聊时她分不清这话在哪个群说的）",
+      "old": "            where = f\" 群{group_id}\" if group_id else \"\"",
+      "new": "            where = \"\"",
+      "expect_fail": "test_group_scope_still_visible_and_empty_timestamp_safe"
+    },
+    {
+      "name": "M-SB5-丢掉语义类型（说过/承诺过/动作已完成 三者不能互相改写，必须逐条可见）",
+      "old": "            lines.append(f\"  💭 {labels.get(key, key)} {day}{where} {v[:80]}\")",
+      "new": "            lines.append(f\"  💭 {day}{where} {v[:80]}\")",
+      "expect_fail": "test_noise_fields_do_not_come_back"
+    }
+  ]
+}

@@ -147,3 +147,63 @@ class TestMaybeUpdate:
         assert result is True
         assert ticks > 0
         assert thread_ids and all(thread_id != main_thread for thread_id in thread_ids)
+
+
+class TestSummarySizeContract:
+    """2026-10-15 T56（C2「生产者没有体积契约」）。
+
+    关系档案是全仓唯一「合成长文本、写库不设上限」的材料——画像 PROFILE_MAX_LEN(120 字)、
+    知识块 1500 字、记忆事实 80 字/条都有上限，只有它没有。DB 实测全库 23 份非空档案
+    正文 p50 360t / max 598t，正好贴着单块上限 600t，于是「消费端每轮兜底截断」沦为常态。
+    上限该落在生产端，且必须复用消费端那一个裁剪实现。"""
+
+    def test_oversize_summary_is_capped_before_write(self, store):
+        from agent.protocols import (
+            RELATIONSHIP_SUMMARY_MAX_TOKENS, truncate_bg_block,
+        )
+        long_body = "\n".join(
+            f"{i}. 这是第{i}条关系条目，写得又长又啰嗦，专门把正文顶到上限之上。"
+            for i in range(1, 41)
+        )
+        llm = AsyncMock(return_value=long_body)
+        mgr = _manager(store, llm)
+        store.get_or_create_person("31001", "长档案")
+        _seed_chats(store, "31001", 80)
+
+        assert asyncio.run(mgr.maybe_update("31001")) is True
+
+        saved = store.get_relationship_summary("31001")
+        assert len(saved) < len(long_body), \
+            "超长档案没有在生产端封顶——截断仍是消费端每轮兜底"
+        assert saved == truncate_bg_block(
+            long_body.strip(), RELATIONSHIP_SUMMARY_MAX_TOKENS), \
+            "生产端封顶没有复用消费端的裁剪实现——两套规则必然对不上"
+
+    def test_median_length_summary_is_not_touched(self, store):
+        """阳性对照的反面：中位数档案（实测 p50 ≈ 360t）不该被动——
+        上限只封住贴顶的那几份，不是把所有人的档案都缩一遍。"""
+        body = "1. 认识于测试群\n2. 喜欢被叫哥哥\n3. 无\n4. 一起打过游戏"
+        llm = AsyncMock(return_value=body)
+        mgr = _manager(store, llm)
+        store.get_or_create_person("31002", "常规档案")
+        _seed_chats(store, "31002", 80)
+
+        assert asyncio.run(mgr.maybe_update("31002")) is True
+        assert store.get_relationship_summary("31002") == body, "中位数档案被动了"
+
+    def test_block_with_capped_body_fits_single_block_ceiling(self):
+        """上限的算术必须自洽：封顶后的**整块**（契约行 + 标题 + 正文 + 包装）
+        必须 ≤ 单块上限，否则「生产端保证」是假的，消费端照样再切一刀。
+        全汉字正文是最坏情形（estimate_tokens 按 1.8t/字，英文只按 0.5t/字）。"""
+        from agent.handler import _build_relationship_block
+        from agent.protocols import (
+            MAX_BACKGROUND_BLOCK_TOKENS, RELATIONSHIP_SUMMARY_MAX_TOKENS,
+            _bg_est, _bg_wrap_tokens, truncate_bg_block,
+        )
+        capped = truncate_bg_block("汉" * 5000, RELATIONSHIP_SUMMARY_MAX_TOKENS)
+        block = _build_relationship_block("某人", capped)
+        total = _bg_est(block) + _bg_wrap_tokens("关系档案")
+        assert total <= MAX_BACKGROUND_BLOCK_TOKENS, (
+            f"封顶后整块 {total}t 仍超单块上限 {MAX_BACKGROUND_BLOCK_TOKENS}t——"
+            "_RELATIONSHIP_BLOCK_FIXED_TOKENS 与实际块结构脱钩了"
+        )

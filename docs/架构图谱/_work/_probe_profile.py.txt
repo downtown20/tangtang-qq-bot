@@ -1,0 +1,14 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s,*a: c.execute(s,*a).fetchall()
+out={}
+out['candidates_ge10_empty_notes'] = q("SELECT COUNT(*) FROM people p WHERE COALESCE(p.notes,'')='' AND (SELECT COUNT(*) FROM memories m WHERE m.qq_id=p.qq_id AND COALESCE(m.status,'active')='active')>10")[0][0]
+out['candidates_ge10_empty_notes_multiscope'] = q("""SELECT COUNT(*) FROM people p WHERE COALESCE(p.notes,'')='' AND (SELECT COUNT(*) FROM memories m WHERE m.qq_id=p.qq_id AND COALESCE(m.status,'active')='active')>10
+ AND (SELECT COUNT(DISTINCT COALESCE(m.source_group_id,'')) FROM memories m WHERE m.qq_id=p.qq_id AND COALESCE(m.status,'active')='active')>1""")[0][0]
+out['notes_nonempty'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>''")[0][0]
+out['notes_dirty'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(notes_dirty,0)=1")[0][0]
+out['kv_synth_attempt_n'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'synth_attempt:%'")[0][0]
+out['kv_synth_attempt_recent'] = q("SELECT key, value FROM kv_store WHERE key LIKE 'synth_attempt:%' ORDER BY value DESC LIMIT 4")
+out['kv_profile_syn_at_n'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'profile_syn_at:%'")[0][0]
+print(json.dumps(out, ensure_ascii=False, indent=1))

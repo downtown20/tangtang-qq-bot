@@ -1,0 +1,218 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  line-height: 1.5;
+  color: var(--label-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: var(--fs-13);
+  color: var(--label-primary);
+  background: var(--bg-layer-3);
+  border: 0.5px solid var(--border-l4);
+  border-radius: var(--radius-md);
+  height: 34px;
+  padding: 0 12px;
+  outline: none;
+  transition: border-color var(--dur-base) var(--ease);
+}
+
+textarea {
+  height: auto;
+  padding: 8px 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--label-caption);
+}
+
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--label-tertiary) 50%),
+    linear-gradient(135deg, var(--label-tertiary) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 15px, calc(100% - 11px) 15px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* 滚动条：DSH 主题默认 5px */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-l3);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-l4);
+}
+
+/* 无边框窗口：只有标题栏可拖动 */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   通用原子组件（DSH 规格）——放在 global 而不是某个页面里：
+   之前它们住在 pages/Settings.css，其他页面靠「Settings 也被 import 了」
+   才碰巧拿到样式，任何一个懒加载或顺序变化就会静默丢样式。
+   ═══════════════════════════════════════════════════════════════ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-14);
+  font-weight: 500;
+  line-height: 22px;
+  white-space: nowrap;
+  transition: background var(--dur-base) var(--ease),
+    border-color var(--dur-base) var(--ease), opacity var(--dur-base) var(--ease);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 主按钮＝反色填充（DSH 的 brand-primary，不是蓝色） */
+.btn-primary {
+  background: var(--brand-primary);
+  color: var(--bg-base);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-primary-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 0.5px solid var(--border-l3);
+  color: var(--label-secondary);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+.btn-ghost.is-active {
+  background: var(--bg-active);
+  color: var(--label-primary);
+  border-color: var(--border-l4);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--error-soft);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-13);
+  gap: 5px;
+}
+
+.btn-icon-only {
+  padding: 0;
+  width: 36px;
+  justify-content: center;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   讲解模式（2026-10-25 第 45 轮）
+
+   `html[data-explain="off"]` 由 App.tsx 挂上，这里只负责隐藏。
+   用 CSS 而不是给组件传 prop：解释区块散在十几个组件里，
+   传 prop 就要改十几条链路，漏一处就是「关了还漏一条」。
+
+   ⚠ 纪律：`.explain-only` **只准**加在解释性文字上
+     （这站干什么 / 判断依据 / 参数解释 / 怎么看 / 图例）。
+   数据、结论、异常原因**永远显示**——否则这个开关会变成藏 bug 的工具。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 属性选择器而不是 `.explain-only` 单类：历史上有人写成 `pl-explain-only`
+   / `fg-explain-only`（前缀命名），单类选择器匹配不到 → 那几段永远关不掉，
+   而且**看不出来**（开关点了没反应，用户只会觉得「这按钮只管一部分」）。
+   2026-10-26 主人报「讲解只控制『她怎么想』的注释」，
+   `PromptLedger.tsx` 的 `pl-explain-only` 就是这么静默失效的。
+   现在凡是类名里含 `explain-only` 的都受控。 */
+html[data-explain='off'] [class*='explain-only'] {
+  display: none !important;
+}
+
+

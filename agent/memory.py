@@ -14,9 +14,25 @@ from collections import deque
 from typing import Optional
 from dataclasses import dataclass
 
-from .store import Store
+from .store import Store, TRUSTED_TRUST_LEVELS, TRUST_INJECT_PRIORITY
 from . import protocols as _protocols  # 画像标注/根基契约常量（2026-08-15）
 from .async_io import run_bounded_blocking, run_bounded_store_io
+
+
+# ── 行首列表标记剥离（2026-10-15 T58，修 D1）──
+# 旧写法 `^[\s\-•·\d.]+\s*` 锚不住「列表标记」：它对**裸数字**照吃不误，
+# 于是 `2026年10月5日休学…` 被啃成 `年10月5日休学…`——年份在库里的记忆与画像里
+# 已经丢了一个多月（DB 实测 33 条 fact_synthesis + 14 份 people.notes，最近 10-13 仍在产生）。
+# 注释写的是「支持 - 开头或数字开头的列表」，实现却在吃任意连续数字。
+# 现在只认三种标记：- / • / · 开头，或 `1.` `1、` `1)` 这类**短**编号
+#（\d{1,3} 刻意排除 4 位年份与点分日期）。正例/反例见
+# tests/test_memory_recall_budget.py::test_list_marker_strip_keeps_year。
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-•·]\s*|\d{1,3}[.、)]\s*)\s*")
+
+
+def _strip_list_marker(line: str) -> str:
+    """剥掉行首列表标记，保留裸数字——年份/日期/数量都不是标记。"""
+    return _LIST_MARKER_RE.sub("", line).strip()
 
 
 @dataclass
@@ -109,9 +125,16 @@ class MemorySystem:
         """获取或创建人物档案（委托给 Store）"""
         return self.store.get_or_create_person(qq_id, nickname)
 
-    def update_person(self, qq_id: str, **kwargs):
-        """更新人物档案（委托给 Store）"""
-        self.store.update_person(qq_id, **kwargs)
+    def update_person(self, qq_id: str, *, actor: str = "", reason: str = "",
+                      **kwargs):
+        """更新人物档案（委托给 Store）。
+
+        `actor` / `reason` 只用于记忆留痕（memory_revisions），不是 people 列。
+        传空则由 Store 落 `unknown`——生产调用点必须显式给出，否则
+        `test_memory_revision_trail.py` 会红。
+        """
+        self.store.update_person(qq_id, actor=actor or "unknown",
+                                 reason=reason, **kwargs)
 
     def active_notes(self, qq_id: str) -> str:
         """画像统一出口——dirty 或无可信谱系一律返回空。
@@ -126,7 +149,10 @@ class MemorySystem:
         person = self.get_or_create_person(qq_id)
         if not person or person.get("notes_dirty"):
             return ""
-        if person.get("notes_trust_level") not in {"verified", "manual", "corrected"}:
+        # 放行集合来自 store.TRUSTED_TRUST_LEVELS——与 `query_memories(trusted_only)`
+        # 同一个常量。这两道门（画像注入 / 记忆召回）必须放行同一批等级，否则
+        # 「剖面页说可注入 N 条」与「实际能召回多少」会变成两个数。
+        if person.get("notes_trust_level") not in TRUSTED_TRUST_LEVELS:
             return ""
         return person.get("notes", "") or ""
 
@@ -215,14 +241,22 @@ class MemorySystem:
         retracted, superseded = [], []
         for mem_id, mem in hit_ids.items():
             status = "superseded" if mem["key"] in _protocols.SYNTHESIS_KEYS else "retracted"
-            self.store.set_memory_status(mem_id, status)
+            # 2026-10-24：留痕必须带 actor + reason——只记「变了」回答不了
+            # 「谁改的、为什么改」，而纠正是最需要事后复盘的一类变更。
+            self.store.set_memory_status(
+                mem_id, status, actor="tool:correct_memory",
+                reason=f"纠正：否定「{wrong[:60]}」",
+            )
             (superseded if status == "superseded" else retracted).append(mem_id)
 
         # 3) 旧事实簇没有会话作用域，只允许无作用域的维护调用修改。
         cluster_retracted = 0
         if source_group_id is None:
             for cf in self.store.search_cluster_facts_by_text(subject_qq, wrong):
-                self.store.retract_cluster_fact(cf["id"], "retracted")
+                self.store.retract_cluster_fact(
+                    cf["id"], "retracted", actor="tool:correct_memory",
+                    reason=f"纠正：否定簇事实「{wrong[:60]}」",
+                )
                 cluster_retracted += 1
 
         # 4) notes 脏标（jieba 分词关键词在 notes 中出现即标脏）
@@ -265,7 +299,10 @@ class MemorySystem:
             )
         )
         if notes_hit:
-            self.store.update_person(subject_qq, notes_dirty=1)
+            self.store.update_person(
+                subject_qq, notes_dirty=1, actor="tool:correct_memory",
+                reason="纠正命中画像关键词：标脏，禁止继续注入旧 notes",
+            )
             notes_dirty = True
 
         # 4.5) 零匹配 fail-closed（2026-08-17 事故）：wrong_fact 在 subject 的记忆、
@@ -294,6 +331,24 @@ class MemorySystem:
                 except Exception:
                     pass
 
+        # 6) 补「被谁取代」的指针。
+        #
+        # 纠正流程是「先标旧行、后写纠正事实」——第 2 步标 status 的那一刻，
+        # 纠正事实（第 5 步）还没有 id，指针没法写。所以在这里补最后一刀，
+        # 否则演化史里这些行就是断链（实测全库 1261 条 superseded 无指针）。
+        #
+        # 只在**写了纠正事实**时才补：没有 corrected_fact 的纠正只是「撤回」，
+        # 被否定的事物本来就没有替代品，硬编一个指针等于伪造版本关系。
+        if corrected_id and superseded:
+            try:
+                self.store.link_superseded(
+                    superseded, corrected_id, actor="tool:correct_memory",
+                    reason=f"纠正：被纠正事实 #{corrected_id} 取代",
+                )
+            except Exception:
+                logger.debug("纠正：补 superseded_by 指针失败（不影响纠正本体）",
+                             exc_info=True)
+
         return {
             "retracted": len(retracted), "superseded": len(superseded),
             "notes_dirty": notes_dirty, "corrected_id": corrected_id,
@@ -304,7 +359,10 @@ class MemorySystem:
                embed_engine=None, reranker=None, query_vec=None,
                target_qq: str = "", grounded_only: bool | None = None,
                trusted_only: bool = True,
-               source_group_id: str | None = None) -> list[MemoryEntry]:
+               uncertain_only: bool = False,
+               min_importance: int = 0, min_confidence: float = 0.0,
+               source_group_id: str | None = None,
+               reinforce_after: bool = False) -> list[MemoryEntry]:
         """回忆：BGE语义粗筛 → Reranker精排 → importance + 时间衰减。
 
         三阶段检索：
@@ -313,7 +371,44 @@ class MemorySystem:
         3. 终排：importance + 类型权重 + 指数时间衰减（Ebbinghaus简化）
 
         query_vec：2026-08-15 整体审查性能——调用方已编码过同一 query 时直接复用，
-        避免同一消息每回合被 encode 2-3 次（每次 ~4ms CPU）。"""
+        避免同一消息每回合被 encode 2-3 次（每次 ~4ms CPU）。
+
+        uncertain_only（2026-10-24 不确定性三档）：反选信任门——只取**没有原话佐证**
+        的记忆（legacy_unverified/unverified/NULL），供「她模糊记得」那一档使用。
+        与 trusted_only 互斥（同时为真由 store 抛 ValueError，这里不重复判定——
+        判定只能有一处）。min_importance/min_confidence 是模糊路的额外质量闸门：
+        在 SQL 侧收窄，而不是取回一堆碎片再在 Python 里筛（那样 limit 会被噪声吃满）。
+
+        reinforce_after（2026-10-25 第 11 轮）：召回到的记忆回写「提取强度」。
+
+        ⚠ **默认关闭。只有对话路径（记忆块 / 自忆 / `search_memories` 工具）显式传
+        True。** 为什么不是默认开——第一版就是默认开，实测**立刻写放大**：bot 启动后
+        两分钟内 96 条被 `importance+1`，因为 `recall()` 同时被**后台任务批量调用**
+        （启动时的记忆整理、反思、关系合成）。而「被后台扫过」**不等于**「她想起了」，
+        把两者混起来会让排序被后台任务污染。
+
+        这和第 9 轮「核了工具存在、没核工具作用域」是同一类错：**核了「接在底层
+        能覆盖全部调用点」，没核「全部调用点里有哪些不该覆盖」**。
+        所以现在的方向是 **fail-closed**：漏标一个调用点，代价是「不强化」（安全），
+        而不是「过度强化」（污染排序）。
+
+        为什么这事值得做：`memories` 有 `last_recalled` / `recall_count` 两列
+        （对应 Bjork 双强度模型里的**提取强度**），`memory.reinforce()` 和
+        `store.reinforce_memory_by_id()` 都有完整实现、`health_check` 还有监控项。
+        查库的真相是：2026-08 有大量回写（8-17 单日 251 条），**9 月起几乎归零**
+        ——不是「从未接」，是**接了之后在重构中掉了**。掉了的后果是三件静默失效：
+          ① Phase 2 的休眠降权（60 天不用 ×0.5）**不再执行**——新记忆字段全空，
+             `if last_rec` 直接挡住；
+          ② `cleanup_stale_memories` 判「从未回忆」用的是 `recall_count = 0`，
+             而新记忆恒为 0 → 系统把它们当成「从未用过」；
+          ③ 「她最近到底想起了什么」无法观测——记忆能力判据 J1/J2 没有测量基础。
+
+        ⚠ **模糊档必须关掉**（`recall_uncertain` 恒传 False）：强化会 `importance +1`，
+        让「她不确定的事」一路爬到可信档，等于用「被检索次数」伪造证据等级。
+
+        ⚠ 副作用是**设计意图不是 bug**：回写一开，休眠降权从此真正生效；被用起来的
+        记忆 importance 会缓慢上升（30 分钟冷却 + 上限 10 兜着）。
+        """
 
         # grounded_only 是旧调用方兼容名；新模型以关系化证据验证后的
         # trust_level 为唯一真值入口，不能再凭非空 CSV 自证。
@@ -321,6 +416,8 @@ class MemorySystem:
             trusted_only = grounded_only
         rows = self.store.query_memories(
             qq_id, target_qq=target_qq, trusted_only=trusted_only,
+            uncertain_only=uncertain_only,
+            min_importance=min_importance, min_confidence=min_confidence,
             source_group_id=source_group_id,
             # 显式查询必须遍历该主体的完整可信集合；否则旧的 top-200 会让
             # 低 importance 但高度相关的永久记忆永远不可达。
@@ -503,7 +600,7 @@ class MemorySystem:
             scored.append((score, r))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [
+        entries = [
             MemoryEntry(
                 id=r["id"], qq_id=r["qq_id"], key=r["key"], value=r["value"],
                 cognitive=r.get("cognitive", "semantic") or "semantic",
@@ -527,6 +624,45 @@ class MemorySystem:
             )
             for score, r in scored[:limit]
         ]
+        if reinforce_after and entries:
+            # 提取强度回写（2026-10-25 第 11 轮，见方法 docstring）。
+            # fail-open：写库失败绝不能让召回失败——否则「她想不起来」会被放大成
+            # 「她这一轮没说话」。reinforce 内部已有 30 分钟冷却与 summarized 跳过。
+            try:
+                self.reinforce(qq_id, entries)
+            except Exception as e:
+                logger.debug(f"🧠 提取强度回写失败（不影响召回）: {e}")
+        return entries
+
+    def recall_uncertain(self, qq_id: str, limit: int | None = None,
+                         query_text: str = "", embed_engine=None,
+                         reranker=None, query_vec=None,
+                         source_group_id: str | None = None,
+                         ) -> list[MemoryEntry]:
+        """模糊档召回（2026-10-24 不确定性三档）——薄封装，不另写一套排序。
+
+        只做三件事：把「反选信任门 + 质量门槛」的参数钉死在一处，然后走**同一个**
+        recall。为什么是薄封装而不是复制一份召回逻辑：排序/衰减/Reranker 这些
+        规则如果分叉，两档就会用两套尺子量同一件事——下次调参只改一处，另一处
+        悄悄腐烂（教训 #4/#14）。
+
+        门槛取 protocols 的常量（UNCERTAIN_MIN_IMPORTANCE / MIN_CONFIDENCE）：
+        DB 实测 active 模糊档 10,060 条，加双门槛后剩 943 条（94 人，人均 10 条），
+        噪声面收窄一个数量级——不加门槛时「importance=10 的『我觉得可以炒』」这类
+        碎片会直接进对话。"""
+        return self.recall(
+            qq_id,
+            limit=int(limit if limit is not None else _protocols.UNCERTAIN_RECALL_LIMIT),
+            query_text=query_text, embed_engine=embed_engine,
+            reranker=reranker, query_vec=query_vec,
+            trusted_only=False, uncertain_only=True,
+            min_importance=_protocols.UNCERTAIN_MIN_IMPORTANCE,
+            min_confidence=_protocols.UNCERTAIN_MIN_CONFIDENCE,
+            source_group_id=source_group_id,
+            # 模糊档**绝不**回写提取强度：强化会 importance+1，让「她不确定的事」
+            # 一路爬到可信档——那等于用「被检索次数」伪造证据等级（第 11 轮）。
+            reinforce_after=False,
+        )
 
     def reinforce(self, qq_id: str, memory_entries: list):
         """
@@ -570,7 +706,10 @@ class MemorySystem:
         返回删除数量。
         """
         _log = logging.getLogger("糖糖.Memory")
-        deleted = self.store.delete_stale_memories(days)
+        deleted = self.store.delete_stale_memories(
+            days, actor="decay:stale_cleanup",
+            reason=f"陈旧清理：importance≤2 且从未回忆且 >{days} 天",
+        )
         if deleted:
             _log.info(f"🧹 陈旧记忆清理: {deleted} 条已删除 (importance≤2, 未回忆, >{days}天)")
         return deleted
@@ -728,7 +867,47 @@ class MemorySystem:
 
     def _format_self_memories(self, selected: list = None) -> str:
         """格式化糖糖自己的记忆——不是"用户档案"，是自我认知。
-        每条都展示语义类型、时间、置信度和原始聊天来源。"""
+
+        ## 2026-10-25 第十轮：元数据曾吃掉这一块 68% 的预算
+
+        每条原本写成：
+
+            💭 [承诺过 | 2026-08-27 22:22 | 置信度0.70 | 来源 chat_log#236563 私聊] 承诺把「啥子！！！」补传过去
+
+        前缀 50 个字符 ≈ 33t，而 promise 类自忆的正文只有 9~20 字（≈6~14t）。
+        实测（拿她真答出来的 5 条真数据）：单条 40~51t、5 条共 **242t**，
+        其中 **165t（68%）是元数据**；落到 150t 预算下只装得下 **2 条**。
+
+        其中两个字段是纯噪音，与「她记不记得自己说过什么」无关：
+
+        · `置信度0.70` —— 查库：`bot_qq` 名下 1673 条 active 自忆的 confidence
+          **全是 0.70**（写入侧硬编码一个值）。它不区分任何东西，只是占地方。
+        · `来源 chat_log#236563` —— 她**没有**能按 chat_log id 取回的工具
+          （`search_chat_history` 是关键词检索，不吃 id）。这串数字她既用不上、
+          也带不走；30 万条 chat_log 里她一次都没引用过它。而第 9 轮刚证明过：
+          「登记一条取回路径」必须核**执行体的检索主体**，否则就是假路径。
+
+        同一功能的另一块（`format_compact_memories`，记忆块）早在第 8 轮就是
+        `  💭 {内容}` 的紧凑格式——**同一个能力两套实现，只压过其中一套**。
+        现在两边前缀同为个位数 token，5 条自忆在 150t 下能全部落座。
+
+        ## provenance 没有因此丢失
+
+        「有原始消息支撑」由三处保证，每一处都比「逐条打印编号」更强：
+
+        ① **写入侧** `remember_self` 的 `validate_self_memory_source` 强制：
+           必须是同一对象、同一作用域、`is_bot_reply=1` 的 chat_log 行——
+           bot 行只在确认送达后才写，所以这些行天然是「她真说过」。
+        ② **块首全块声明**「有原始消息支持的自忆」——它是针对**整块**的断言，
+           逐条再打一遍编号是同一件事的重复表述（也正是 68% 的来源）。
+        ③ **读侧** 调用方的 `grounded_only=True` 只取可信档（trusted_only），
+           不可信的一条都进不来。
+
+        保留字段的理由：`类型`（说过/承诺过/动作已完成——契约明说三者不能互相
+        改写，必须逐条可见）+ `日期`（第 9 轮刚修好「时间块从没进上下文」，
+        时间感是宝贝；但秒级精度无用，`MM-DD` 足够）+ `群号`（仅群聊时，
+        她要知道这句话是在哪个群说的）。
+        """
         if not selected:
             return "📋 你自己说过的话——还没记下什么特别的"
         labels = {
@@ -741,27 +920,22 @@ class MemorySystem:
             if hasattr(m, "value"):
                 v = m.value
                 key = getattr(m, "key", "said")
-                timestamp = getattr(m, "timestamp", "") or "时间未知"
-                confidence = getattr(m, "confidence", 0.0)
-                evidence = getattr(m, "evidence_ids", "") or "无"
+                timestamp = getattr(m, "timestamp", "") or ""
                 group_id = getattr(m, "source_group_id", "") or ""
             elif isinstance(m, dict):
                 v = str(m.get("value", ""))
                 key = m.get("key", "said")
-                timestamp = m.get("timestamp", "") or "时间未知"
-                confidence = m.get("confidence", 0.0)
-                evidence = m.get("evidence_ids", "") or "无"
+                timestamp = m.get("timestamp", "") or ""
                 group_id = m.get("source_group_id", "") or ""
             else:
                 v = str(m)
-                key, timestamp, confidence, evidence, group_id = "said", "时间未知", 0.0, "无", ""
+                key, timestamp, group_id = "said", "", ""
             if len(v) < 4:
                 continue
-            location = f"群{group_id}" if group_id else "私聊"
-            lines.append(
-                f"  💭 [{labels.get(key, key)} | {str(timestamp)[:16]} | "
-                f"置信度{float(confidence):.2f} | 来源 chat_log#{evidence} {location}] {v[:80]}"
-            )
+            ts = str(timestamp)
+            day = ts[5:10] if len(ts) >= 10 else "日期未知"
+            where = f" 群{group_id}" if group_id else ""
+            lines.append(f"  💭 {labels.get(key, key)} {day}{where} {v[:80]}")
         return "\n".join(lines) if len(lines) > 1 else "📋 你自己说过的话——还没记下什么特别的"
 
     def format_compact_memories(self, qq_id: str, selected: list = None,
@@ -769,7 +943,37 @@ class MemorySystem:
                                  include_profile: bool = True) -> str:
         """紧凑格式：人物速写(≤50字) + 可检索事实(最多max_facts条，每条80字)。
         画像提供性格氛围，💭事实提供对话锚点——LLM从💭中检索，
-        从🖼️中感受气质。两个频道不互相干扰。"""
+        从🖼️中感受气质。两个频道不互相干扰。
+
+        2026-10-24 不确定性三档：**按记忆自己的 trust_level 决定标记**，不按
+        「来自哪一路召回」——判定依据是数据的真值等级，不是调用方的意图。
+        这样即使将来有别的路径把模糊记忆塞进来，也逃不掉 `~`（双向闸门：
+        可信的不许带、模糊的必须带）。模糊行出现时块尾补一条行为契约，
+        否则 LLM 会把 `~` 当成装饰（方案 3.4）。
+
+        2026-10-25 纠正优先档（主人决策「corrected 优先」）：可信档内部再分层——
+        同一件事可能既有 ta 亲口纠正的结论（corrected），又有提取器当时以为对的
+        说法（verified）。原来两者注入文本完全一样（都是 💭），冲突时她只能猜。
+        现在 corrected 行挂 ✏️ 并**稳定排序到最前**，块尾补一条冲突仲裁契约。
+        """
+        # 稳定排序：同优先级内保持调用方（BGE/Reranker）给的相关性顺序——
+        # 那一层才是「哪条与这句话有关」的判断，不能被信任等级覆盖。
+        # 只调整呈现顺序、**不丢弃任何一条**：「哪条是真的」仍由 LLM 判
+        # （store.TRUST_INJECT_PRIORITY 的注释写了为什么不能拿它做过滤）。
+        if selected:
+            selected = sorted(
+                selected,
+                key=lambda m: TRUST_INJECT_PRIORITY.get(
+                    str(getattr(m, "trust_level", "") or ""), 0),
+                reverse=True,
+            )
+            # 观测：这一轮记忆块里到底装了哪几条、什么信任等级。
+            # 为什么需要：`turn_traces` 的 `memory_marks` 只能看到**最终 prompt**
+            # 里还剩几个标记，分不清「没被选中」和「被背景预算裁掉了」——
+            # 这两种情况的修法完全不同（前者调精排、后者调预算）。
+            logger.info("🧠 记忆块装入: %s", " | ".join(
+                f"#{getattr(m, 'id', '?')}:{getattr(m, 'trust_level', '?')}"
+                for m in selected))
         person = self.get_or_create_person(qq_id)
         nickname = person.get("nickname", qq_id)
         total = person.get("total_chats", 0)
@@ -785,6 +989,8 @@ class MemorySystem:
             lines.append(f"  🖼️ {_protocols.profile_text(profile_notes, max_len=50)}{_protocols.PROFILE_CAVEAT_SHORT}")
 
         # 事实锚点：排除与画像高度重叠的记忆（避免同一段话出现两次）
+        uncertain_lines = 0
+        corrected_lines = 0
         if selected:
             profile_prefix = profile_notes[:40] if has_profile else ""
             facts = []
@@ -801,18 +1007,67 @@ class MemorySystem:
                 if m.key in _protocols.SYNTHESIS_KEYS:
                     facts.append(f"  🖼️ {v[:60]}")
                 else:
-                    facts.append(f"  💭 {v[:80]}")
+                    # 2026-10-24：非可信档挂 ~（模糊），可信档保持 💭
+                    # 2026-10-25：可信档内 corrected 再挂 ✏️（纠正优先档）
+                    if self.is_uncertain(m):
+                        facts.append(f"  {_protocols.UNCERTAIN_MARK} {v[:80]}")
+                        uncertain_lines += 1
+                    elif self.is_corrected(m):
+                        facts.append(f"  {_protocols.CORRECTED_MARK} {v[:80]}")
+                        corrected_lines += 1
+                    else:
+                        facts.append(f"  💭 {v[:80]}")
             if facts:
                 lines.extend(facts[:max_facts])
 
         if not has_profile and not has_memories:
             lines.append("  ⚠️ 你对ta还不太了解——ta还没告诉过你关于自己的事。被问到关于ta的问题时，好奇追问，不编造。")
+        # 块尾行为契约：只在真的出现了对应行时追加（绝大多数轮次不占 token）
+        if corrected_lines:
+            lines.append(f"  {_protocols.CORRECTED_MEMORY_CONTRACT}")
+        if uncertain_lines:
+            lines.append(f"  {_protocols.UNCERTAIN_MEMORY_CONTRACT}")
         return "\n".join(lines)
+
+    @staticmethod
+    def is_uncertain(entry) -> bool:
+        """这条记忆是不是「没有原话佐证」的模糊档。
+
+        单一判定点：`trust_level` 是否落在唯一放行集合（store.TRUSTED_TRUST_LEVELS）
+        之外。缺失/NULL 一律算模糊（口径字典 §二：NULL 等同 legacy）——fail-closed
+        的方向是「宁可说得含糊」，不是「宁可说得肯定」。"""
+        level = str(getattr(entry, "trust_level", "") or "").strip()
+        return level not in TRUSTED_TRUST_LEVELS
+
+    @staticmethod
+    def is_corrected(entry) -> bool:
+        """这条记忆是不是 ta 亲口纠正过的结论（corrected 档）。
+
+        2026-10-25 主人决策「corrected 优先」的判定入口。只认
+        `trust_level == 'corrected'`——**不用 `origin == 'corrected'`**：
+        `origin` 记的是「这条怎么来的」，`trust_level` 记的是「它现在有多可信」；
+        纠正结论的信任等级可能被后续维护改写，注入层的唯一判定源必须是
+        trust_level（与 `is_uncertain` 同一口径，两条判定不能各查各的字段）。
+
+        为什么需要一个独立方法而不是并进 `is_uncertain`：两者是**正交**的。
+        `is_uncertain` 决定「要不要挂 🔵~ 表示不确定」，这里决定「要不要挂 ✏️
+        表示是纠正结论」——corrected 当然属于可信档（不挂 ~），但它需要额外
+        的可见性（冲突时以它为准）。"""
+        return str(getattr(entry, "trust_level", "") or "").strip() == "corrected"
 
     # ---- 短期记忆（群聊上下文） ----
 
-    def add_to_buffer(self, group_id: str, qq_id: str, nickname: str, message: str):
-        """添加消息到短期缓冲"""
+    def add_to_buffer(self, group_id: str, qq_id: str, nickname: str, message: str) -> int:
+        """添加消息到短期缓冲，返回该条消息的 `seq` 锚点。
+
+        **为什么返回 seq（2026-10-25）**：调用方在**构造 LLM 上下文之前**就把当前
+        消息放进了缓冲，而 `get_recent_context_messages()` 取最近 N 条时必然把它
+        一起取出来——随后 `_call_deepseek` 又把它作为本轮 `user_message` 追加一次，
+        于是同一条用户消息在 `api_messages` 里出现两遍（主人实测：会客厅里糖糖
+        说「你说了两遍」）。修复不由内容比对完成（`user_message` 带背景块前缀、
+        图片占位符会被中性化，两者并不总相等），而是由这个 `seq` 精确锚定：
+        调用方把返回值传给 `get_recent_context_messages(exclude_seq=...)`。
+        """
         if group_id not in self.short_term:
             self.short_term[group_id] = deque(maxlen=self.short_term_size)
 
@@ -827,6 +1082,88 @@ class MemorySystem:
             "seq": seq,
         }
         self.short_term[group_id].append(entry)
+        return seq
+
+    def warm_short_term_from_chat_log(self, bot_qq: str, bot_name: str = "",
+                                      active_hours: int = 24,
+                                      max_scopes: int = 8) -> dict:
+        """启动时从 `chat_log` 重建最近对话窗口（2026-10-25 第 4 轮）。
+
+        ## 为什么
+
+        `short_term` 是纯内存 deque——bot 一重启，所有对话窗口归零，她下一句话
+        就「不记得刚才聊到哪」。而 `chat_log` 里这些消息全在。
+
+        取证：`turn_traces#80` 的 `prompt_digest.history_count=0`——那是重启后
+        第一轮，她只收到当前这一句话、没有任何上下文；下一轮回升到 2 条，
+        证实是内存态被清、不是「会客厅不拼历史」。
+
+        ## 为什么是「重建」而不是「持久化 buffer」
+
+        两者都能让重启后还记得，但**持久化会造出第二份真相**：buffer 存磁盘 +
+        chat_log 各一份，两份不一致时没人知道该信谁。`chat_log` 本来就是唯一
+        事实源，buffer 只是它的内存投影——投影可以重算，不必存档。
+
+        ## 边界
+
+        - 已有内存数据的会话**不覆盖**（回灌只补空窗，不动活数据）；
+        - 只回灌最近 `active_hours` 内活跃的 `max_scopes` 个会话——全量回灌
+          会让启动变慢，而几小时前的群聊窗口本来也没有上下文价值；
+        - 排除 quarantine 行与框架合成行（14k+ 条「【同时有 N 个人找你…】」
+          是提示词不是聊天，回灌进来她会把系统提示当成自己说过的话）。
+
+        返回 `{"scopes": n, "entries": m}` 供启动日志观测。
+        """
+        stats = {"scopes": 0, "entries": 0}
+        store = getattr(self, "store", None)
+        if not bot_qq or store is None:
+            return stats
+        try:
+            scopes = store.list_recent_chat_scopes(
+                hours=active_hours, limit=max_scopes)
+        except Exception:
+            logger.debug("对话窗口回灌：取活跃会话失败", exc_info=True)
+            return stats
+
+        for scope in (scopes or []):
+            kind = str(scope.get("kind") or "")
+            sid = str(scope.get("id") or "")
+            if not sid:
+                continue
+            key = f"_private_{sid}" if kind == "private" else sid
+            if self.short_term.get(key):
+                continue  # 已有活数据，绝不覆盖
+            try:
+                rows = store.recent_chat_rows_for_scope(
+                    kind=kind, scope_id=sid, limit=self.short_term_size)
+            except Exception:
+                logger.debug("对话窗口回灌：读会话失败 %s", key, exc_info=True)
+                continue
+            if not rows:
+                continue
+            # 昵称一次批量取——单人查库 × 30 条会在启动路径上放大成 240 次查询
+            speakers = [str(r.get("qq_id") or "") for r in rows if not r.get("is_bot_reply")]
+            try:
+                nick_map = store.get_nicknames(sorted(set(speakers)))
+            except Exception:
+                nick_map = {}
+            buf = deque(maxlen=self.short_term_size)
+            for row in rows:
+                is_bot = bool(row.get("is_bot_reply"))
+                uid = str(row.get("qq_id") or "")
+                self._msg_seq = getattr(self, "_msg_seq", 0) + 1
+                buf.append({
+                    "qq_id": str(bot_qq) if is_bot else uid,
+                    "nickname": (bot_name or "糖糖") if is_bot else (nick_map.get(uid) or uid),
+                    "message": str(row.get("message") or ""),
+                    # chat_log 存的 "YYYY-MM-DD HH:MM:SS"；buffer 里只需要时分秒
+                    "time": str(row.get("timestamp") or "")[11:19],
+                    "seq": self._msg_seq,
+                })
+            self.short_term[key] = buf
+            stats["scopes"] += 1
+            stats["entries"] += len(buf)
+        return stats
 
     def enrich_image_message_in_buffer(self, group_id: str, qq_id: str, enriched: str):
         """识图写回（2026-08-16 结构性修复）：把识图描述写进 buffer 里最近一条
@@ -891,7 +1228,8 @@ class MemorySystem:
 
     def get_recent_context_messages(self, group_id: str, bot_qq: str, limit: int = 30,
                                     focus_user: str = "", priority_users: list = None,
-                                    is_private: bool = False) -> list[dict]:
+                                    is_private: bool = False,
+                                    exclude_seq: int = 0) -> list[dict]:
         """获取最近上下文，返回结构化消息列表——适配 LLM Chat Completions API。
 
         与 get_recent_context() 使用相同的消息选择逻辑，但输出格式不同：
@@ -901,6 +1239,10 @@ class MemorySystem:
 
         这样 LLM 能通过 role 字段区分自己说过的话和别人说的话，
         而非把所有内容当作文本去"阅读理解"。
+
+        `exclude_seq`：排除某条消息（`add_to_buffer` 的返回值）。**主对话入口必须传
+        当前消息的 seq**——否则当前消息既出现在这里（历史数组），又被 `_call_deepseek`
+        作为本轮 user 追加，同一条话会在请求体里出现两次。不传（0）时行为与历史一致。
         """
         if group_id not in self.short_term:
             return []
@@ -920,6 +1262,14 @@ class MemorySystem:
             selected.sort(key=lambda m: m.get('seq', 0))
         else:
             selected = all_msgs[-limit:]
+
+        # 排除「当前这条」——它由调用方的 user_message 单独提供，不能重复进历史。
+        # 只按 seq 精确排除；不做内容比对（理由见 docstring）。
+        if exclude_seq:
+            selected = [
+                m for m in selected
+                if int(m.get('seq', 0) or 0) != int(exclude_seq)
+            ]
 
         messages = []
         for m in selected:
@@ -984,6 +1334,8 @@ class MemorySystem:
                     self.store.update_memory_evidence(
                         cached["id"], evidence_ids, source_group_id,
                         evidence_quote=evidence_quote,
+                        actor="dedup:cache",
+                        review_reason="同批次重复出现，补录新证据",
                     )
             return
         self._dedup_cache.add(dedup_key)
@@ -997,12 +1349,17 @@ class MemorySystem:
         exact = self.store.find_memory_by_value(qq_id, value)
         if exact is not None:
             new_imp = max(importance, exact["importance"])
-            self.store.set_memory_importance(exact["id"], new_imp)
+            self.store.set_memory_importance(
+                exact["id"], new_imp, actor="dedup:exact",
+                reason="精确去重：同一事实再次出现，取更高 importance",
+            )
             if evidence_ids:
                 # P0-D2：新证据必须被 quote 支持（见 update_memory_evidence）
                 self.store.update_memory_evidence(
                     exact["id"], evidence_ids, source_group_id,
-                    evidence_quote=evidence_quote)
+                    evidence_quote=evidence_quote,
+                    actor="dedup:exact",
+                    review_reason="精确去重：同一事实再次出现，补录新证据")
             if embed_engine and embed_engine.ready:
                 new_vec = embed_engine.encode(value)
                 if new_vec is not None:
@@ -1033,13 +1390,24 @@ class MemorySystem:
                     sim = self._char_similarity(value, old_val)
                 if sim > 0.85:
                     new_imp = max(importance, old["importance"])
-                    self.store.update_memory_value(old["id"], value)
-                    self.store.set_memory_importance(old["id"], new_imp)
+                    # ⚠️ 这是旧值**永久消失**的写点：update_memory_value 用新表述
+                    # 就地覆盖旧的。留痕时把相似度写进 reason，事后才能判断这次
+                    # 合并是不是误合并（0.86 和 0.99 的可信度完全不同）。
+                    self.store.update_memory_value(
+                        old["id"], value, actor="dedup:semantic",
+                        reason=f"语义去重合并（相似度 {sim:.2f}）：旧表述被新表述覆盖",
+                    )
+                    self.store.set_memory_importance(
+                        old["id"], new_imp, actor="dedup:semantic",
+                        reason="语义去重合并：取更高 importance",
+                    )
                     if evidence_ids:
                         # P0-D2：新证据必须被 quote 支持（见 update_memory_evidence）
                         self.store.update_memory_evidence(
                             old["id"], evidence_ids, source_group_id,
-                            evidence_quote=evidence_quote)
+                            evidence_quote=evidence_quote,
+                            actor="dedup:semantic",
+                            review_reason="语义去重合并：补录新证据")
                     # 更新 embedding——合并后的文本应与向量一致
                     if new_vec is not None:
                         self.store.set_embedding(old["id"], new_vec)
@@ -1198,7 +1566,8 @@ class MemorySystem:
     def get_stats(self, qq_id: str) -> dict:
         """获取与某人的互动统计"""
         person = self.get_or_create_person(qq_id)
-        memories = self.recall(qq_id)
+        # 统计用途不算「想起来」——否则查一次统计就把 recall_count / importance 污染了
+        memories = self.recall(qq_id, reinforce_after=False)
         return {
             "nickname": person.get("nickname", ""),
             "intimacy": person.get("intimacy", 0),
@@ -1257,9 +1626,14 @@ class MemorySystem:
             if existing_summary else ""
         )
 
+        # ⚠ 2026-10-15（提取积压调查）：这两行原本没有 f 前缀，`{nickname}`
+        # 是**字面量**——LLM 收到的 system prompt 里写着「你的群友{nickname}」，
+        # 提取器被要求提取一个叫「{nickname}」的人的事实。全仓没有一处
+        # `.format()` 修补它，所以从上线起就是这样发的。
+        # 这是可证的缺陷；「它是不是 82% 空数组的成因」属待验证假设（另记）。
         system_prompt = (
-            "你是小糖糖，一只猫娘。以下聊天记录是你的群友{nickname}和你们的对话。\n"
-            "你只提取{nickname}关于自己的陈述——不提取关于你的陈述、不提取角色扮演。\n\n"
+            f"你是小糖糖，一只猫娘。以下聊天记录是你的群友{nickname}和你们的对话。\n"
+            f"你只提取{nickname}关于自己的陈述——不提取关于你的陈述、不提取角色扮演。\n\n"
             "规则：\n"
             "- 只提取用户明确陈述的关于自己的事实\n"
             "- 每条信息标注认知类型(cognitive)、重要性(importance 1-10)、置信度(confidence 0.0-1.0)\n"
@@ -1278,6 +1652,14 @@ class MemorySystem:
             "- 玩笑/玩梗——「我是秦始皇」「我住在火星」这类明显夸张的玩笑不是事实\n"
             "- 测试语句——开发者在测试记忆功能的输入（「测试一下」「随便说句话试试」）不是自述\n"
             "- 引用转述——消息里转述/引用别人的话（「他说」「XX说」、引号里的他人言论）不是用户自述\n"
+            "- 关于别人的陈述——**主语是第三方**的句子（「他今年高一」「她不喜欢抽烟」\n"
+            "  「XX 是我同事」）说的是**那个人**，不是当前用户自述。\n"
+            "  尤其当用户让你「修正/记一下 XX 的事」时，那句事实属于 XX —— 记到当前用户名下\n"
+            "  就是张冠李戴（2026-10-25 现场：主人让你修正「穷到吃外卖」的记忆，\n"
+            "  说「他实际是高一新生」，结果第二天这句话被提取成了主人自己的身份记忆）。\n"
+            "  判据**看主语，不看句子里有没有「他/她」**：\n"
+            "  ✅「我老婆叫米雪儿」「我妈是医生」——主语是「我」，是自述\n"
+            "  🚫「她叫米雪儿」「他今年高一」——主语是第三方，说的是别人\n"
             "- 否定句注意方向——「我不喜欢XX」提取为「不喜欢XX」，绝不能提取成「喜欢XX」\n"
             "- 无上下文单句标签——像「特摄仙人」这种孤零零的称号/名词，没有自述句式证据\n"
             "（我是/我学/我住/我叫/我玩），不提取\n"
@@ -1291,12 +1673,32 @@ class MemorySystem:
             "- identity: 身份、职业、学校、年龄、所在地等长期稳定信息\n"
             "- preference: 喜欢/讨厌/偏好（食物、音乐、颜色、品牌等）\n"
             "- habit: 习惯、日常行为模式、口头禅\n"
-            "- event: 生活事件、经历（去过哪里、做了什么、发生了什么）\n"
+            "- event: **已经发生**的生活事件、经历（去过哪里、做了什么、发生了什么）。\n"
+            "  🚫 还没发生的事（明天/下周/周末要做的）不要写成 event——用下面的 open_loop\n"
             "- relationship: 人际关系——不仅限于用户自己，也包括用户提到的其他人的关系。"
             "如「我是她男朋友」「我妈是医生」「张三是李四拉进群的」。\n"
             "- note: 其他值得记住的信息（说过的话、观点、技能等）\n"
             "- alias: 外号/绰号/称呼（2026-08-16）——只在系统提供了候选列表时判断，"
-            "value 是外号本身\n\n"
+            "value 是外号本身\n"
+            "- open_loop: 一件**还没结**的事——对方说将来要做的、承诺的、担心的、有截止日的事。"
+            "value 用一句话说清「什么没结」（不要写成「他说要…」，直接写事本身），"
+            "另给 kind 和 expected_at。\n"
+            "  ⚠ **判据只有一个：这件事发生了没有？** 还没发生 → open_loop；已经发生 → event。\n"
+            "  下面这些**都是 open_loop，不要写成 event / note / identity**"
+            "（2026-10-25 实测：1791 个提取批次里含将来时词的 158 条只有 2 条被判成 open_loop，"
+            "其余 116 条落进了 event——这不是「数据里没有」，是分类没选对）：\n"
+            "  ✅「明天去学校拿录取通知书」→ open_loop(kind=plan, expected_at=明天)\n"
+            "  ✅「明天要去医院复查」→ open_loop(kind=plan, expected_at=明天)\n"
+            "  ✅「明天10点有事，需要人叫醒」→ open_loop(kind=plan, expected_at=明天)\n"
+            "  ✅「国庆假期作业还没动笔」→ open_loop(kind=deadline)\n"
+            "  ✅ 算：「明天要去面试」「下个月体检」「说了要写但还没写」「想跟某人和好但还没开口」\n"
+            "  🚫 不算：已经完成的事——「面试完了」「体检做完了」是普通 event 记忆，不是没结的事\n"
+            "  🚫 不算：糖糖自己的承诺——那是糖糖的事（走另一条 remember_self），不是对方的未结事\n"
+            "  🚫 不算：无时间指向的空泛愿望——「以后想环游世界」「想变得有钱」没有落点，不是没结的事\n"
+            "  **同一件事只输出一条**：几句话说的是同一件事时（「明天要去医院复查」+「八点起来抢复查的号」），"
+            "合并成一条 open_loop，细节并进 value；拆成两条会让她对同一件事问两遍、收两次尾。\n"
+            "  kind 取值：plan(计划) / promise(承诺) / worry(担忧) / request(请求) / deadline(截止日)\n"
+            "  expected_at：预计发生/到期日，格式 YYYY-MM-DD；不知道或没有明确日期就填空字符串 \"\"\n\n"
             "认知类型（cognitive）：\n"
             "- episodic: 有时间锚点的具体事件——「上周去吃了火锅」「昨天说想学吉他」「和张三一起打游戏」\n"
             "  这些是发生过的事，会随时间快速淡化\n"
@@ -1307,6 +1709,8 @@ class MemorySystem:
             "输出格式（严格的 JSON 数组，不要其他内容）：\n"
             '[{"type":"identity","cognitive":"semantic","value":"在北大读计算机","importance":8,"confidence":0.95,"claim_type":"stated","evidence_quote":"我在北大读计算机","evidence_ids":[12]},'
             '{"type":"preference","cognitive":"semantic","value":"喜欢喝咖啡","importance":3,"confidence":0.8,"claim_type":"inferred","evidence_quote":"每天都要来一杯","evidence_ids":[15]}]'
+            "\n\nopen_loop 条目的写法（多 kind / expected_at 两个字段；其他类型不要带这两个字段）：\n"
+            '[{"type":"open_loop","kind":"plan","value":"明天要去面试","expected_at":"2026-10-26","cognitive":"episodic","importance":6,"confidence":0.9,"claim_type":"stated","evidence_quote":"我明天要去面试","evidence_ids":[12]}]'
         )
 
         # 2026-08-16 范式转换（教训 #24）：外号候选由系统在 @ 附近收集（信号收集
@@ -1431,7 +1835,7 @@ class MemorySystem:
                             if str(user_evidence[evidence_id].get("group_id", "") or "")
                             == source_group_id
                         ]
-                        valid.append({
+                        payload = {
                             "type": item.get("type", "note"),
                             "cognitive": cognitive,
                             "value": self._truncate_natural(raw_value, 100),
@@ -1443,7 +1847,17 @@ class MemorySystem:
                             "evidence_quote": str(item.get("evidence_quote") or "").strip(),
                             "evidence_ids": evidence_ids,
                             "source_group_id": source_group_id,
-                        })
+                        }
+                        # open_loop 专有字段必须透传：丢了 expected_at，L3 的
+                        # 「到期优先」排序永远命中不到；丢了 kind，注入块说不清
+                        # 「这是计划还是担忧」。只挂在 open_loop 上——其他类型
+                        # 多出这两个字段会污染既有记忆结构（闸门钉住）。
+                        if str(payload["type"]) == "open_loop":
+                            payload["kind"] = (
+                                str(item.get("kind") or "plan").strip().lower() or "plan")
+                            payload["expected_at"] = str(
+                                item.get("expected_at") or "").strip()
+                        valid.append(payload)
                     outcome = (
                         "success_empty" if raw_total == 0
                         else "success_with_items" if valid
@@ -1621,9 +2035,9 @@ class MemorySystem:
             if facts_match:
                 profile = response[:facts_match.start()].strip()
                 facts_text = facts_match.group(1).strip()
-                # 按行解析，支持 - 开头或数字开头的列表
+                # 按行解析，只剥行首列表标记（年份是内容不是标记——见 _strip_list_marker）
                 for line in facts_text.split('\n'):
-                    line = _re.sub(r'^[\s\-•·\d.]+\s*', '', line).strip()
+                    line = _strip_list_marker(line)
                     if len(line) >= 10:  # 过滤太短的
                         key_facts.append(line)
 
@@ -1655,6 +2069,7 @@ class MemorySystem:
                     importance=4, origin="summarized",
                     source_memory_ids=source_memory_ids,
                     source_group_id=profile_scope,
+                    actor="synthesis:profile",
                 )
                 # 新行同步建 embedding（旧行 embedding 已在快照事务内删除）
                 if embed_engine and embed_engine.ready:
@@ -1683,7 +2098,10 @@ class MemorySystem:
 
             return profile
         except Exception:
-            pass
+            # 2026-10-24：这里原本是裸 `except Exception: pass`——「合成失败」与
+            # 「记忆不够」返回同一个 None，调用方与运维都看不出区别（教训 #27：
+            # 空结果不许静默）。只加日志，返回值与降级行为一概不变。
+            logger.warning("画像合成异常（已返回 None）", exc_info=True)
         return None
 
     # ════════════════════════════════════════════════════════════
@@ -2065,6 +2483,8 @@ class MemorySystem:
                 await self._run_store_io(
                     "update_cluster_summary", self.store.update_cluster_summary,
                     cluster_id, summary, new_emb,
+                    actor="synthesis:fact_cluster",
+                    reason=f"簇摘要重生成：{cluster['title']}",
                 )
         except Exception:
             pass
@@ -2208,11 +2628,15 @@ class MemorySystem:
                     # 更新 ci 的 title
                     await self._run_store_io(
                         "set_cluster_title", self.store.set_cluster_title,
-                        ci["id"], new_topic,
+                        ci["id"], new_topic, actor="synthesis:cluster_merge",
+                        reason=f"簇合并：'{cj['title']}' 并入 '{ci['title']}'",
                     )
                     # 删除 cj
                     await self._run_store_io(
                         "delete_cluster", self.store.delete_cluster, cj["id"],
+                        actor="synthesis:cluster_merge",
+                        reason=(f"簇合并：'{cj['title']}' 并入 '{ci['title']}'"
+                                f"（相似度 {sim:.0%}），成员事实已迁移后删除原簇"),
                     )
                     # 重新生成摘要
                     await self._regenerate_cluster_summary(ci["id"], llm_call, embed_engine)
@@ -2382,6 +2806,9 @@ class MemorySystem:
             limit=None,
             trusted_only=True,
             source_group_id=source_group_id,
+            # ⚠ limit=None 取回的是**全量**记忆：这里若走提取强度回写，等于把该
+            # 主体名下所有记忆一次性 importance+1。关系检索是**筛选**，不是「想起」。
+            reinforce_after=False,
         )
         relation_words = (
             "室友", "朋友", "同学", "同事", "对象", "男朋友", "女朋友",

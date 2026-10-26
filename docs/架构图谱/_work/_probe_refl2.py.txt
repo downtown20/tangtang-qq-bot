@@ -1,0 +1,12 @@
+# -*- coding: utf-8 -*-
+import io, os, sys
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+base = os.path.join(root, '日志')
+for d in ['2026-10-13', '2026-10-14', '2026-10-15']:
+    p = os.path.join(base, 'tangtang.log' if d == '2026-10-15' else 'tangtang.log.' + d)
+    print('==', d)
+    with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if '🧘' in line or ('反思' in line and '心跳' not in line):
+                print('   ', line.rstrip()[:200])

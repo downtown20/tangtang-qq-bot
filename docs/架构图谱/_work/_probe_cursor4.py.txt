@@ -1,0 +1,24 @@
+# -*- coding: utf-8 -*-
+"""只读取证 13：reflection 游标写入者定位——谁在 13:05 写了它（autonomy-tracer）"""
+import io, os, sys, datetime, json
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+# 1) 是否有其它进程/文件在 13:05 附近被写
+sd = os.path.join(root, '状态')
+for f in sorted(os.listdir(sd)):
+    fp = os.path.join(sd, f)
+    mt = os.path.getmtime(fp)
+    print(f, datetime.datetime.fromtimestamp(mt).strftime('%H:%M:%S.%f'))
+print()
+print('now', datetime.datetime.now().strftime('%H:%M:%S'))
+print()
+print('--- memory.db mtime ---')
+print(datetime.datetime.fromtimestamp(os.path.getmtime(os.path.join(root, 'memory.db'))))
+print()
+print('--- 13:04:50-13:05:20 日志 ---')
+p = os.path.join(root, '日志', 'tangtang.log')
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        t = line[11:19]
+        if '13:04:50' <= t <= '13:05:20':
+            print('  ', line.rstrip()[:170])

@@ -15,7 +15,6 @@ from onebot.ws_client import SendResult
 
 from .async_io import run_bounded_blocking, run_bounded_store_io
 from .protocols import strip_protocol_markers, strip_quote_marker, strip_split_markers
-from .sticker import get_face_for_text
 
 logger = logging.getLogger("糖糖.Reply")
 
@@ -384,14 +383,6 @@ class ReplyPipeline:
             reply = re.sub(r'\[CQ:at[^\]]*\]', '', reply).strip()
         return reply
 
-    def _pick_sticker_by_emotion(self, text: str) -> str | None:
-        """根据文字情绪选表情包，与工具/标签路径共用匹配器。"""
-        allow_nsfw = _has_affirmed_nsfw_context(text)
-        excluded = set() if allow_nsfw else {"色色"}
-        results = self.stickers.match_by_emotion_text(
-            text, embed_engine=self.embed_engine, count=1, excluded=excluded
-        )
-        return results[0] if results else None
 
     # ═══════════════════════════════════════
     # 分句 + 发送

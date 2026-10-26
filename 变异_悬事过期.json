@@ -1,0 +1,19 @@
+{
+  "target": "agent/handler_autonomy.py",
+  "tests": "tests/test_open_loops_injection.py",
+  "_about": "第 13 轮 L5：过期清理必须在启动清理与每日汇总两处都被调度，否则悬事永不过期（半条命）。",
+  "mutations": [
+    {
+      "name": "每日汇总不再清理过期悬事",
+      "old": "                expired = await self._run_store_io(\n                    \"daily_aggregate.expire_open_loops\",\n                    self.memory.store.expire_open_loops,\n                    days_overdue=30, max_asked=2,\n                )",
+      "new": "                expired = 0  # 变异：不再清理",
+      "expect_fail": "test_expire_is_scheduled_in_autonomy"
+    },
+    {
+      "name": "启动清理不再清理过期悬事",
+      "old": "                    expired = await self._run_store_io(\n                        \"autonomy.expire_open_loops\",\n                        self.memory.store.expire_open_loops,\n                        days_overdue=30, max_asked=2,\n                    )",
+      "new": "                    expired = 0  # 变异：不再清理",
+      "expect_fail": "test_expire_is_scheduled_in_autonomy"
+    }
+  ]
+}

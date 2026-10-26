@@ -310,6 +310,15 @@ async def _check_extract_busy(handler) -> dict:
 # 门槛 5 意味着重启后头十几次提取就被当成「成功率」，而热身阶段的失败率不代表稳态。
 MIN_EXTRACT_OUTCOMES = 30
 
+# 2026-10-15 T58（排查 D2）：**协议成功 ≠ 有产出**。
+# 实测 2026-10-13 之后 134 次提取里 129 次是 success_empty（96.3%）：模型原样回
+# `[]`（raw_length=2、protocol_ok=true、rejected=0），而本检查只盯协议成功率，
+# 于是**一边在 message 里印着「产出率 3%」一边返回 ok**——仪表在、阈值不在
+#（教训 #30 同族：跑起来没报错 ≠ 真的在产出）。
+# 5% 是**地板不是目标**：10 条消息的窗口一条也提取不出来很正常，长期低于 5%
+# 才说明提取器实际上是死的。
+MIN_EXTRACT_PRODUCED_RATE = 0.05
+
 
 async def _check_extract_success(handler) -> dict:
     """分别观测 JSON 协议成功率与记忆产出率。
@@ -348,6 +357,10 @@ async def _check_extract_success(handler) -> dict:
     )
     if protocol < 0.7:
         return {"status": "warn", "message": message}
+    if produced < MIN_EXTRACT_PRODUCED_RATE:
+        return {"status": "warn",
+                "message": (message + "——记忆提取长期空产出，提取器可能已经死了"
+                            f"（地板 {MIN_EXTRACT_PRODUCED_RATE:.0%}）")}
     return {"status": "ok", "message": message}
 
 async def _check_stale_extraction(handler) -> dict:

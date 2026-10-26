@@ -67,18 +67,6 @@ class BirthdayGreeter:
 
     _STATE_KEY = "birthday_sent"
 
-    def _save_sent_today(self):
-        if self._store:
-            self._store.kv_set(self._STATE_KEY, json.dumps(
-                {
-                    "date": self._last_date,
-                    "sent": list(self._sent_today),
-                    "uncertain": list(self._uncertain_today),
-                    "sending": list(self._sending_today),
-                },
-                ensure_ascii=False
-            ))
-
     def _load_sent_today(self):
         if not self._store:
             return

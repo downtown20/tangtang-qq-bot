@@ -118,3 +118,20 @@ def test_cg_gate_does_not_replace_existing_send_chain_contract():
     assert source.count("await self._send_cg_actions(") == 2
     assert 'if name == "send_cg_sticker":' in source
     assert 'turn_actions["cg"] = True' in source
+
+
+def test_both_cg_send_sites_pass_the_tag():
+    """标签必须穿过**两个**发送调用点（群/私聊），不只是工具写入端（2026-10-16）。
+
+    源码级闸门，理由与上面那条相同：调用点在 `handler.py` 的巨型方法里，
+    单测打进去的成本远高于它要防的风险（漏一个调用点 = 群聊里标签静默失效，
+    而这在测试里表现为「一切正常」）。变异对照实测：只改调用点不改工具时，
+    行为级测试全绿——所以这条必须存在。
+    """
+    source = (
+        Path(__file__).resolve().parent.parent / "agent" / "handler.py"
+    ).read_text(encoding="utf-8")
+
+    assert source.count('tag=turn_actions.get("cg_tag", "")') == 2, \
+        "两个 _send_cg_actions 调用点都必须把 cg_tag 传下去（群聊一处、私聊一处）"
+    assert source.count("_send_cg_actions(") == 3  # 定义 1 + 调用 2

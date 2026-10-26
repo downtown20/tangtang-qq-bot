@@ -1,0 +1,15 @@
+# -*- coding: utf-8 -*-
+"""只读取证 8：MoodEvent 枚举 / care_due 日期 / reflection_state 当前 mtime（autonomy-tracer）"""
+import io, os, sqlite3, sys, datetime
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+print('reflection_state mtime', datetime.datetime.fromtimestamp(os.path.getmtime(os.path.join(root, '状态', '.reflection_state.json'))))
+print('content', io.open(os.path.join(root, '状态', '.reflection_state.json'), encoding='utf-8').read())
+c = sqlite3.connect(os.path.join(root, 'memory.db'))
+print('mood_log cols', [r[1] for r in c.execute('pragma table_info(mood_log)')])
+print('mood_log 3922400700:', c.execute("select * from mood_log where qq_id='3922400700' order by date desc limit 6").fetchall())
+print('mood_log recent any:', c.execute('select * from mood_log order by date desc limit 5').fetchall())
+import re
+src = io.open(os.path.join(root, 'agent', 'mood.py'), encoding='utf-8').read()
+print('MoodEvent members:', re.findall(r'^    ([A-Z_]+) =', src, re.M))
+print('LATE_NIGHT present:', 'LATE_NIGHT' in src)

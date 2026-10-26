@@ -101,24 +101,42 @@ def test_explicit_private_scenario_can_load_sensitive_reference(tmp_path):
 
 
 def test_sensitive_reference_loading_yields_to_event_loop(tmp_path, monkeypatch):
-    """敏感参考加载不能把同步文件读取放进私聊消息协程。"""
+    """敏感参考加载不能把同步文件读取放进私聊消息协程。
+
+    2026-10-16 修正（原版两处失准，属教训 #37「判据测的不是行为」）：
+      ① 调用 `MessageHandler._seductive_knowledge_async` —— 该符号已随 T2.14
+         范本独立化退役，测试直接 AttributeError（不是测出问题，是没跑起来）；
+         现行入口是 `_intimate_reference_async`（handler.py:11611）。
+      ② 参考文件放在 `色色参考/` **根下** —— 而加载器只认数字前缀**子目录**
+         （intimate_reference.discover_slot_files），于是它一个文件都没读，
+         `read_text` 的 patch 是空转，「心跳照跳」自然成立 —— 假绿。
+         现在按真实槽位布局摆放，文件真的会被读（否则下面那条计数断言会红）。
+    """
     sensitive = tmp_path / "色色参考"
-    sensitive.mkdir()
+    slot = sensitive / "00-核心"
+    slot.mkdir(parents=True)
     for index in range(8):
-        (sensitive / f"参考{index}.md").write_text(
+        (slot / f"参考{index}.md").write_text(
             "仅供授权场景使用", encoding="utf-8",
         )
 
-    original_read_text = type((sensitive / "参考0.md")).read_text
+    original_read_text = type((slot / "参考0.md")).read_text
+    reads = {"n": 0}
 
     def slow_read_text(path, *args, **kwargs):
         import time
+        reads["n"] += 1
         time.sleep(0.02)
         return original_read_text(path, *args, **kwargs)
 
-    monkeypatch.setattr(type((sensitive / "参考0.md")), "read_text", slow_read_text)
+    monkeypatch.setattr(type((slot / "参考0.md")), "read_text", slow_read_text)
     handler = SimpleNamespace(knowledge=SimpleNamespace(knowledge_dir=str(tmp_path)))
-    handler._seductive_knowledge = lambda: MessageHandler._seductive_knowledge(handler)
+    # 替身要挂上真实入口（测试替身没有该属性时 _intimate_reference_async
+    # 会在 run_bounded_blocking 里 AttributeError —— 那不是判据要测的东西）
+    # 2026-10-26 第五轮：`_intimate_reference` 多了 pack 参数（多包化），
+    # 替身必须同签名——否则 `_intimate_reference_async(pack)` 调它会 TypeError。
+    handler._intimate_reference = (
+        lambda _pack=None: MessageHandler._intimate_reference(handler, _pack))
 
     async def exercise():
         ticks = 0
@@ -130,14 +148,16 @@ def test_sensitive_reference_loading_yields_to_event_loop(tmp_path, monkeypatch)
                 ticks += 1
 
         async def load():
-            return await MessageHandler._seductive_knowledge_async(handler)
+            return await MessageHandler._intimate_reference_async(handler, None)
 
         heartbeat_task = asyncio.create_task(heartbeat())
         await asyncio.sleep(0)
         load_task = asyncio.create_task(load())
         await asyncio.sleep(0.08)
         ticks_during_load = ticks
-        await asyncio.gather(load_task, heartbeat_task)
+        ref, _ = await asyncio.gather(load_task, heartbeat_task)
+        assert reads["n"] >= 8, "一个参考文件都没读到——判据在空转（假绿）"
+        assert "仅供授权场景使用" in ref.text
         return ticks_during_load
 
     ticks_during_load = asyncio.run(exercise())

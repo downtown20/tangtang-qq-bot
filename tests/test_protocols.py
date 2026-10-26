@@ -308,11 +308,24 @@ class TestSeductiveModeStateMachine:
         assert "10001" not in h._sed_active
 
     def test_ttl_expiry(self):
-        """2026-08-17 Codex 全天审查：激活是带 TTL 的会话状态，过期自动失效"""
+        """激活可以是带 TTL 的会话状态，过期自动失效。
+
+        ⚠ 2026-10-26 第五轮：`0` 的含义从「早已过期」改成了「**永久**」
+        （主人：「TTL 也在前端改，默认永久」）。所以过期必须用真实的过去时间表示——
+        继续用 0 会变成「永不过期」，这条测试就从「验过期」变成了「验永久」。
+        """
+        import time as _t
         h = self._handler()
-        h._sed_active["10001"] = 0  # 早已过期
+        h._sed_active["10001"] = _t.time() - 1  # 1 秒前就过期了
         assert h._is_sed_active("10001") is False
         assert "10001" not in h._sed_active  # 惰性清除
+
+    def test_zero_ttl_means_forever(self):
+        """0 = 永久（新语义）。这条和多包包的 `ttl_seconds: 0` 是同一个约定。"""
+        h = self._handler()
+        h._sed_active["10001"] = 0
+        assert h._is_sed_active("10001") is True
+        assert "10001" in h._sed_active  # 不会被当成过期清掉
 
     def test_persistence_restore_line_present(self):
         """持久化闸门形态：state:sed_active 在 __init__ 有绑定形态恢复行"""
@@ -360,10 +373,6 @@ class TestGroundingContract:
         assert "喜欢草莓" in out
         assert "不要发明新的具体往事" in out, "记忆块丢失根基约束"
 
-    def test_knowledge_block_functional(self):
-        out = protocols.knowledge_block("活动时间是周六")
-        assert "活动时间是周六" in out
-        assert "不确定就说" in out
 
     # ── 调用点引用（函数体锚定——删调用点或退回硬编码都红灯）──
     def test_private_initiative_uses_contract(self):
@@ -382,11 +391,10 @@ class TestGroundingContract:
         assert "_protocols.memory_block" in group, "群聊路径没走统一记忆块"
         assert "_protocols.memory_block" in priv, "私聊路径没走统一记忆块"
 
-    def test_knowledge_block_used_in_both_reply_paths(self):
-        group = self._func_body(self._HANDLER, "handle_group_message")
-        priv = self._func_body(self._HANDLER, "handle_private_message")
-        assert "_protocols.knowledge_block" in group, "群聊路径没走统一知识库块"
-        assert "_protocols.knowledge_block" in priv, "私聊路径没走统一知识库块"
+    # 原 test_knowledge_block_used_in_both_reply_paths 于 2026-10-16 T2.14 移除：
+    # 它钉的是「两条路径都用 knowledge_block」——而那个函数已随色色错配一起删除。
+    # 现在这条契约由 tests/test_intimate_reference.py 接管（pinned 投递 + 饱和池在场 +
+    # 旧挂法必须失败 + 群聊不许挂载），判据更严：不只查「调没调」，还查「过池后还在不在」。
 
     def test_profile_caveat_at_all_synthetic_injection_points(self):
         """合成画像全部注入点必须带准确性标注（2026-08-15 Codex Important 1：

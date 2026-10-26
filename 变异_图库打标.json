@@ -1,0 +1,48 @@
+{
+  "target": "agent/image_tagger.py",
+  "tests": "tests/test_image_tagger.py",
+  "mutations": [
+    {
+      "name": "默认可跑（一进图库就有人能点，没配过也烧 GPU）",
+      "old": "    \"provider\": \"off\",",
+      "new": "    \"provider\": \"ollama\",",
+      "expect_fail": "test_defaults_are_off"
+    },
+    {
+      "name": "「已打标」判据放宽成「metadata 里有条目」（界面说还剩 0 张，实际 30 张没打）",
+      "old": "    tagged = [p for p in files if str((meta.get(p.name) or {}).get(\"persons\") or \"\").strip()]",
+      "new": "    tagged = [p for p in files if p.name in meta]",
+      "expect_fail": "test_scan_counts_match_resume_semantics"
+    },
+    {
+      "name": "API key 不检查（点了才在批量跑到一半时全失败）",
+      "old": "        if not (os.environ.get(\"IMAGE_TAG_API_KEY\") or str(cfg.get(\"api_key\") or \"\").strip()):\n            return \"API key 没配：设置里填，或在 .env 里写 IMAGE_TAG_API_KEY\"",
+      "new": "        pass",
+      "expect_fail": "test_provider_ready_explains_what_is_missing"
+    },
+    {
+      "name": "路径不 resolve（`../secret.txt` 能读到图库外的文件）",
+      "old": "    path = (d / str(name or \"\").strip()).resolve()",
+      "new": "    path = d / str(name or \"\").strip()",
+      "expect_fail": "test_describe_one_rejects_path_escape"
+    },
+    {
+      "name": "改名撞名时覆盖写入（悄悄毁掉另一张图）",
+      "old": "                    if target.exists():\n                        # 撞名不动：宁可这次不改名，也不覆盖另一张图\n                        raise RuntimeError(f\"改名目标已存在：{new_name}\")\n                    path.rename(target)",
+      "new": "                    target.write_bytes(path.read_bytes())\n                    path.unlink()",
+      "expect_fail": "test_worker_does_not_overwrite_on_rename_collision"
+    },
+    {
+      "name": "找不到打标脚本就自己解析（两套真相，标签质量悄悄不同）",
+      "old": "    if script is None:\n        raise RuntimeError(",
+      "new": "    if script is None:\n        raise RuntimeError(\"\") or None  # 假装能用\n    if False:\n        raise RuntimeError(",
+      "expect_fail": "test_tagger_missing_script_raises_instead_of_faking"
+    },
+    {
+      "name": "接口把 API key 原样吐回前端",
+      "old": "    safe = {k: v for k, v in cfg.items() if k != \"api_key\"}",
+      "new": "    safe = dict(cfg)",
+      "expect_fail": "test_status_hides_api_key"
+    }
+  ]
+}

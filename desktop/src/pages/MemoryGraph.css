@@ -1,0 +1,597 @@
+/* ═══════════════════════════════════════════════════════════════
+   记忆图谱（MemoryGraph）—— 左画布 + 右侧栏
+
+   配色沿用 tokens.css；五种节点色的变量定义在这里（canvas 读不到
+   CSS 类的颜色，所以 JS 用 getComputedStyle 读这些变量），
+   深色主题各一套，切主题时 MutationObserver 触发重绘。
+   类名统一 mg- 前缀。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 节点色（canvas 绘图用；浅色主题） ── */
+:root {
+  --mg-person: var(--accent);
+  --mg-category: #7c63f0;
+  --mg-cluster: #0891b2;
+  --mg-fact: #64748b;
+  --mg-memory: #ea8a2f;
+  --mg-edge: rgba(15, 17, 21, 0.12);
+  --mg-edge-strong: rgba(65, 118, 230, 0.55);
+  --mg-label: #61666b;
+  --mg-ring: rgba(255, 255, 255, 0.92);
+}
+
+/* ── 深色主题：提高亮度，保证深底上看得清 ── */
+:root[data-theme='dark'] {
+  --mg-category: #a99bff;
+  --mg-cluster: #4dd0e1;
+  --mg-fact: #94a3b8;
+  --mg-memory: #f5a35c;
+  --mg-edge: rgba(255, 255, 255, 0.16);
+  --mg-edge-strong: rgba(122, 170, 255, 0.6);
+  --mg-label: #cfd3d6;
+  --mg-ring: rgba(21, 21, 23, 0.9);
+}
+
+/* ── 页面骨架：占满内容区，画布自己撑高 ── */
+.mg-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 32px 20px;
+  background: var(--bg-base);
+  color: var(--label-primary);
+}
+
+.mg-top {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.mg-top-main {
+  min-width: 0;
+}
+
+.mg-title {
+  margin: 0;
+  font-size: var(--fs-20);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  line-height: 28px;
+}
+
+.mg-sub {
+  margin: 6px 0 0;
+  font-size: var(--fs-13);
+  line-height: 1.55;
+  color: var(--label-tertiary);
+}
+
+.mg-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* person 模式的面包屑 */
+.mg-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: var(--fs-12);
+  color: var(--label-caption);
+}
+
+.mg-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px 0 5px;
+  border-radius: var(--radius-sm);
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.mg-back:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.mg-back:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mg-crumb-sep {
+  color: var(--border-l4);
+}
+
+.mg-crumb-cur {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-tertiary);
+}
+
+/* ── 统计条（只有 overview） ── */
+.mg-stats {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 16px;
+  margin: 12px 0;
+  padding: 9px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l1);
+}
+
+.mg-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mg-stat + .mg-stat {
+  padding-left: 16px;
+  border-left: 0.5px solid var(--border-l2);
+}
+
+.mg-stat-num {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.mg-stat-label {
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+}
+
+/* ── 错误条 ── */
+.mg-error {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--error-soft);
+  border: 0.5px solid rgba(236, 19, 19, 0.25);
+  color: var(--error);
+  font-size: var(--fs-12);
+}
+
+.mg-error-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* ── 主体：画布 + 侧栏 ── */
+.mg-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+}
+
+.mg-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  overflow: hidden;
+}
+
+/* 尺寸交给 CSS，像素尺寸由 JS 按 DPR 设置；touch-action 关掉，滚轮/拖拽才不会被浏览器吃掉 */
+.mg-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.mg-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 24px;
+  text-align: center;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  color: var(--label-tertiary);
+  user-select: none;
+  pointer-events: none;
+}
+
+.mg-corner-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 9px;
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ── 右侧栏 ── */
+.mg-side {
+  width: 320px;
+  flex: none;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-2);
+}
+
+/* 侧栏顶部：进入「完整记忆剖面」的入口（person 模式才有） */
+.mg-side-profile {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 0.5px solid var(--border-l1);
+}
+
+.mg-profile-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-l3);
+  background: var(--bg-module);
+  color: var(--label-secondary);
+  font-size: var(--fs-12);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.mg-profile-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--label-primary);
+}
+
+.mg-side-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}.mg-side-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mg-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+.mg-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.mg-side-title {
+  margin-top: 1px;
+  font-size: var(--fs-15);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--label-primary);
+  word-break: break-word;
+}
+
+.mg-side-title.is-sm {
+  font-size: var(--fs-14);
+}
+
+.mg-side-title.is-wrap {
+  font-size: var(--fs-14);
+  line-height: 1.5;
+}
+
+.mg-side-sub {
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+.mg-side-desc {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-tertiary);
+}
+
+.mg-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.mg-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  color: var(--label-tertiary);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+/* 键值行（与 Page.css 的 .kv 同一视觉语言） */
+.mg-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.mg-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 0.5px solid var(--border-l1);
+  font-size: var(--fs-12);
+}
+
+.mg-row:last-child {
+  border-bottom: none;
+}
+
+.mg-row span {
+  flex: none;
+  color: var(--label-tertiary);
+}
+
+.mg-row b {
+  min-width: 0;
+  max-width: 66%;
+  text-align: right;
+  font-weight: 500;
+  color: var(--label-primary);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+/* ── 侧栏区块 ── */
+.mg-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mg-block-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.mg-block-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-module);
+  color: var(--label-caption);
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 长关系摘要/引用块：超了自己滚，不把侧栏撑成一屏 */
+.mg-quote {
+  margin: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-l1);
+  border-left: 2px solid var(--border-l4);
+  background: var(--bg-module);
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-secondary);
+  word-break: break-word;
+  user-select: text;
+}
+
+.mg-empty-line {
+  padding: 4px 0;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-caption);
+}
+
+/* 记忆 / 经历列表：超过 8 条就在这里面滚（约 8 行的高度） */
+.mg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mg-scroll {
+  max-height: 336px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.mg-item {
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-l1);
+  background: var(--bg-module);
+  min-width: 0;
+}
+
+.mg-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mg-item-key {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  font-weight: 500;
+  color: var(--label-secondary);
+}
+
+.mg-item-meta {
+  flex: none;
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mg-item-text {
+  margin-top: 3px;
+  font-size: var(--fs-12);
+  line-height: 1.62;
+  color: var(--label-primary);
+  word-break: break-word;
+  user-select: text;
+}
+
+.mg-item-foot {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--label-caption);
+  word-break: break-word;
+}
+
+/* ── 图例 ── */
+.mg-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.mg-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: var(--fs-12);
+}
+
+.mg-legend-label {
+  flex: none;
+  color: var(--label-secondary);
+}
+
+.mg-legend-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+}
+
+/* ── 进入 person 模式的主按钮 ── */
+.mg-enter {
+  justify-content: center;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.mg-hint {
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-caption);
+}
+
+/* ── 旋转（刷新按钮 / 加载中） ── */
+.mg-spin {
+  animation: mg-spin 0.9s linear infinite;
+}
+
+@keyframes mg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 窄窗口：侧栏收窄；再窄就上下排 ── */
+@media (max-width: 1120px) {
+  .mg-page {
+    padding: 4px 20px 16px;
+  }
+  .mg-side {
+    width: 288px;
+  }
+}
+
+@media (max-width: 860px) {
+  .mg-body {
+    flex-direction: column;
+  }
+  .mg-canvas-wrap {
+    min-height: 260px;
+  }
+  .mg-side {
+    width: auto;
+    max-height: 42%;
+  }
+}
+
+/* ── 动效降级 ── */
+@media (prefers-reduced-motion: reduce) {
+  .mg-spin {
+    animation: none;
+  }
+}

@@ -1,0 +1,18 @@
+# -*- coding: utf-8 -*-
+import io, os, collections, sys
+sys.stdout.reconfigure(encoding='utf-8')
+base = os.path.join(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')), '日志')
+for d in ['2026-10-13', '2026-10-14']:
+    p = os.path.join(base, 'tangtang.log.' + d)
+    hours = collections.Counter(); boots = collections.Counter(); hb = []; refl = []
+    with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            hours[line[11:13]] += 1
+            if 'boot=' in line: boots[line.split('boot=')[1][:8]] += 1
+            if '反思' in line: refl.append(line.rstrip()[:200])
+            if '反思循环心跳' in line: hb.append(line[:19])
+    print('==', d, 'hours', sorted(hours.items()))
+    print('   boots', boots.most_common())
+    print('   reflection hb n=', len(hb), hb[:2], hb[-2:] if hb else '')
+    print('   reflection-ish lines:', len(refl))
+    for l in refl[:6]: print('     ', l)

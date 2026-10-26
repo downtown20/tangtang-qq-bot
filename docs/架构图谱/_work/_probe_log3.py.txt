@@ -1,0 +1,19 @@
+# -*- coding: utf-8 -*-
+"""只读：日志中「提取/记忆/画像/关系」相关事件计数（整窗 2026-10-15 00:00 起）。"""
+import io, collections
+p = r'D:\qq-小糖糖\日志\tangtang.log'
+keys = ['提取','记忆','画像','关系档案','语义','回填','自治循环心跳','embeddings','BGE']
+cnt = collections.Counter()
+first = {}; last = {}
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        for k in keys:
+            if k in line:
+                cnt[k] += 1
+                ts = line[:19]
+                first.setdefault(k, ts); last[k] = ts
+out = []
+for k in keys:
+    out.append(f'{k}: {cnt[k]} first={first.get(k,"-")} last={last.get(k,"-")}')
+io.open(r'D:\qq-小糖糖\docs\架构图谱\_work\_log_probe3.txt','w',encoding='utf-8').write('\n'.join(out))
+print('ok')

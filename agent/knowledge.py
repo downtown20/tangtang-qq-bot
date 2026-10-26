@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .knowledge_index import IndexChunk, IndexDocument, KnowledgeIndex, document_id_for
+from .intimate_reference import PACKAGE_DIRNAME as _INTIMATE_PACKAGE_DIRNAME
+from .tuning import tuning_float, tuning_int
 
 logger = logging.getLogger("糖糖.Knowledge")
 
@@ -48,15 +50,23 @@ STOP_WORDS = {
 }
 
 # 输出限制
-MAX_TOTAL_CHARS = 3000       # 一次注入 LLM 的总字符数上限
-MAX_PER_CHUNK = 1500          # 单个块的字符上限
-MAX_RESULTS = 3               # 最多返回几个块
-SEMANTIC_EVIDENCE_THRESHOLD = 0.58
-SEMANTIC_SEGMENT_CHARS = 450  # 与 BGE 512 token 窗口匹配的语义子段上限
+MAX_TOTAL_CHARS = tuning_int("knowledge_max_total_chars", 3000)       # 一次注入 LLM 的总字符数上限
+MAX_PER_CHUNK = tuning_int("knowledge_max_per_chunk", 1500)          # 单个块的字符上限
+MAX_RESULTS = tuning_int("knowledge_max_results", 3)                 # 最多返回几个块
+SEMANTIC_EVIDENCE_THRESHOLD = tuning_float("knowledge_semantic_threshold", 0.58)
+SEMANTIC_SEGMENT_CHARS = tuning_int("knowledge_semantic_segment_chars", 450)  # 与 BGE 512 token 窗口匹配的语义子段上限
 
 # 普通知识工具的安全边界。敏感资料由显式授权场景的专用加载器读取，
 # 不进入全局 search_knowledge 索引，避免群聊/普通私聊绕过场景授权。
-SENSITIVE_DIRECTORY_NAMES = frozenset({"色色参考", "adult", "nsfw"})
+#
+# 亲密范本的目录名**从模块常量取**，不在这里重写字面量：两处各写一个字符串，
+# 改包名时必然漏改一处，而漏的那次正是 `_原文/` 整目录进索引、可被
+# search_knowledge / read_document 检索到（静默越权）。2026-10-23 主人定案
+# 「_原文 不允许检索」，本集合是这条定案的第一道闸；第二、三道见
+# tests/test_intimate_reference.py 的归档禁检索三条。
+SENSITIVE_DIRECTORY_NAMES = frozenset(
+    {"adult", "nsfw", _INTIMATE_PACKAGE_DIRNAME.casefold()}
+)
 
 
 def discover_document_files(knowledge_dir: str | Path) -> list[Path]:

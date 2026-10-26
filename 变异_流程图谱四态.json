@@ -1,0 +1,42 @@
+{
+  "target": "agent/console_api.py",
+  "tests": "tests/test_console_turn_flow.py",
+  "mutations": [
+    {
+      "name": "四态塌回布尔：ok 恒 True（warn 段会被画成绿灯）",
+      "old": "            \"ok\": status in (\"ok\", \"skip\"),",
+      "new": "            \"ok\": True,",
+      "expect_fail": "test_nine_phases_in_order"
+    },
+    {
+      "name": "参数不带解释（界面上只剩一串数字）",
+      "old": "        item: dict = {\"k\": k, \"v\": v, \"doc\": doc}",
+      "new": "        item: dict = {\"k\": k, \"v\": v}",
+      "expect_fail": "没有解释"
+    },
+    {
+      "name": "体检结论不再点名异常站（有红站也报「没有故障」）",
+      "old": "    if errors:\n        focus = errors[0]",
+      "new": "    if False:\n        focus = errors[0]",
+      "expect_fail": "== 'context'"
+    },
+    {
+      "name": "讲人话的文案里混进 Markdown（界面原样显示星号）",
+      "old": "        logic=(\"只要消息写进 chat_log 就算过站。这一站不管要不要回——\"",
+      "new": "        logic=(\"只要消息写进 chat_log 就算过站。这一站**不管**要不要回——\"",
+      "expect_fail": "混进了 Markdown"
+    },
+    {
+      "name": "环节之间不再说「交给下一站什么」（配合关系消失）",
+      "old": "            \"carries\": list(_FLOW_CARRIES.get(key, [])),",
+      "new": "            \"carries\": [],",
+      "expect_fail": "没说交给下一站什么"
+    },
+    {
+      "name": "记忆块被裁报成异常（黄灯变红灯，让人去修不存在的问题）",
+      "old": "    elif memory_status == \"truncated\":\n        recall_status, recall_did = \"warn\", (",
+      "new": "    elif memory_status == \"truncated\":\n        recall_status, recall_did = \"error\", (",
+      "expect_fail": "记忆块被裁必须是"
+    }
+  ]
+}

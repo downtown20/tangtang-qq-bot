@@ -1,0 +1,12 @@
+# -*- coding: utf-8 -*-
+"""只读取证 5：反思门槛（>=20 条经验）在历史时刻是否满足（autonomy-tracer）"""
+import io, os, json, sys
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+s = json.load(io.open(os.path.join(root, '状态', '.tangtang_self.json'), encoding='utf-8'))
+buf = s.get('experience_buffer') or []
+times = sorted((e.get('time') or '') for e in buf)
+print('buffer entries', len(times), 'first', times[0], 'last', times[-1])
+for probe in ['2026-10-12 22:32', '2026-10-13 02:02', '2026-10-13 22:32', '2026-10-14 02:16', '2026-10-14 22:00', '2026-10-15 02:00', '2026-10-15 03:15']:
+    n = sum(1 for t in times if t <= probe)
+    print('  cumulative through', probe, '=', n)

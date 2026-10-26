@@ -1,0 +1,31 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+fwd = dict(q("SELECT qq_id, cursor_chat_id FROM extraction_cursors WHERE pipeline='memory' AND direction='forward'"))
+bf  = dict(q("SELECT qq_id, cursor_chat_id FROM extraction_cursors WHERE pipeline='memory' AND direction='backfill'"))
+rows = q("SELECT qq_id, MAX(id) FROM chat_log GROUP BY qq_id")
+owner='2180254043'
+elig=[]; total=0
+for qq, mx in rows:
+    f = fwd.get(qq, 0); b = bf.get(qq, 0)
+    if b and b <= f:
+        n = 0
+    else:
+        if b:
+            n = q("SELECT COUNT(*) FROM chat_log WHERE qq_id=? AND is_bot_reply=0 AND id>? AND id<? AND COALESCE(quarantined_at,'')=''", (qq, f, b))[0][0]
+        else:
+            n = q("SELECT COUNT(*) FROM chat_log WHERE qq_id=? AND is_bot_reply=0 AND id>? AND COALESCE(quarantined_at,'')=''", (qq, f))[0][0]
+    if n: total += n
+    th = 10 if qq==owner else 30
+    if n >= th: elig.append((qq, n))
+elig.sort(key=lambda x:-x[1])
+print(json.dumps({
+ 'backfill_eligible_users': len(elig),
+ 'backfill_msgs_in_eligible': sum(x[1] for x in elig),
+ 'backfill_top': elig[:6],
+ 'users_with_backfill_cursor': len(bf),
+ 'users_with_forward_cursor': len(fwd),
+ 'bf_le_fwd_users': sum(1 for k,v in bf.items() if v <= fwd.get(k,0)),
+ 'total_users_in_chatlog': len(rows),
+}, ensure_ascii=False, indent=1))

@@ -1,0 +1,12 @@
+{
+  "target": "agent/handler.py",
+  "tests": "tests/test_short_term_warmup.py",
+  "mutations": [
+    {
+      "name": "M18-start_services 不调回灌（代码写了没人调，教训 #12）",
+      "old": "        try:\n            stats = self.memory.warm_short_term_from_chat_log(\n                bot_qq=self.bot_qq,\n                bot_name=str(self.config.get(\"bot\", {}).get(\"name\") or \"\"),\n                active_hours=24,\n                max_scopes=8,\n            )\n            if stats.get(\"entries\"):\n                logger.info(\"🪟 对话窗口回灌：%s 个会话 / %s 条历史（重启后不丢上下文）\",\n                            stats.get(\"scopes\", 0), stats.get(\"entries\", 0))\n        except Exception as exc:\n            logger.warning(\"⚠ 对话窗口回灌失败（不影响启动）: %s\", type(exc).__name__)",
+      "new": "        pass",
+      "expect_fail": "test_start_services_calls_warmup"
+    }
+  ]
+}

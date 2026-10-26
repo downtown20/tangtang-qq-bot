@@ -19,14 +19,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .tuning import tuning_int
+
 logger = logging.getLogger("糖糖.Scenario")
 
 # ---------------------------------------------------------------------------
 # 硬约束
 # ---------------------------------------------------------------------------
 
-MAX_OVERLAY_CHARS = 2000  # 敏感层超过此值 warn
-MAX_REPLACE_CHARS = 500  # 替换型 role 超过此值 warn
+MAX_OVERLAY_CHARS = tuning_int("scenario_max_overlay_chars", 2000)  # 敏感层超过此值 warn
+MAX_REPLACE_CHARS = tuning_int("scenario_max_replace_chars", 500)  # 替换型 role 超过此值 warn
 
 # ---------------------------------------------------------------------------
 # 数据模型

@@ -1,0 +1,5 @@
+# pnpm 11：构建脚本白名单（package.json 的 pnpm 字段已不再被读取）
+# electron 的 postinstall 需要下载 ~100MB 二进制，esbuild 需要编译原生包。
+allowBuilds:
+  electron: true
+  esbuild: true

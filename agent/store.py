@@ -10,6 +10,7 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 import logging
 import time
@@ -21,6 +22,101 @@ from urllib.parse import quote
 from .extraction_policy import summarize_extraction_backlog
 
 logger = logging.getLogger("糖糖.Store")
+
+
+def _revision_text(value) -> str:
+    """把留痕字段值归一成 TEXT（memory_revisions 所有列都是 NOT NULL）。
+
+    为什么单独一个函数而不是各处 str()：删除前快照是整行 dict，
+    直接 str(dict) 会写出 Python repr（单引号、True/None），
+    既不可读也不能再解析回来。JSON 至少是机器可复原的。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
+# ── 信任模型：哪些 trust_level 能进入「可信召回 / 可信注入」──
+# 这不是信任等级的枚举，而是**唯一一道门的放行集合**：记忆召回
+# `query_memories(trusted_only=True)` 与画像注入 `Memory.active_notes()` 必须
+# 放行同一批等级。历史上这两处各写一遍字面集合，加可观测性时又要写第三遍——
+# 三处口径一旦漂移，界面上说「可注入 N 条」和实际召回的数字就是两个数，
+# 而这种不一致在界面上看不出来（教训 #35：文档/展示与代码分家）。
+# 2026-10-24 收敛到这一处：Python 判断用它，SQL 用下面生成的片段。
+# ⚠ 改这个集合 = 改信任模型。`agent/health_check.py` 里 6 处只读观测 SQL
+#   仍写字面量，改这里时必须同步（那里不参与放行判定，只报数）。
+TRUSTED_TRUST_LEVELS = frozenset({"verified", "manual", "corrected"})
+_TRUSTED_SQL_IN = "(" + ",".join(
+    "'%s'" % level for level in sorted(TRUSTED_TRUST_LEVELS)) + ")"
+
+#: legacy → verified 重验证的**置信度门槛**（2026-10-25 第五轮）。
+#:
+#: 为什么需要第二个判据：`update_memory_evidence` 原来只要求「有被原文逐字支持的
+#: quote」，这只证明**这句话说过**，不证明**这条记忆是关于 ta 本人的事实**。
+#: 小说情节、玩笑、转述、引用、假设都能通过引文校验——抽样实证：
+#: `mem#25510`「小说开头设定主角…猝死（小说情节内容）」、`mem#19337`
+#: 「自称是Ezfic大神」都被升成了 verified 并进入注入。
+#:
+#: 与 `insert_memory` 新提取路径的 `confidence >= 0.75` 是同一件事的两条路：
+#: 那条路有门槛，这条路**一直没有**。取 0.7 比 0.75 略宽，因为重验证额外拿到了
+#: 原文证据、证据强度更高；卡 0.75 会把大量默认置信度（0.7）的正常记忆挡在门外。
+LEGACY_PROMOTION_MIN_CONFIDENCE = 0.7
+
+# ── 注入顺序的信任优先级（2026-10-25 主人决策「corrected 优先」）──
+# `TRUSTED_TRUST_LEVELS` 回答的是「**能不能**进注入」，它是**集合**——平级、无顺序。
+# 但同一件事可能同时存在两条都能注入的记忆：一条是 ta 亲口纠正的结论
+# （corrected），一条是提取器当时以为对的事实（verified）。集合放行了两个，
+# 注入文本却把它们写成同一个样子（都是 💭），于是「信谁」变成她的自由发挥。
+#
+# 现场（2026-10-25 查库）：`mem#17589`（corrected「成展是大学大二学生
+# （不是高中生）」）与 `mem#18121`（verified「今年7月刚靠指标生名额考上一中，
+# 是高一新生」）属于同一个人、同时 active、同时注入，无任何仲裁——而后者是
+# 第三人称转述被记成本人事实的产物（`chat#199048` 原文明指「穷到吃外卖」，
+# 纠正流程当时只撤掉了 17475/17476，没碰到还处于 legacy 的 18121，
+# 10-24 的证据回挂又把它升成了 verified）。
+#
+# 主人 2026-10-25 拍板：**corrected 优先**。它不替 LLM 判断哪条是真的（LLM 是
+# 唯一决策者），只把「这条是 ta 亲口纠正过的」这个事实摆到台面上——注入排序
+# 在前、行前带标记、块尾给一条「冲突时以它为准」的契约。判定仍归 LLM，
+# 依据由系统提供（与「不让她更小心，而是给她信息」同一条纪律）。
+#
+# ⚠ 这是**注入呈现顺序**，不是真假判定。不要拿它去过滤/丢弃记忆——
+#   那是替 LLM 做判断，且会让「她为什么想不起这条」变成无法解释的黑箱。
+TRUST_INJECT_PRIORITY = {
+    "corrected": 3,   # ta 亲口否定了别的说法 → 最高
+    "manual": 2,      # 人工录入
+    "verified": 1,    # 提取器 + 原话佐证
+}
+
+
+# ── 自述名字的窄句式（P1，2026-10-24）──
+# 只认「名字/叫」句式，**刻意不认「我是X」**：后者绝大多数是身份词
+# （"我是中国人"/"我是大二学生"/"我是欧泊搜查官"），把身份词当名字是这个
+# 功能最容易犯的错（实测库里 `自称欧泊第1人`、`我是米雪儿·李呀！…` 都会命中）。
+# 允许的字符集也刻意收窄到中日文/拉丁字母/间隔号：**宁可漏认，不可错认**——
+# 漏认只是少一个待确认的称呼，错认会直接污染人物档案。
+_NAME_CHARS = r"[\u4e00-\u9fff\u3040-\u30ffA-Za-z·・．.]{1,12}"
+_SELF_NAME_PATTERNS = (
+    re.compile(r"^(?:我的)?名字(?:是|叫)\s*(" + _NAME_CHARS + r")$"),
+    re.compile(r"^我叫\s*(" + _NAME_CHARS + r")$"),
+    re.compile(r"^(?:请|可以)?叫我\s*(" + _NAME_CHARS + r")$"),
+    re.compile(r"^(" + _NAME_CHARS + r")是我的名字$"),
+)
+# 代词/泛称不是名字。只列明确无歧义的几个，不做穷举。
+_SELF_NAME_STOPWORDS = frozenset(
+    {"我", "你", "他", "她", "它", "ta", "自己", "谁", "名字"}
+)
+# 名字里不会出现的虚词/语气字。用于挡住「叫我尾大狐酱就没问题」这类把
+# 语气尾巴吞进名字的误判——实测原文如此，抽出来是 `尾大狐酱就没问题`。
+# 宁可漏认（少一个待确认的称呼），不可错认（污染档案）。
+_SELF_NAME_BLOCK_CHARS = frozenset("就没不是了吗呢吧啊哦呀嘛的你我他她它们")
 
 
 _TASK_ACTION_INVARIANT_COUNT_SQL = """
@@ -394,6 +490,20 @@ def _sanitize_display_name(name: str, limit: int = 40) -> str:
     return cleaned.strip()[:limit]
 
 
+def _parse_chat_ts(text: str) -> float:
+    """`chat_log.timestamp`（'YYYY-MM-DD HH:MM:SS' 本地时间）→ unix 秒。
+
+    会客厅镜像需要把消息时间交给前端排序/显示。解析失败返回 0，不抛异常——
+    历史行里有空时间戳，一条坏数据不该让整个会话流读不出来。
+    """
+    if not text:
+        return 0.0
+    try:
+        return datetime.strptime(str(text).strip(), "%Y-%m-%d %H:%M:%S").timestamp()
+    except (ValueError, OSError):
+        return 0.0
+
+
 class Store:
     """SQLite 数据访问层 —— 唯一持有数据库连接的地方"""
 
@@ -496,6 +606,10 @@ class Store:
                 ("segments", "TEXT DEFAULT ''"),       # typed segments JSON（Task B 预生成）
                 ("is_synthetic", "INTEGER DEFAULT 0"), # 批处理合成行标记
                 ("quarantined_at", "TEXT DEFAULT ''"), # 非空=已 quarantine（可回滚）
+                # 真正的发言人账号（2026-10-24）：桌面端「以主人身份代发」到 QQ 时，
+                # `is_bot_reply=1`（QQ 上别人看到的是糖糖的号在说）但打字的是主人。
+                # 空 = 按 is_bot_reply 推断（历史行全部为空，行为不变）。
+                ("speaker_qq", "TEXT DEFAULT ''"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE chat_log ADD COLUMN {col} {col_type}")
@@ -549,6 +663,12 @@ class Store:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_aliases_unique
                 ON aliases(alias, qq_id)
             """)
+            # 2026-10-24 P1：自称名字要能追溯「依据的是哪条记忆」。没有这个指针，
+            # 档案里凭空多出一个外号，事后没人知道它从哪来、该不该删。
+            try:
+                conn.execute("ALTER TABLE aliases ADD COLUMN memory_id INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
             # 遗忘曲线列（兼容旧库：列不存在时添加）
             for col, col_type in [
                 ("last_recalled", "TEXT DEFAULT ''"),
@@ -665,6 +785,46 @@ class Store:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_reverification_disposition "
                 "ON memory_reverification_dispositions(memory_id, id)"
+            )
+            # 记忆变更流水（2026-10-24）：append-only，只 INSERT，永不 UPDATE/DELETE。
+            #
+            # 为什么需要它：现有 status/valid_to/superseded_by 只能表达「整行被替代」
+            # 这一种事件。而「value 被就地改写」「行被物理删除」这两类事件事后完全
+            # 不可复原——语义去重命中（相似度>0.85）时旧表述是永久消失的。
+            #
+            # 为什么不加外键：这张表的职责之一就是记录「行已被删除」，加
+            # ON DELETE CASCADE 会让删除时流水跟着消失（自相矛盾），加 RESTRICT
+            # 又会禁止删除。所以 entity_id 是裸值，不对 memories.id 设约束。
+            #
+            # entity: memories / cluster_facts / fact_clusters / people
+            # op:     update / status / supersede / retract / fulfill / delete / migrate
+            # field:  被改的列名（value/importance/trust_level/notes/summary/...）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_revisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    qq_id TEXT NOT NULL DEFAULT '',
+                    op TEXT NOT NULL,
+                    field TEXT NOT NULL DEFAULT '',
+                    before_value TEXT NOT NULL DEFAULT '',
+                    after_value TEXT NOT NULL DEFAULT '',
+                    reason TEXT NOT NULL DEFAULT '',
+                    actor TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_revisions_entity "
+                "ON memory_revisions(entity, entity_id, id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_revisions_qq "
+                "ON memory_revisions(qq_id, id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_revisions_actor "
+                "ON memory_revisions(actor, id)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memories_subject_truth "
@@ -926,15 +1086,38 @@ class Store:
             # 就把 profile/fact synthesis 标成 verified，导致无 evidence 的
             # 合成事实进入 trusted_only 召回。保留原行作审计，但降为线索级，
             # 让它退出自动记忆注入（幂等，下一次启动不会重复改变已降级行）。
-            unanchored_summaries = conn.execute(
-                "UPDATE memories SET trust_level='legacy_unverified' "
-                "WHERE origin='summarized' "
-                "AND COALESCE(status,'active')='active' "
-                "AND COALESCE(trust_level,'legacy_unverified')='verified' "
-                "AND NOT EXISTS ("
-                "SELECT 1 FROM memory_evidence e WHERE e.memory_id=memories.id"
-                ")"
-            ).rowcount
+            unanchored_ids = [
+                int(row[0]) for row in conn.execute(
+                    "SELECT id FROM memories "
+                    "WHERE origin='summarized' "
+                    "AND COALESCE(status,'active')='active' "
+                    "AND COALESCE(trust_level,'legacy_unverified')='verified' "
+                    "AND NOT EXISTS ("
+                    "SELECT 1 FROM memory_evidence e WHERE e.memory_id=memories.id"
+                    ") "
+                    "ORDER BY id"
+                ).fetchall()
+            ]
+            if unanchored_ids:
+                conn.execute(
+                    "UPDATE memories SET trust_level='legacy_unverified' "
+                    "WHERE id IN (%s)" % ",".join("?" * len(unanchored_ids)),
+                    unanchored_ids,
+                )
+                for mem_id in unanchored_ids:
+                    owner = conn.execute(
+                        "SELECT qq_id FROM memories WHERE id=?", (mem_id,)
+                    ).fetchone()
+                    self._record_revision(
+                        conn, entity="memories", entity_id=mem_id,
+                        qq_id=str(owner[0] or "") if owner else "",
+                        op="migrate", field="trust_level",
+                        before="verified", after="legacy_unverified",
+                        reason=("迁移：无原始证据的摘要不得继承 verified"
+                                "（保留审计行，但退出自动注入）"),
+                        actor="migration:unanchored_summary",
+                    )
+            unanchored_summaries = len(unanchored_ids)
             if unanchored_summaries:
                 logger.warning(
                     "🧹 已隔离 %s 条无原始证据的摘要记忆（保留审计）",
@@ -942,11 +1125,29 @@ class Store:
                 )
             # 旧版 origin=self 是 bot 全局池，没有目标用户与原始消息，已造成
             # 跨用户串承诺。保留审计记录但退出全部读路径；幂等迁移。
-            retired = conn.execute(
-                "UPDATE memories SET status='retracted' "
-                "WHERE origin='self' AND COALESCE(target_qq,'')='' "
-                "AND COALESCE(status,'active')='active'"
-            ).rowcount
+            retired_ids = [
+                (int(row[0]), str(row[1] or "")) for row in conn.execute(
+                    "SELECT id, qq_id FROM memories "
+                    "WHERE origin='self' AND COALESCE(target_qq,'')='' "
+                    "AND COALESCE(status,'active')='active' ORDER BY id"
+                ).fetchall()
+            ]
+            if retired_ids:
+                conn.execute(
+                    "UPDATE memories SET status='retracted' "
+                    "WHERE id IN (%s)" % ",".join("?" * len(retired_ids)),
+                    [item[0] for item in retired_ids],
+                )
+                for mem_id, mem_qq in retired_ids:
+                    self._record_revision(
+                        conn, entity="memories", entity_id=mem_id,
+                        qq_id=mem_qq, op="retract", field="status",
+                        before="active", after="retracted",
+                        reason=("迁移：旧版 origin=self 无目标用户，已造成跨用户串承诺，"
+                                "退出全部读路径"),
+                        actor="migration:self_memory_scope",
+                    )
+            retired = len(retired_ids)
             if retired:
                 logger.warning(f"🧹 已隔离 {retired} 条无目标的旧自我记忆（保留审计）")
 
@@ -959,11 +1160,29 @@ class Store:
                     "SELECT 1 FROM schema_migrations WHERE version=?",
                     (action_receipt_migration,),
             ).fetchone():
-                unverified_actions = conn.execute(
-                    "UPDATE memories SET trust_level='legacy_unverified' "
-                    "WHERE origin='self' AND key='action_completed' "
-                    "AND COALESCE(status,'active')='active'"
-                ).rowcount
+                action_ids = [
+                    (int(row[0]), str(row[1] or "")) for row in conn.execute(
+                        "SELECT id, qq_id FROM memories "
+                        "WHERE origin='self' AND key='action_completed' "
+                        "AND COALESCE(status,'active')='active' ORDER BY id"
+                    ).fetchall()
+                ]
+                if action_ids:
+                    conn.execute(
+                        "UPDATE memories SET trust_level='legacy_unverified' "
+                        "WHERE id IN (%s)" % ",".join("?" * len(action_ids)),
+                        [item[0] for item in action_ids],
+                    )
+                    for mem_id, mem_qq in action_ids:
+                        self._record_revision(
+                            conn, entity="memories", entity_id=mem_id,
+                            qq_id=mem_qq, op="migrate", field="trust_level",
+                            before="verified", after="legacy_unverified",
+                            reason=("迁移：旧完成事实只有聊天原文锚点、无 confirmed action "
+                                    "回执，无法证明外部动作真的发生"),
+                            actor="migration:self_action_receipt",
+                        )
+                unverified_actions = len(action_ids)
                 conn.execute(
                     "INSERT INTO schema_migrations(version, checksum, applied_at) "
                     "VALUES (?, ?, ?)",
@@ -1493,6 +1712,82 @@ class Store:
                 "ON decision_runs(scope_id,recorded_at)"
             )
 
+            # ── 回合痕迹（2026-10-24 会客厅「看到她在想什么」）─────────────
+            # 为什么不塞进 decision_runs：那张表是**决策事实契约**——frozen
+            # dataclass、status/decision 的 CHECK 约束、还有接线闸门盯着它。
+            # 思维链是**观察数据**：可能几千字、可能含内部策略、要能按天清理。
+            # 混进审计事实表会让「契约」跟着 UI 需求变形，也让清理无从下手。
+            #
+            # run_id 与 decision_runs 同键（一回合一条），event_key 可回挂
+            # chat_log —— 三者构成「这句回复 ← 这次决策 ← 她当时怎么想的」链条。
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS turn_traces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL UNIQUE,
+                    event_key TEXT NOT NULL DEFAULT '',
+                    scope_id TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '',
+                    reasoning_text TEXT NOT NULL DEFAULT '',
+                    tool_steps_json TEXT NOT NULL DEFAULT '[]',
+                    prompt_chars INTEGER NOT NULL DEFAULT 0,
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    recorded_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_turn_traces_scope "
+                "ON turn_traces(scope_id,id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_turn_traces_event "
+                "ON turn_traces(event_key)"
+            )
+            # 2026-10-25 第三轮自查：加 `prompt_digest`——原表只记「她怎么想的」
+            # （reasoning）和「她查了什么」（tool_steps），**没有「她收到了什么」**。
+            # 于是「她记错了」这类问题只能靠本地复刻 prompt + 日志推断（第 1、2 轮
+            # 都卡在这里）。存摘要不存全文：要回溯的是结构（哪些段、哪些背景块、
+            # 历史多少条），不是全文。老库走 ALTER 迁移。
+            _tt_cols = {_r[1] for _r in conn.execute(
+                "PRAGMA table_info(turn_traces)").fetchall()}
+            if "prompt_digest" not in _tt_cols:
+                conn.execute(
+                    "ALTER TABLE turn_traces "
+                    "ADD COLUMN prompt_digest TEXT NOT NULL DEFAULT ''"
+                )
+
+            # ── 未闭合事件（open_loops，2026-10-24 设计一）──
+            # 「她说过要去做 X」不是一条记忆，是一个**有状态、会被改写**的对象：
+            # 问了几次、有没有结果、什么时候该放弃。所以独立成表而不是
+            # `memories.key='open_loop'`——记忆是只读历史，硬塞进去会让
+            # memory_revisions 被高频状态改动淹没（store 里明写的「不记纯计数」边界）。
+            # 方案：docs/开发规划/未闭合事件_技术方案_20261024.md
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS open_loops (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    qq_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'plan',
+                    expected_at TEXT NOT NULL DEFAULT '',
+                    source_memory_id INTEGER NOT NULL DEFAULT 0,
+                    source_group_id TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN (
+                        'open','resolved','dropped','expired'
+                    )),
+                    asked_count INTEGER NOT NULL DEFAULT 0 CHECK(asked_count >= 0),
+                    last_asked_at TEXT NOT NULL DEFAULT '',
+                    resolved_at TEXT NOT NULL DEFAULT '',
+                    resolution TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_open_loops_open "
+                "ON open_loops(qq_id, status, expected_at)"
+            )
+
             # 事实簇历史证据迁移必须在所有表建好后执行；只做一次、可审计，
             # 不删除原始行。无效锚点降为 retracted，无法追溯的旧摘要清空，
             # 避免历史合成文本继续作为 LLM 的事实依据。
@@ -1518,6 +1813,7 @@ class Store:
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         invalid_fact_ids: list[int] = []
+        invalid_fact_subjects: dict[int, str] = {}
         affected_cluster_ids: set[int] = set()
         rows = conn.execute(
             "SELECT id,cluster_id,subject_qq,evidence_ids FROM cluster_facts "
@@ -1550,6 +1846,7 @@ class Store:
 
             if malformed:
                 invalid_fact_ids.append(int(fact_id))
+                invalid_fact_subjects[int(fact_id)] = str(subject_qq or "")
                 affected_cluster_ids.add(int(cluster_id))
 
         if invalid_fact_ids:
@@ -1558,6 +1855,16 @@ class Store:
                 "WHERE id=? AND COALESCE(status,'active')='active'",
                 [(fact_id,) for fact_id in invalid_fact_ids],
             )
+            for fact_id in invalid_fact_ids:
+                self._record_revision(
+                    conn, entity="cluster_facts", entity_id=fact_id,
+                    qq_id=invalid_fact_subjects.get(fact_id, ""),
+                    op="migrate", field="status",
+                    before="active", after="retracted",
+                    reason=("迁移：历史 evidence_ids 含无效/外部锚点，"
+                            "保留原子行作审计但退出摘要支撑"),
+                    actor="migration:cluster_fact_evidence",
+                )
 
         # 无 evidence 的历史事实同样不能留下可供 LLM 读取的摘要；原子行仍
         # 保留，方便之后人工复核/重建，不把不可追溯内容伪装成已删除。
@@ -1573,14 +1880,30 @@ class Store:
         ).fetchall()
         affected_cluster_ids.update(int(row[0]) for row in orphan_clusters)
         if affected_cluster_ids:
+            ordered_clusters = sorted(affected_cluster_ids)
+            cluster_summaries = {
+                int(row[0]): str(row[1] or "") for row in conn.execute(
+                    "SELECT id, COALESCE(summary,'') FROM fact_clusters "
+                    "WHERE id IN (%s)" % ",".join("?" * len(ordered_clusters)),
+                    ordered_clusters,
+                ).fetchall()
+            }
             conn.executemany(
                 "UPDATE fact_clusters SET summary='', "
                 "fact_count=(SELECT COUNT(*) FROM cluster_facts cf "
                 "WHERE cf.cluster_id=fact_clusters.id "
                 "AND COALESCE(cf.status,'active')='active'), updated_at=? "
                 "WHERE id=?",
-                [(now, cluster_id) for cluster_id in affected_cluster_ids],
+                [(now, cluster_id) for cluster_id in ordered_clusters],
             )
+            for cluster_id in ordered_clusters:
+                self._record_revision(
+                    conn, entity="fact_clusters", entity_id=cluster_id, qq_id="",
+                    op="update", field="summary",
+                    before=cluster_summaries.get(cluster_id, ""), after="",
+                    reason="迁移：簇内已无可追溯 active 事实，摘要不得继续注入",
+                    actor="migration:cluster_fact_evidence",
+                )
 
         conn.execute(
             "INSERT INTO schema_migrations(version,checksum,applied_at) "
@@ -5332,11 +5655,43 @@ class Store:
                 (qq_id,),
             ).fetchall()
             aliases = [_sanitize_display_name(alias_row[0]) for alias_row in alias_rows]
+            # 2026-10-24 P0：**库内昵称为空时用传入值补写**（只补空，不覆盖）。
+            #
+            # 旧行为是「行已存在就彻底无视传入昵称」——而 17 个创建点里只有群关系图
+            # 那一个真的传昵称，于是「谁先被不传昵称的路径创建，谁就永久空白」。
+            # 实测 27 人昵称为空，其中一位聊了 1886 次、有 252 字画像，档案里却
+            # 连名字都没有；群关系图每天都能拿到真实昵称，传进来又被静默丢弃。
+            #
+            # 为什么**不覆盖**已有值：`people.nickname` 的语义是「跨群稳定身份」
+            # （见 handler._handle_group_message 的注释：people 用 QQ 昵称而非群名片），
+            # 而群名片/QQ 昵称会随时改。自动覆盖会让身份跟着群名片漂移。
+            # 历史版本由 `memory_revisions` 承载，需要时可回溯。
+            stored_nick = _sanitize_display_name(row["nickname"] or "")
+            if not stored_nick and nickname:
+                try:
+                    updated = conn.execute(
+                        "UPDATE people SET nickname=? WHERE qq_id=? "
+                        "AND COALESCE(nickname,'')=''",
+                        (nickname, qq_id),
+                    ).rowcount
+                    if updated:
+                        self._record_revision(
+                            conn, entity="people", entity_id=qq_id, qq_id=str(qq_id),
+                            op="update", field="nickname", before="", after=nickname,
+                            reason=("昵称补写：档案创建时来源路径未带昵称"
+                                    "（只补空，不覆盖已有值）"),
+                            actor="sync:person_create",
+                        )
+                    conn.commit()
+                    stored_nick = nickname
+                except sqlite3.Error:
+                    logger.warning("昵称补写失败（不影响档案读取）: %s", qq_id,
+                                   exc_info=True)
             return {
                 # 2026-08-15 整体审查安全 I4：读路径同样净化——净化器上线前
                 # 入库的旧昵称（含控制字符）读出来仍会流进提示词
                 "qq_id": row["qq_id"],
-                "nickname": _sanitize_display_name(row["nickname"] or nickname),
+                "nickname": stored_nick or _sanitize_display_name(nickname),
                 "intimacy": row["intimacy"], "relationship": row["relationship"],
                 "notes": row["notes"] or "", "first_met": row["first_met"],
                 "last_chat": row["last_chat"], "total_chats": row["total_chats"],
@@ -5367,11 +5722,83 @@ class Store:
             ).fetchone()
         return row is not None
 
-    def update_person(self, qq_id: str, **kwargs):
-        """更新人物档案。特殊参数：total_chats=True 自增聊天计数。"""
+    def touch_person_nickname(self, qq_id: str, nickname: str, *,
+                              actor: str = "sync:message_entry") -> bool:
+        """消息入口的昵称同步：**昵称为空才补**，已有值一律不动。
+
+        为什么单独一个方法、而不是让消息入口直接调 `get_or_create_person`：
+        入口是**每条消息**都走的高频路径，而 `get_or_create_person` 还要查外号、
+        组装十几个字段；这里只做一件事，并用进程内缓存挡掉重复查询（同一个人的
+        昵称不变时，从第二条消息起就是纯内存判断）。
+
+        为什么**不创建档案**：随机数字/没接触过的 qq 不该因为一条消息就造出
+        people 行（交叉上下文那边早有同一条教训：随机数字会污染 people 表）。
+        建档是 `get_or_create_person` 的职责，这里只补「已存在档案的空昵称」。
+
+        返回是否真的写入了。
+        """
+        qq = str(qq_id or "").strip()
+        clean = _sanitize_display_name(nickname or "")
+        if not qq or not clean:
+            return False
+        cache = getattr(self, "_nickname_touch_cache", None)
+        if cache is None:
+            cache = {}
+            self._nickname_touch_cache = cache
+        if cache.get(qq) == clean:
+            return False
+        if len(cache) > 4000:
+            cache.clear()
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(nickname,'') FROM people WHERE qq_id = ?", (qq,)
+                ).fetchone()
+                if row is None or str(row[0] or "").strip():
+                    # 档案不存在（不在这里创建）或已有昵称（不覆盖）——
+                    # 记住这次判断，后续消息不必再查库。
+                    cache[qq] = clean
+                    return False
+                changed = conn.execute(
+                    "UPDATE people SET nickname=? WHERE qq_id=? "
+                    "AND COALESCE(nickname,'')=''",
+                    (clean, qq),
+                ).rowcount
+                if changed:
+                    self._record_revision(
+                        conn, entity="people", entity_id=qq, qq_id=qq,
+                        op="update", field="nickname", before="", after=clean,
+                        reason="昵称补写：消息入口拿到 QQ 昵称，档案里此前为空",
+                        actor=actor,
+                    )
+                conn.commit()
+                cache[qq] = clean
+                return bool(changed)
+        except sqlite3.Error:
+            # 昵称同步是补充动作，失败不能影响消息处理本身；但必须留日志，
+            # 否则「昵称一直是空」会静默到没人发现。
+            cache.pop(qq, None)
+            logger.warning("昵称同步失败（消息处理继续）: %s", qq, exc_info=True)
+            return False
+
+    def update_person(self, qq_id: str, *, actor: str = "unknown",
+                      reason: str = "", **kwargs):
+        """更新人物档案。特殊参数：total_chats=True 自增聊天计数。
+
+        2026-10-24：这是 `people` 表的通用写入口，按字段分流留痕——
+        **真值字段**（notes / notes_trust_level / notes_source_ids / relationship /
+        sex / age / nickname）变了就写流水；**统计字段**（intimacy / total_chats /
+        last_chat / last_bonus_date / notes_dirty）不写，理由与 reinforce 相同：
+        统计漂移与流程标志不是对「她认识这个人是谁」的更正。
+        `notes` 是糖糖对一个人的认知本身，被就地覆盖，必须留旧版。
+        """
         allowed = {
             "nickname", "intimacy", "relationship", "notes", "last_chat",
             "total_chats", "sex", "age", "last_bonus_date", "notes_dirty",
+            "notes_trust_level", "notes_source_ids",
+        }
+        truth_fields = {
+            "nickname", "relationship", "notes", "sex", "age",
             "notes_trust_level", "notes_source_ids",
         }
         updates = {k: v for k, v in kwargs.items() if k in allowed}
@@ -5390,15 +5817,35 @@ class Store:
             else:
                 if k == "nickname" and isinstance(v, str):
                     v = _sanitize_display_name(v)
+                    updates[k] = v
                 set_parts.append(f"{k} = ?")
                 values.append(v)
         values.append(qq_id)
 
         with self._connect() as conn:
+            watched = [k for k in updates if k in truth_fields]
+            previous = {}
+            if watched:
+                row = conn.execute(
+                    f"SELECT {', '.join(watched)} FROM people WHERE qq_id=?",
+                    (qq_id,),
+                ).fetchone()
+                if row:
+                    previous = dict(zip(watched, row))
             conn.execute(
                 f"UPDATE people SET {', '.join(set_parts)} WHERE qq_id = ?",
                 values
             )
+            for field_name in watched:
+                before = _revision_text(previous.get(field_name))
+                after = _revision_text(updates.get(field_name))
+                if before != after:
+                    self._record_revision(
+                        conn, entity="people", entity_id=qq_id, qq_id=str(qq_id),
+                        op="update", field=field_name,
+                        before=before, after=after,
+                        reason=reason, actor=actor,
+                    )
             conn.commit()
 
     def set_intimacy(self, qq_id: str, value: int):
@@ -5544,6 +5991,88 @@ class Store:
         else:
             return [{"qq_id": r[0], "message": r[1], "timestamp": r[2],
                      "group_id": r[3] or "", "is_bot_reply": bool(r[4])} for r in rows]
+
+    # ═══════════════════════════════════════════════════════════
+    # 对话窗口回灌（2026-10-25 第 4 轮）
+    # ═══════════════════════════════════════════════════════════
+    # `memory.short_term` 是纯内存 deque——bot 一重启，所有对话窗口归零，
+    # 她下一句话就「不记得刚才聊到哪」。而 `chat_log` 里这些消息全在。
+    # 这几条只读查询就是「从唯一事实源重建窗口」的取数口。
+    #
+    # **刻意不持久化 buffer**：那等于把同一份数据存两处，两份不一致时没人
+    # 知道该信谁。chat_log 本来就是唯一事实源，buffer 只是它的内存投影——
+    # 投影可以重算，不必存档。
+
+    def list_recent_chat_scopes(self, *, hours: int = 24, limit: int = 8) -> list[dict]:
+        """最近 N 小时有过消息的会话，按最后一条时间倒序。
+
+        返回 `[{"kind": "group"|"private", "id": ..., "last": <ts>}]`。
+        私聊在 `chat_log` 里 `group_id` 为空，按 `qq_id`（对话对象）拆开。
+        排除 quarantine 行与框架合成行（14k+ 条「【同时有 N 个人找你…】」
+        是提示词不是聊天，回灌进来会让她把系统提示当成自己说过的话）。
+        """
+        limit = max(1, min(int(limit), 32))
+        cutoff = (datetime.now() - timedelta(hours=max(1, int(hours)))).strftime(
+            "%Y-%m-%d %H:%M:%S")
+        common = ("timestamp >= ? AND COALESCE(quarantined_at,'')='' "
+                  "AND COALESCE(is_synthetic,0)=0")
+        out: list[dict] = []
+        with self._connect() as conn:
+            for row in conn.execute(
+                "SELECT group_id, MAX(timestamp) AS last FROM chat_log "
+                f"WHERE COALESCE(group_id,'')!='' AND {common} "
+                "GROUP BY group_id ORDER BY last DESC LIMIT ?",
+                (cutoff, limit),
+            ).fetchall():
+                out.append({"kind": "group", "id": str(row[0] or ""), "last": row[1]})
+            for row in conn.execute(
+                "SELECT qq_id, MAX(timestamp) AS last FROM chat_log "
+                f"WHERE COALESCE(group_id,'')='' AND {common} "
+                "GROUP BY qq_id ORDER BY last DESC LIMIT ?",
+                (cutoff, limit),
+            ).fetchall():
+                out.append({"kind": "private", "id": str(row[0] or ""), "last": row[1]})
+        out.sort(key=lambda x: str(x.get("last") or ""), reverse=True)
+        return out[:limit]
+
+    def recent_chat_rows_for_scope(self, *, kind: str, scope_id: str,
+                                   limit: int = 30) -> list[dict]:
+        """某会话最近 N 条聊天，**旧→新**（回灌 buffer 要按时间序塞 deque）。"""
+        limit = max(1, min(int(limit), 200))
+        if str(kind) == "group":
+            where, params = "COALESCE(group_id,'')=?", (str(scope_id),)
+        else:
+            where, params = "COALESCE(group_id,'')='' AND qq_id=?", (str(scope_id),)
+        sql = ("SELECT qq_id, is_bot_reply, message, timestamp FROM chat_log "
+               f"WHERE {where} AND COALESCE(quarantined_at,'')='' "
+               "AND COALESCE(is_synthetic,0)=0 ORDER BY id DESC LIMIT ?")
+        with self._connect() as conn:
+            rows = conn.execute(sql, params + (limit,)).fetchall()
+        return [{"qq_id": str(r[0] or ""), "is_bot_reply": bool(r[1]),
+                 "message": str(r[2] or ""), "timestamp": str(r[3] or "")}
+                for r in reversed(rows)]
+
+    def get_nicknames(self, qq_ids: list[str]) -> dict[str, str]:
+        """批量取昵称——回灌的历史里得有人名，否则她会重新掉进「一串数字」
+        （第 1 轮那个 `@QQ2693914170` 认不出自己的坑就是这个味道）。"""
+        ids = [str(q) for q in (qq_ids or []) if str(q or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        out: dict[str, str] = {}
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    f"SELECT qq_id, nickname FROM people WHERE qq_id IN ({placeholders})",
+                    tuple(ids),
+                ).fetchall()
+            except Exception:
+                return {}
+        for row in rows:
+            nick = str(row[1] or "").strip()
+            if nick:
+                out[str(row[0])] = nick
+        return out
 
     def query_chat_history(self, *, chat_type: str, chat_id: str,
                            speaker: str = "", from_ts: str = "", to_ts: str = "",
@@ -5811,6 +6340,391 @@ class Store:
             row = conn.execute("SELECT * FROM group_info WHERE group_id=?", (group_id,)).fetchone()
             return dict(row) if row else None
 
+    def list_group_overview(self) -> list[dict]:
+        """所有「有痕迹的群」总览：名字、人数、消息量、最后活跃。
+
+        数据源是**三处的并集**，只看一处都会漏：
+          · `chat_log.group_id` —— 真聊过的群（最权威的「她在不在这个群」）
+          · `group_info` —— 同步过群资料的群（可能还没聊过）
+        配置侧（场景/黑名单）不在这里读——那是 config.yaml 的事，
+        由调用方合并，避免这一层偷偷依赖配置格式。
+
+        排序按消息量倒序：管理页面最该先看到的是「她真正在活跃的群」。
+        """
+        sql = (
+            "WITH agg AS ("
+            "  SELECT group_id, COUNT(*) AS n, MAX(timestamp) AS last_active "
+            "  FROM chat_log WHERE COALESCE(group_id,'')<>'' GROUP BY group_id"
+            ") "
+            "SELECT g.group_id AS id, "
+            "       COALESCE(gi.group_name,'') AS name, "
+            "       COALESCE(gi.member_count,0) AS member_count, "
+            "       COALESCE(gi.max_members,0) AS max_members, "
+            "       COALESCE(agg.n,0) AS messages, "
+            "       COALESCE(agg.last_active,'') AS last_active "
+            "FROM ("
+            "  SELECT DISTINCT group_id FROM chat_log WHERE COALESCE(group_id,'')<>'' "
+            "  UNION SELECT group_id FROM group_info WHERE COALESCE(group_id,'')<>''"
+            ") g "
+            "LEFT JOIN group_info gi ON gi.group_id = g.group_id "
+            "LEFT JOIN agg ON agg.group_id = g.group_id "
+            "ORDER BY messages DESC, id ASC"
+        )
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(r) for r in conn.execute(sql).fetchall()]
+
+    def get_people_names(self, qq_ids: list[str]) -> dict[str, str]:
+        """批量取 QQ → 昵称，给「场景目标」列表显示人名用。
+
+        一次查完而不是逐个查：目标表可能有几十行，N+1 查询在 SQLite 上
+        虽然不慢，但没必要。查不到的 qq 不出现在结果里，调用方自己回退成 QQ 号。
+        """
+        ids = [str(q or "").strip() for q in (qq_ids or [])]
+        ids = [q for q in ids if q]
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT qq_id, COALESCE(nickname,'') FROM people "
+                "WHERE qq_id IN (%s)" % marks, tuple(ids)
+            ).fetchall()
+        return {str(r[0]): str(r[1] or "") for r in rows if r[0]}
+
+    # ═══════════════════════════════════════════════════════════
+    # 记忆图谱（2026-10-24 P2）
+    #
+    # 「她脑子里关于大家的认知长什么样」：人 → 语义簇 → 事实，外加记忆与经历。
+    # 只读；这里只返回原始行，节点/边的组装交给 console_api（那是展示逻辑）。
+    # ═══════════════════════════════════════════════════════════
+
+    def memory_graph_overview(self, limit_people: int = 40) -> list[dict]:
+        """全局图谱原料：人 + 各自的簇数/记忆数，按「她记得多少」排序。
+
+        为什么不用相关子查询：`people` 538 行 × `memories` 22459 条，逐行 COUNT
+        会退化成 538 次全表扫。改成三个聚合 CTE 各扫一次再 LEFT JOIN。
+        """
+        limit_people = max(1, min(int(limit_people), 300))
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "WITH spoke AS ( SELECT qq_id AS qq, COUNT(*) AS n FROM memories "
+                "                WHERE COALESCE(qq_id,'')<>'' GROUP BY qq_id ), "
+                "     about AS ( SELECT target_qq AS qq, COUNT(*) AS n FROM memories "
+                "                WHERE COALESCE(target_qq,'')<>'' GROUP BY target_qq ), "
+                "     clus AS ( SELECT subject_qq AS qq, COUNT(*) AS n FROM fact_clusters "
+                "               WHERE COALESCE(subject_qq,'')<>'' GROUP BY subject_qq ) "
+                "SELECT p.qq_id AS qq, COALESCE(p.nickname,'') AS nickname, "
+                "       COALESCE(p.intimacy,0) AS intimacy, "
+                "       COALESCE(clus.n,0) AS clusters, "
+                "       COALESCE(spoke.n,0) AS spoke, "
+                "       COALESCE(about.n,0) AS about "
+                "FROM people p "
+                "LEFT JOIN spoke ON spoke.qq = p.qq_id "
+                "LEFT JOIN about ON about.qq = p.qq_id "
+                "LEFT JOIN clus ON clus.qq = p.qq_id "
+                "WHERE COALESCE(clus.n,0) + COALESCE(spoke.n,0) + COALESCE(about.n,0) > 0 "
+                "ORDER BY (COALESCE(about.n,0) + COALESCE(clus.n,0) * 3) DESC, "
+                "         COALESCE(p.intimacy,0) DESC LIMIT ?",
+                (limit_people,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def cluster_category_stats(self) -> list[dict]:
+        """按「人 × 类别」聚合的簇数——全局图上人连到类别的那条边。
+
+        不返回逐簇行：2538 行拼成节点会把全局图淹掉，而人连的其实是
+        「我对他形成了 3 个关于习惯的理解」这种**聚合关系**。
+        """
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT subject_qq AS qq, COALESCE(category,'') AS category, "
+                "       COUNT(*) AS clusters, COALESCE(SUM(fact_count),0) AS facts "
+                "FROM fact_clusters WHERE COALESCE(subject_qq,'')<>'' "
+                "GROUP BY subject_qq, category"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def memory_graph_totals(self) -> dict:
+        """图谱页顶部的总量统计（一次查完，别在前端拼）。"""
+        with self._connect() as conn:
+            one = lambda sql: int(conn.execute(sql).fetchone()[0] or 0)  # noqa: E731
+            return {
+                "people": one("SELECT COUNT(*) FROM people"),
+                "people_known": one(
+                    "SELECT COUNT(*) FROM people WHERE COALESCE(nickname,'')<>''"),
+                "clusters": one("SELECT COUNT(*) FROM fact_clusters"),
+                "facts": one("SELECT COUNT(*) FROM cluster_facts"),
+                "memories": one("SELECT COUNT(*) FROM memories"),
+                "memories_active": one(
+                    "SELECT COUNT(*) FROM memories WHERE COALESCE(status,'active')='active'"),
+                "evidence": one("SELECT COUNT(*) FROM memory_evidence"),
+                "episodes": one("SELECT COUNT(*) FROM episodes"),
+            }
+
+    def person_memory_history_rows(self, qq_id: str) -> list[dict]:
+        """某个人的全部记忆（**含正文**与版本指针），给演化史用。
+
+        和 `person_memory_rows` 的区别：那个只取维度列（做聚合统计），
+        这个要 `value` 正文和 `valid_to`——演化史看的是「她对他的理解具体
+        改成了什么」，没有正文就没意义。
+
+        `superseded_by` 实测是 `memories.id`（501/501 全部能解析），
+        但注意它可以是 **N→1**：画像重合成时，多条旧事实会被同一条新画像取代。
+        """
+        qq = str(qq_id or "").strip()
+        if not qq:
+            return []
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, COALESCE(key,'') AS key, COALESCE(value,'') AS value, "
+                "       COALESCE(status,'active') AS status, "
+                "       COALESCE(origin,'') AS origin, "
+                "       COALESCE(importance,0) AS importance, "
+                "       COALESCE(event_time,'') AS event_time, "
+                "       COALESCE(ingested_at,'') AS ingested_at, "
+                "       COALESCE(valid_to,'') AS valid_to, "
+                "       COALESCE(superseded_by,'') AS superseded_by, "
+                "       COALESCE(target_qq,'') AS target_qq, "
+                "       COALESCE(qq_id,'') AS owner "
+                "FROM memories WHERE qq_id=? OR target_qq=? "
+                "ORDER BY id ASC", (qq, qq)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def person_memory_rows(self, qq_id: str) -> list[dict]:
+        """某个人的全部记忆的**维度列**（不含正文）。
+
+        给记忆剖面做多维聚合用。为什么一次全捞再在 Python 里 Counter：
+        7 个维度各发一条 GROUP BY 要扫同一个小集合 7 遍，而一个人的记忆通常
+        只有几十到几百条——全捞出来在内存聚合更快，也更好读。
+        """
+        qq = str(qq_id or "").strip()
+        if not qq:
+            return []
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, COALESCE(key,'') AS key, "
+                "       COALESCE(cognitive,'') AS cognitive, "
+                "       COALESCE(retention,'') AS retention, "
+                "       COALESCE(trust_level,'') AS trust_level, "
+                "       COALESCE(status,'') AS status, "
+                "       COALESCE(origin,'') AS origin, "
+                "       COALESCE(importance,0) AS importance, "
+                "       COALESCE(event_time,'') AS event_time, "
+                "       COALESCE(ingested_at,'') AS ingested_at, "
+                "       COALESCE(superseded_by,'') AS superseded_by, "
+                "       COALESCE(target_qq,'') AS target_qq, "
+                "       COALESCE(qq_id,'') AS owner, "
+                "       COALESCE(source_group_id,'') AS source_group_id "
+                "FROM memories WHERE qq_id=? OR target_qq=?", (qq, qq)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def person_evidence_samples(self, memory_ids: list, limit: int = 60) -> list[dict]:
+        """把记忆指回原话：`memory_evidence` → `chat_log`，取证据样本。
+
+        这是整张剖面图里唯一能「验真」的一层——上面所有抽象（簇、事实、画像）
+        都只能证明「她认为」，只有这一层能证明「原话是什么」。
+        """
+        ids = [int(m) for m in (memory_ids or []) if str(m).strip().isdigit()]
+        ids = ids[:400]
+        if not ids:
+            return []
+        limit = max(1, min(int(limit), 200))
+        marks = ",".join("?" * len(ids))
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT e.memory_id, e.chat_id, COALESCE(c.message,'') AS message, "
+                "       COALESCE(c.timestamp,'') AS timestamp, c.is_bot_reply "
+                "FROM memory_evidence e LEFT JOIN chat_log c ON c.id = e.chat_id "
+                "WHERE e.memory_id IN (%s) "
+                "ORDER BY e.memory_id DESC, e.chat_id DESC LIMIT ?" % marks,
+                tuple(ids) + (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def memory_capabilities(self) -> dict:
+        """记忆系统的**存储能力总览**（全局，不分人）。
+
+        这是「她到底能记住什么」的硬件规格：每层的容量、向量覆盖率、提取流水线
+        进度。数字直接查不缓存——剖面页要的就是此刻的真实值。
+        """
+        with self._connect() as conn:
+            def one(sql, p=()):
+                try:
+                    return int(conn.execute(sql, p).fetchone()[0] or 0)
+                except Exception:
+                    return 0
+
+            mem_total = one("SELECT COUNT(*) FROM memories")
+            mem_active = one(
+                "SELECT COUNT(*) FROM memories "
+                "WHERE COALESCE(status,'active')='active'")
+            # 信任门的两侧（2026-10-24 立项研究第三期）：门一直在安静地工作，而
+            # 「它挡掉了多少」此前从未出现在任何界面上——查昵称时才偶然发现全库
+            # 74% 的记忆被挡在可信召回之外。口径必须与真实召回门一致，所以集合
+            # 取自 TRUSTED_TRUST_LEVELS，不另写一份字面量。
+            trusted_injectable = one(
+                "SELECT COUNT(*) FROM memories "
+                "WHERE COALESCE(status,'active')='active' "
+                f"AND COALESCE(trust_level,'legacy_unverified') IN {_TRUSTED_SQL_IN}")
+            memories_with_evidence = one(
+                "SELECT COUNT(*) FROM memories "
+                "WHERE COALESCE(status,'active')='active' "
+                "AND TRIM(COALESCE(evidence_ids,''))<>''")
+            profiled_total = one(
+                "SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>''")
+            # dirty 的画像同样不注入（active_notes 先看 notes_dirty），所以它也在
+            # 「被挡住」一侧——把 dirty 圈进来才对得上注入门的实际行为。
+            profiled_injectable = one(
+                "SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>'' "
+                "AND COALESCE(notes_dirty,0)=0 "
+                "AND COALESCE(notes_trust_level,'legacy_unverified') "
+                f"IN {_TRUSTED_SQL_IN}")
+            emb = one("SELECT COUNT(*) FROM memory_embeddings")
+            try:
+                revision_since = str(conn.execute(
+                    "SELECT COALESCE(MIN(created_at),'') FROM memory_revisions"
+                ).fetchone()[0] or "")
+            except sqlite3.Error:
+                revision_since = ""
+            return {
+                "chat_log": one("SELECT COUNT(*) FROM chat_log"),
+                "inbound_events": one("SELECT COUNT(*) FROM inbound_events"),
+                "evidence": one("SELECT COUNT(*) FROM memory_evidence"),
+                "memories": mem_total,
+                "memories_active": mem_active,
+                # 可注入 / 被信任门挡住——「她认识但用不上」的那一部分必须可见，
+                # 否则没人会为它排优先级（这正是本轮调查暴露的可观测性缺口）。
+                "trusted_injectable": trusted_injectable,
+                "trusted_blocked": max(0, mem_active - trusted_injectable),
+                "trusted_cover": (round(trusted_injectable / mem_active, 4)
+                                  if mem_active else 0.0),
+                # 证据覆盖：补证据这件事的靶子有多大——没有证据就永远升不了级，
+                # 所以这个比例决定了「补一天能涨多少」的上限。
+                "memories_with_evidence": memories_with_evidence,
+                "evidence_cover": (round(memories_with_evidence / mem_active, 4)
+                                   if mem_active else 0.0),
+                "memories_episodic": one(
+                    "SELECT COUNT(*) FROM memories WHERE cognitive='episodic'"),
+                "memories_semantic": one(
+                    "SELECT COUNT(*) FROM memories WHERE cognitive='semantic'"),
+                "embeddings": emb,
+                "embedding_dims": 512,
+                "embedding_cover": (round(emb / mem_total, 4) if mem_total else 0.0),
+                "embedding_failures": one(
+                    "SELECT COUNT(*) FROM memory_embedding_failures"),
+                "clusters": one("SELECT COUNT(*) FROM fact_clusters"),
+                "facts": one("SELECT COUNT(*) FROM cluster_facts"),
+                "people": one("SELECT COUNT(*) FROM people"),
+                "people_profiled": profiled_total,
+                # 画像的同一条门：有画像 ≠ 能注入（legacy/dirty 一律不注入）
+                "people_profiled_injectable": profiled_injectable,
+                "people_profiled_blocked": max(0, profiled_total - profiled_injectable),
+                "episodes": one("SELECT COUNT(*) FROM episodes"),
+                "journal": one("SELECT COUNT(*) FROM tangtang_journal"),
+                "digests": one("SELECT COUNT(*) FROM daily_digests"),
+                "extraction_jobs": one("SELECT COUNT(*) FROM extraction_jobs"),
+                "extraction_cursors": one("SELECT COUNT(*) FROM extraction_cursors"),
+                # 变更留痕能力（2026-10-24）：不是容量指标，而是「她的记忆可被追溯
+                # 到什么程度」——剖面页要能回答「改过几次、谁改的」，所以给出
+                # 总条数 + 最早记录时刻（= 能力的生效起点，不是数据创造时间）。
+                "revisions": one("SELECT COUNT(*) FROM memory_revisions"),
+                "revision_since": revision_since,
+            }
+
+    def person_memory_graph(self, qq_id: str, fact_limit: int = 60,
+                            memory_limit: int = 40,
+                            episode_limit: int = 20,
+                            cluster_limit: int = 40,
+                            include_inactive: bool = False) -> dict:
+        """单个人的完整认知切片：语义簇 + 簇内事实 + 关于 ta 的记忆 + 共同经历。
+
+        `include_inactive=True` 会一并带回 superseded / retracted 的记忆——
+        记忆剖面要它：被推翻的记忆也是她记忆史的一部分，而且不看它就没法解释
+        「为什么现在记得的是这个版本」。图谱视图保持 False（图上只该画当前有效的）。
+        """
+        qq = str(qq_id or "").strip()
+        if not qq:
+            return {}
+        fact_limit = max(1, min(int(fact_limit), 300))
+        # 记忆上限放到 1000：记忆剖面要「按维度筛选」，而筛选是前端做的——
+        # 只带 40 条的话，按 key=event 筛出来的分布是假的（实测某人 1069 条记忆，
+        # 40 条里 event 只有 12 条，而真实是 382 条）。1000 条约 300KB，本地可接受。
+        memory_limit = max(1, min(int(memory_limit), 1000))
+        episode_limit = max(1, min(int(episode_limit), 100))
+        # 簇也要限：实测有人被归纳出 145 个簇，全画出来是一团毛线（力导向
+        # O(n²) 在 246 节点上每帧 6 万次计算，还得靠它转几十秒才收敛）。
+        # 只取事实最多的前 cluster_limit 个——那才是「她对这个人的主要理解」。
+        cluster_limit = max(1, min(int(cluster_limit), 200))
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            person = conn.execute(
+                "SELECT qq_id, COALESCE(nickname,'') AS nickname, "
+                "       COALESCE(intimacy,0) AS intimacy, "
+                "       COALESCE(relationship,'') AS relationship, "
+                "       COALESCE(relationship_summary,'') AS relationship_summary, "
+                "       COALESCE(notes,'') AS notes, "
+                "       COALESCE(notes_trust_level,'') AS notes_trust_level, "
+                "       COALESCE(first_met,'') AS first_met, "
+                "       COALESCE(last_chat,'') AS last_chat, "
+                "       COALESCE(total_chats,0) AS total_chats, "
+                "       COALESCE(birthday,'') AS birthday, "
+                "       COALESCE(sex,'') AS sex, "
+                "       COALESCE(age,'') AS age "
+                "FROM people WHERE qq_id=?", (qq,)).fetchone()
+            clusters = [dict(r) for r in conn.execute(
+                "SELECT id, COALESCE(category,'') AS category, "
+                "       COALESCE(title,'') AS title, COALESCE(summary,'') AS summary, "
+                "       COALESCE(fact_count,0) AS fact_count, "
+                "       COALESCE(permanence,'') AS permanence "
+                "FROM fact_clusters WHERE subject_qq=? "
+                "ORDER BY fact_count DESC, id ASC LIMIT ?", (qq, cluster_limit)).fetchall()]
+            facts = [dict(r) for r in conn.execute(
+                "SELECT id, cluster_id, COALESCE(fact,'') AS fact, "
+                "       COALESCE(confidence,0) AS confidence, "
+                "       COALESCE(importance,0) AS importance "
+                "FROM cluster_facts WHERE subject_qq=? "
+                "  AND COALESCE(status,'active')='active' "
+                "ORDER BY importance DESC, confidence DESC, id DESC LIMIT ?",
+                (qq, fact_limit)).fetchall()]
+            mem_sql = (
+                "SELECT id, COALESCE(key,'') AS key, COALESCE(value,'') AS value, "
+                "       COALESCE(importance,0) AS importance, "
+                "       COALESCE(origin,'') AS origin, "
+                "       COALESCE(event_time,'') AS event_time, "
+                "       COALESCE(cognitive,'') AS cognitive, "
+                "       COALESCE(retention,'') AS retention, "
+                "       COALESCE(trust_level,'') AS trust_level, "
+                "       COALESCE(status,'') AS status "
+                "FROM memories WHERE (qq_id=? OR target_qq=?) "
+            )
+            if not include_inactive:
+                mem_sql += "  AND COALESCE(status,'active')='active' "
+            mem_sql += "ORDER BY importance DESC, id DESC LIMIT ?"
+            memories = [dict(r) for r in conn.execute(
+                mem_sql, (qq, qq, memory_limit)).fetchall()]
+            episodes = [dict(r) for r in conn.execute(
+                "SELECT id, COALESCE(title,'') AS title, "
+                "       COALESCE(summary,'') AS summary, "
+                "       COALESCE(time_start,'') AS time_start, "
+                "       COALESCE(time_end,'') AS time_end "
+                "FROM episodes WHERE qq_id=? ORDER BY id DESC LIMIT ?",
+                (qq, episode_limit)).fetchall()]
+        return {
+            "person": dict(person) if person else {"qq_id": qq},
+            "clusters": clusters,
+            "facts": facts,
+            "memories": memories,
+            "episodes": episodes,
+        }
+
     def count_bot_replies_between(self, since: str, until: str) -> int:
         """检查在指定时间窗口内是否有糖糖的回复。用于判断 @ 消息是否已被处理。"""
         try:
@@ -5861,19 +6775,101 @@ class Store:
     # aliases 表
     # ═══════════════════════════════════════
 
-    def add_alias(self, qq_id: str, alias: str, source: str = "auto"):
-        """记录外号，自动去重"""
+    def add_alias(self, qq_id: str, alias: str, source: str = "auto",
+                  memory_id: int = 0):
+        """记录外号，自动去重。
+
+        `memory_id`（2026-10-24 P1）＝ 这个外号**依据哪条记忆**。没它的话，
+        档案里凭空多出一个称呼，事后没人知道它从哪来、该不该删。
+        """
         alias = _sanitize_display_name(alias)
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         with self._connect() as conn:
             try:
                 conn.execute(
-                    "INSERT INTO aliases (alias, qq_id, source, created_at) VALUES (?, ?, ?, ?)",
-                    (alias, qq_id, source, now)
+                    "INSERT INTO aliases (alias, qq_id, source, created_at, memory_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (alias, qq_id, source, now, int(memory_id or 0))
                 )
                 conn.commit()
             except sqlite3.IntegrityError:
                 pass
+
+    def _self_name_from_text(self, value: str) -> str:
+        """从一句记忆正文里抽「自述名字」，抽不到返回空串。
+
+        纯函数、无 IO——被提取流程和回填脚本共用。规则刻意窄（见文件顶部的
+        `_SELF_NAME_PATTERNS` 注释）：只认「名字是X / 我叫X / 叫我X / X是我的名字」。
+        """
+        text = str(value or "").strip()
+        if not text or len(text) > 24:
+            return ""
+        for pattern in _SELF_NAME_PATTERNS:
+            match = pattern.match(text)
+            if not match:
+                continue
+            candidate = _sanitize_display_name(match.group(1)).strip()
+            if not candidate or candidate in _SELF_NAME_STOPWORDS:
+                return ""
+            if any(ch in _SELF_NAME_BLOCK_CHARS for ch in candidate):
+                return ""
+            return candidate
+        return ""
+
+    def _promote_self_declared_names(self, conn, qq_id: str) -> list[str]:
+        """把「名字是X」这类**自述**归档成自称（aliases），返回新归档的名字。
+
+        三条不能让步的边界（写在这里防误改）：
+
+        1. **绝不写 `people.nickname`**。自述可能是角色扮演——实测那位用户
+           自称「米雪儿·李」是《卡拉彼丘》的角色设定，还被旁人点明"其实是
+           自称米雪儿的人"。系统自动把它写进身份字段，等于替她认定一个假名字，
+           比没有名字更糟。`nickname` 只由 QQ 昵称补写（`touch_person_nickname`）。
+        2. **只认「名字/叫」句式，不认「我是X」**——后者绝大多数是身份词。
+        3. 只归档 `active` 记忆，每条都带 `memory_id` 证据指针，可回溯、可撤销。
+
+        调用方负责 commit（本方法在调用方的事务里跑）。
+        """
+        owner = str(qq_id or "").strip()
+        if not owner:
+            return []
+        rows = conn.execute(
+            "SELECT id, COALESCE(value,'') FROM memories "
+            "WHERE qq_id=? AND COALESCE(status,'active')='active' "
+            "AND (value LIKE '%名字%' OR value LIKE '%叫我%' OR value LIKE '%我叫%' "
+            "     OR value LIKE '%名字叫%') "
+            "ORDER BY id DESC LIMIT 200",
+            (owner,),
+        ).fetchall()
+        if not rows:
+            return []
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        found: list[str] = []
+        for memory_id, value in rows:
+            candidate = self._self_name_from_text(value)
+            if not candidate:
+                continue
+            if conn.execute(
+                "SELECT 1 FROM aliases WHERE qq_id=? AND alias=?",
+                (owner, candidate),
+            ).fetchone():
+                continue
+            try:
+                conn.execute(
+                    "INSERT INTO aliases (alias, qq_id, source, created_at, memory_id) "
+                    "VALUES (?, ?, 'self_declared', ?, ?)",
+                    (candidate, owner, now, int(memory_id)),
+                )
+            except sqlite3.IntegrityError:
+                continue
+            self._record_revision(
+                conn, entity="people", entity_id=owner, qq_id=owner,
+                op="update", field="alias", before="", after=candidate,
+                reason=f"自述名字归档（依据记忆 #{int(memory_id)}，未写入 nickname）",
+                actor="extract:self_declared_name",
+            )
+            found.append(candidate)
+        return found
 
     def get_aliases(self, qq_id: str) -> list[str]:
         """获取某人的所有外号（2026-08-15 整体审查安全 I4：读路径同样净化——
@@ -5884,6 +6880,28 @@ class Store:
                 (qq_id,)
             ).fetchall()
         return [_sanitize_display_name(r[0]) for r in rows]
+
+    def get_alias_records(self, qq_id: str) -> list[dict]:
+        """带来源与证据的别名记录（P1，2026-10-24）。
+
+        为什么要和 `get_aliases`（只返回字符串列表）分开：档案页必须能区分
+        「这个人怎么自称」（source='self_declared'，可能是角色扮演，附证据记忆）
+        和「别人怎么叫他/系统怎么记的」（auto/llm）。把两种混在一个字符串列表里，
+        展示层就没法告诉主人"这个名字可信到什么程度"。
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT alias, COALESCE(source,''), COALESCE(memory_id,0), "
+                "       COALESCE(created_at,'') FROM aliases WHERE qq_id=? "
+                "ORDER BY created_at DESC, id DESC",
+                (str(qq_id),),
+            ).fetchall()
+        return [{
+            "alias": _sanitize_display_name(row[0]),
+            "source": str(row[1] or ""),
+            "memory_id": int(row[2] or 0),
+            "created_at": str(row[3] or ""),
+        } for row in rows]
 
     # ═══════════════════════════════════════
     # memories 表
@@ -7785,6 +8803,194 @@ class Store:
             ).fetchone()
         return self._decision_run_dict(row) if row else None
 
+    def find_feedback_for_turn(self, user_qq: str, after_ts: str,
+                               reply_text: str, window_hours: int = 3) -> dict | None:
+        """找到糖糖某条回复之后、对方给出的那条反应（`feedback` 表）。
+
+        为什么不能按 id 精确关联：`feedback` 表没有 chat_log 外键，只存
+        `bot_reply`（**拼接后的整段回复**）和反馈发生时间。而一个回合的回复
+        在 chat_log 里是被拆成多条气泡的——所以「单条 message == bot_reply」
+        根本不成立。改用两个松弛条件同时成立：
+
+          ① 同一个人（`user_qq`）在 `after_ts` 之后 `window_hours` 内；
+          ② 两边文本有前缀关系（任一方以另一方 60 字前缀开头）。
+
+        取最早的一条：一条回复只该被第一次反应评价。匹配不到返回 None——
+        界面据此显示「还没有后续反馈」，不编造。
+        """
+        uq = str(user_qq or "")
+        ts = str(after_ts or "")
+        prefix = str(reply_text or "").strip()[:60]
+        if not uq or not ts or not prefix:
+            return None
+        try:
+            upper = (datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                     + timedelta(hours=window_hours)).strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT sentiment, confidence, user_reaction, reply_ms, timestamp, "
+                "direction_verified, bot_reply FROM feedback "
+                "WHERE user_qq=? AND timestamp>=? AND timestamp<=? "
+                "  AND (bot_reply LIKE ? || '%' OR ? LIKE bot_reply || '%') "
+                "ORDER BY timestamp ASC LIMIT 1",
+                (uq, ts, upper, prefix, prefix),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            confidence = float(row[1] or 0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return {
+            "sentiment": str(row[0] or ""),
+            "confidence": confidence,
+            "user_reaction": str(row[2] or ""),
+            "reply_ms": int(row[3] or 0),
+            "timestamp": str(row[4] or ""),
+            "direction_verified": bool(row[5]),
+            # 她这一回合实际发出去的整段回复（多气泡拼接后的原文）。
+            # 2026-10-25 第 17 轮 ④：七段流程的「发送」段要显示它——
+            # 之前只投影了六个字段，回放里看得见「对方怎么反应」却看不见
+            # 「她到底说了什么」，时间轴第 7 段只能写「（未采集到）」。
+            "bot_reply": str(row[6] or ""),
+        }
+
+    # ═══════════════════════════════════════════════════════════
+    # 回合痕迹 turn_traces（2026-10-24）
+    #
+    # 「她说完那句话的时候，脑子里过了什么」——思维链 + 工具步骤。
+    # 与 decision_runs 一一对应（run_id 同键），与 chat_log 靠 event_key 关联。
+    # ═══════════════════════════════════════════════════════════
+    #: 单条思维链最多落库多少字符。超长的思维链对「看懂她怎么想」没有增量，
+    #: 却会让库涨得很快（实测一次回复的 reasoning 常在 1-3k 字）。
+    TRACE_REASONING_LIMIT = 8000
+    #: 单条工具步骤的「结果摘要」最多留多少字符（完整结果可能上万字）
+    TRACE_TOOL_RESULT_LIMIT = 500
+    #: 单轮 prompt 结构摘要最多留多少字符（它是结构不是全文，正常只有几百字）
+    TRACE_DIGEST_LIMIT = 4000
+
+    def record_turn_trace(self, *, run_id: str, event_key: str = "",
+                          scope_id: str = "", model: str = "",
+                          reasoning_text: str = "",
+                          tool_steps: list | None = None,
+                          prompt_chars: int = 0, duration_ms: int = 0,
+                          prompt_digest: dict | None = None) -> dict:
+        """保存一回合的痕迹。同一 run_id 幂等——重复写入不报错也不覆盖。
+
+        幂等而非「冲突即抛」：痕迹是**观察数据**，写出问题不该影响业务
+        （与 record_decision_run 的「漂移拒绝」不同，那是事实契约）。
+
+        `prompt_digest`（2026-10-25 第三轮）：这一轮她**收到了什么**的结构摘要
+        ——system prompt 的段标题、user message 里的 `<背景·X>` 标签、历史条数与
+        字符数。由 `handler._summarize_prompt()` 生成，只存摘要不存全文。
+        没有它，「她记错了」只能靠复刻 prompt 猜。
+        """
+        run_id = str(run_id or "").strip()
+        if not run_id:
+            raise ValueError("TURN_TRACE_NEEDS_RUN_ID")
+        reasoning_text = str(reasoning_text or "")[: self.TRACE_REASONING_LIMIT]
+        steps = []
+        for step in (tool_steps or []):
+            if not isinstance(step, dict):
+                continue
+            steps.append({
+                "name": str(step.get("name") or ""),
+                "args": str(step.get("args") or "")[: self.TRACE_TOOL_RESULT_LIMIT],
+                "result": str(step.get("result") or "")[: self.TRACE_TOOL_RESULT_LIMIT],
+                "ms": int(step.get("ms") or 0),
+            })
+        tool_steps_json = json.dumps(steps, ensure_ascii=False, separators=(",", ":"))
+        digest_json = ""
+        if isinstance(prompt_digest, dict) and prompt_digest:
+            try:
+                digest_json = json.dumps(prompt_digest, ensure_ascii=False,
+                                         separators=(",", ":"))[: self.TRACE_DIGEST_LIMIT]
+            except (TypeError, ValueError):
+                digest_json = ""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM turn_traces WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if existing:
+                return {"id": int(existing[0]), "run_id": run_id, "duplicate": True}
+            cur = conn.execute(
+                "INSERT INTO turn_traces (run_id,event_key,scope_id,model,reasoning_text,"
+                "tool_steps_json,prompt_chars,duration_ms,recorded_at,prompt_digest) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (run_id, str(event_key or ""), str(scope_id or ""), str(model or ""),
+                 reasoning_text, tool_steps_json, int(prompt_chars or 0),
+                 int(duration_ms or 0), now, digest_json),
+            )
+            conn.commit()
+            return {"id": int(cur.lastrowid or 0), "run_id": run_id,
+                    "duplicate": False}
+
+    def get_turn_trace(self, run_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id,run_id,event_key,scope_id,model,reasoning_text,"
+                "tool_steps_json,prompt_chars,duration_ms,recorded_at,prompt_digest "
+                "FROM turn_traces WHERE run_id=?", (str(run_id or ""),)
+            ).fetchone()
+        return self._turn_trace_dict(row) if row else None
+
+    def get_turn_trace_by_event(self, event_key: str) -> dict | None:
+        """按 event_key 取最近一条痕迹——chat_log 的行就是这么挂上去的。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id,run_id,event_key,scope_id,model,reasoning_text,"
+                "tool_steps_json,prompt_chars,duration_ms,recorded_at,prompt_digest "
+                "FROM turn_traces WHERE event_key=? ORDER BY id DESC LIMIT 1",
+                (str(event_key or ""),)
+            ).fetchone()
+        return self._turn_trace_dict(row) if row else None
+
+    def query_turn_traces(self, scope_id: str = "", limit: int = 50) -> list[dict]:
+        """按会话查最近的痕迹（新→旧）。scope_id 空串 = 全部会话。"""
+        limit = max(1, min(int(limit), 500))
+        sql = ("SELECT id,run_id,event_key,scope_id,model,reasoning_text,"
+               "tool_steps_json,prompt_chars,duration_ms,recorded_at,prompt_digest "
+               "FROM turn_traces")
+        params: list = []
+        if scope_id:
+            sql += " WHERE scope_id=?"
+            params.append(str(scope_id))
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [self._turn_trace_dict(r) for r in rows]
+
+    @staticmethod
+    def _turn_trace_dict(row) -> dict:
+        try:
+            steps = json.loads(row[6] or "[]")
+        except (ValueError, TypeError):
+            steps = []
+        # prompt_digest：这一轮她「收到了什么」的结构摘要（2026-10-25 新增）。
+        # 老行没有这一列/内容为空 → 给空 dict，不抛异常（观察数据必须容错）。
+        try:
+            digest = json.loads(row[10] or "{}")
+        except (IndexError, ValueError, TypeError):
+            digest = {}
+        return {
+            "id": int(row[0]),
+            "run_id": row[1],
+            "event_key": row[2],
+            "scope_id": row[3],
+            "model": row[4],
+            "reasoning": row[5],
+            "tool_steps": steps if isinstance(steps, list) else [],
+            "prompt_chars": int(row[7] or 0),
+            "duration_ms": int(row[8] or 0),
+            "recorded_at": row[9],
+            "prompt_digest": digest if isinstance(digest, dict) else {},
+        }
+
+
     def get_decision_run_health(self) -> dict[str, int]:
         """返回 DecisionRun 终态计数和损坏行数，供运行观察读取。"""
         with self._connect() as conn:
@@ -9589,8 +10795,17 @@ class Store:
     def query_memories(self, qq_id: str = "", limit: int | None = 200,
                        include_retracted: bool = False, target_qq: str = "",
                        trusted_only: bool = False,
+                       uncertain_only: bool = False,
+                       min_importance: int = 0, min_confidence: float = 0.0,
                        source_group_id: str | None = None,
                        key: str = "") -> list[dict]:
+        # uncertain_only（2026-10-24 不确定性三档）：**反选**——只取信任门之外的那些。
+        # 与 trusted_only 严格互斥：两个同时为真时结果必然为空集，而空集会被读成
+        # 「这个人没有记忆」——静默的错误前提比抛错危险得多（教训 #19 同族）。
+        if trusted_only and uncertain_only:
+            raise ValueError(
+                "trusted_only 与 uncertain_only 互斥：同时为真只会得到空集，"
+                "空集会被误读成「没有记忆」")
         # key（2026-10-12 M3）：按 key 过滤必须**下推到 SQL**。
         # 承诺结算的候选查询原先取 limit=20 的混合行再在 Python 里筛 promise，
         # 而 active 的 said(=5) 有 300+ 条、importance 相近——实测 target=2180254043
@@ -9616,7 +10831,22 @@ class Store:
             conditions.append("key = ?")
             params.append(str(key))
         if trusted_only:
-            conditions.append("COALESCE(trust_level,'legacy_unverified') IN ('verified','manual','corrected')")
+            conditions.append(
+                f"COALESCE(trust_level,'legacy_unverified') IN {_TRUSTED_SQL_IN}")
+        elif uncertain_only:
+            # 反选集合与放行集合是同一个常量的补集——不另写一份字面量，
+            # 否则改信任模型时两边必然漂移（口径字典 §二）。
+            conditions.append(
+                f"COALESCE(trust_level,'legacy_unverified') NOT IN {_TRUSTED_SQL_IN}")
+        # 质量门槛必须**下推**到 SQL（2026-10-24）：模糊档有 10,060 条，若先按
+        # importance DESC 取 limit 行再在 Python 筛 confidence，噪声会把窗口吃满
+        # （与 key 那次同族：候选被截断，上层就无从挑）。0 表示不过滤。
+        if min_importance:
+            conditions.append("importance >= ?")
+            params.append(int(min_importance))
+        if min_confidence:
+            conditions.append("COALESCE(confidence, 0.7) >= ?")
+            params.append(float(min_confidence))
         where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
@@ -9649,6 +10879,225 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # ═══════════════════════════════════════════════════════════════
+    # 未闭合事件（open_loops，2026-10-24 设计一）
+    # ═══════════════════════════════════════════════════════════════
+    # 「悬着的那些事」。与三条既有机制的边界（写在这里防止以后被合并）：
+    # · `memories`：只读历史，只能被检索；open_loops 有状态、会被改写。
+    # · `key='promise'` 自忆：**糖糖自己**答应别人的事，有目标对象+证据链，
+    #   由 fulfill_self_promise 结算；这里是**对方的**未闭合事件，方向相反。
+    # · `drives.commitment`：她「此刻多在意」，不是「哪件事没结」。
+    # 方案：docs/开发规划/未闭合事件_技术方案_20261024.md
+
+    _OPEN_LOOP_TERMINAL = ("resolved", "dropped", "expired")
+
+    @staticmethod
+    def _open_loop_norm_topic(topic: str) -> str:
+        """话题归一化——去空格、全角空格、标点，用于去重比较。
+
+        只做**结构**归一（不去语义改写）：同一件事的两种说法能不能认出来，
+        交给提取时的 LLM；这里只防「多打一个空格就建两行」。
+        """
+        text = str(topic or "")
+        for ch in (" ", "\u3000", "\t", "\n", "\r"):
+            text = text.replace(ch, "")
+        for ch in "，。、；：！？,.;:!?…—－-":
+            text = text.replace(ch, "")
+        return text.strip().lower()
+
+    def _upsert_open_loop_conn(self, conn, qq_id: str, topic: str, *,
+                               kind: str = "plan", expected_at: str = "",
+                               source_memory_id: int = 0,
+                               source_group_id: str = "") -> int:
+        """在**调用方事务内**新增/更新一条未闭合事件，返回行 id（0 = 输入无效）。
+
+        2026-10-25 第 12 轮抽出：提取落库走 `complete_extraction_job` 的单事务
+        （`BEGIN IMMEDIATE`），里面**不能**再开一条连接去写库（同一库第二个写者
+        会等锁）。而 `add_open_loop` 自己开连接，所以真正的落库路径只能另写一份
+        SQL——两份去重规则必然漂移（教训 #38）。抽到这里的唯一实现，
+        `add_open_loop` 与提取路径共用它。
+
+        去重键是 `(qq_id, 归一化 topic)` 且**只在 open 行之间**去重：
+        已经收尾（resolved/dropped）的事再被提起，应该开一条新的——
+        「上次面试」结了之后「这次面试」是新的一件事。
+        """
+        qq = str(qq_id or "").strip()
+        topic = str(topic or "").strip()
+        if not qq or not topic:
+            return 0
+        norm = self._open_loop_norm_topic(topic)
+        if not norm:
+            return 0
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 同一件事被再次提到：只更新「时间锚点」，不新建行。
+        # 比较用归一化后的 topic（在 Python 里做——SQL 里没有这个归一函数，
+        # 而把归一逻辑写两份必然漂移）。
+        existing = conn.execute(
+            "SELECT id, topic FROM open_loops WHERE qq_id=? AND status='open'",
+            (qq,),
+        ).fetchall()
+        for row in existing:
+            if self._open_loop_norm_topic(row[1]) == norm:
+                if expected_at:
+                    conn.execute(
+                        "UPDATE open_loops SET expected_at=?, updated_at=? "
+                        "WHERE id=? AND status='open'",
+                        (str(expected_at), now, int(row[0])),
+                    )
+                return int(row[0])
+        cur = conn.execute(
+            "INSERT INTO open_loops (qq_id, topic, kind, expected_at, "
+            "source_memory_id, source_group_id, status, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,'open',?,?)",
+            (qq, topic, str(kind or "plan"), str(expected_at or ""),
+             int(source_memory_id or 0), str(source_group_id or ""), now, now),
+        )
+        return int(cur.lastrowid or 0)
+
+    def add_open_loop(self, qq_id: str, topic: str, *, kind: str = "plan",
+                      expected_at: str = "", source_memory_id: int = 0,
+                      source_group_id: str = "") -> int:
+        """新增或更新一条未闭合事件，返回行 id（0 = 输入无效）。
+
+        去重规则见 `_upsert_open_loop_conn`（唯一实现）。本方法是"自己开事务"
+        的便捷入口；生产提取路径走的是 `_apply_extraction_item` → 同一事务内
+        调用 `_upsert_open_loop_conn`。
+        """
+        with self._connect() as conn:
+            loop_id = self._upsert_open_loop_conn(
+                conn, qq_id, topic, kind=kind, expected_at=expected_at,
+                source_memory_id=source_memory_id,
+                source_group_id=source_group_id,
+            )
+            conn.commit()
+            return loop_id
+
+    def _record_open_loop_if_needed(self, conn, qq_id: str, item: dict,
+                                    memory_id: int, source_group: str) -> int:
+        """提取条目若是 open_loop，在同一事务里补写一行 open_loops。返回行 id。
+
+        ⚠ 2026-10-25 第 12 轮的根因记录：这段逻辑原本只写在
+        `handler._persist_extracted_items` 里，而那个方法**生产零调用**
+        （`tests/test_integration_contract.py` 自己把它登记为「仅测试引用」）。
+        生产提取早已改走 `complete_extraction_job` → `_apply_extraction_item`，
+        于是 L2 的 open_loop 事件从未落过库：`open_loops` 表 11145 个任务、0 行。
+        教训：**接线要接在生产真正走的那条路上**，接在死方法里等于没接，
+        而且看起来像接好了（闸门只查"符号有调用点"）。
+        """
+        if str(item.get("type") or "") != "open_loop":
+            return 0
+        return self._upsert_open_loop_conn(
+            conn, qq_id, str(item.get("value") or ""),
+            kind=str(item.get("kind") or "plan"),
+            expected_at=str(item.get("expected_at") or ""),
+            source_memory_id=int(memory_id or 0),
+            source_group_id=str(source_group or ""),
+        )
+
+    def list_open_loops(self, qq_id: str, *, limit: int = 3,
+                        max_asked: int = 2, today: str = "") -> list[dict]:
+        """取这个人当前**悬着的**事（供注入），按「到期优先、其次新近」排序。
+
+        三条硬约束（每一条都对应一种骚扰/错配）：
+        1. 只认 `status='open'`——收尾/放弃/过期的不再提；
+        2. `asked_count < max_asked`——问过上限的不再浮上来；
+        3. `qq_id` 严格相等——群里把甲的悬事说给乙听是最坏的一类串。
+        """
+        qq = str(qq_id or "").strip()
+        if not qq:
+            return []
+        today = str(today or datetime.now().strftime("%Y-%m-%d"))[:10]
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT id, qq_id, topic, kind, expected_at, source_memory_id,
+                          source_group_id, status, asked_count, last_asked_at,
+                          created_at, updated_at
+                   FROM open_loops
+                   WHERE qq_id=? AND status='open' AND asked_count < ?
+                   ORDER BY CASE WHEN expected_at != '' AND expected_at <= ? THEN 0 ELSE 1 END,
+                            CASE WHEN expected_at != '' THEN expected_at ELSE '9999-12-31' END,
+                            id DESC
+                   LIMIT ?""",
+                (qq, int(max_asked), today, max(0, int(limit))),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def resolve_open_loop(self, loop_id: int, *, qq_id: str, outcome: str,
+                          note: str = "") -> bool:
+        """收尾一条未闭合事件。返回是否真的改了（False = 拒绝，不静默成功）。
+
+        `outcome`：
+        - `asked`   —— 问过了，状态仍 open，`asked_count += 1`（不可逆地记次数）
+        - `resolved`—— 知道结果了，终态
+        - `dropped` —— 不再跟进，终态
+
+        三条拒绝（全部 fail-closed）：
+        1. 行不存在 / `qq_id` 不匹配（跨人越权）；
+        2. 已经是终态（resolved/dropped/expired）——**终态不可逆**，
+           「已收尾的事被重新打开」会让注入层重复打扰；
+        3. `outcome` 不认识。
+        """
+        loop_id = int(loop_id or 0)
+        qq = str(qq_id or "").strip()
+        outcome = str(outcome or "").strip().lower()
+        if loop_id <= 0 or not qq:
+            return False
+        if outcome not in ("asked", "resolved", "dropped"):
+            return False
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT qq_id, status, asked_count FROM open_loops WHERE id=?",
+                (loop_id,),
+            ).fetchone()
+            if not row:
+                return False
+            if str(row[0] or "") != qq:
+                return False  # 跨人
+            if str(row[1] or "") in self._OPEN_LOOP_TERMINAL:
+                return False  # 终态不可逆
+            if outcome == "asked":
+                conn.execute(
+                    "UPDATE open_loops SET asked_count=asked_count+1, "
+                    "last_asked_at=?, updated_at=? WHERE id=? AND status='open'",
+                    (now, now, loop_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE open_loops SET status=?, resolution=?, resolved_at=?, "
+                    "updated_at=? WHERE id=? AND status='open'",
+                    (outcome, str(note or "")[:400], now, now, loop_id),
+                )
+            conn.commit()
+            return True
+
+    def expire_open_loops(self, *, days_overdue: int = 30, max_asked: int = 2,
+                          today: str = "") -> int:
+        """把「过期很久且已经问过上限」的行标成 expired，返回条数。
+
+        为什么需要它：不清理的话，一个三年前没结的事会永远占着注入位，
+        而注入位只有 3 个——真正的近期悬事会被历史垃圾挤掉。
+        只动「问过 2 次以上仍没结果」的：没问过的不许替她放弃。
+        """
+        today = str(today or datetime.now().strftime("%Y-%m-%d"))[:10]
+        try:
+            days = max(1, int(days_overdue))
+            cutoff = datetime.strptime(today, "%Y-%m-%d").date().toordinal() - days
+            cutoff_date = datetime.fromordinal(cutoff).strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
+            return 0
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE open_loops SET status='expired', updated_at=? "
+                "WHERE status='open' AND expected_at != '' AND expected_at <= ? "
+                "AND asked_count >= ?",
+                (now, cutoff_date, int(max_asked)),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
+
     def query_all_memories(self) -> list[dict]:
         """查询所有记忆（用于全局统计）"""
         with self._connect() as conn:
@@ -9661,21 +11110,164 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def delete_stale_memories(self, days: int = 90) -> int:
+    # ═══════════════════════════════════════════════════════════════
+    # 记忆变更流水（memory_revisions，2026-10-24）
+    # ═══════════════════════════════════════════════════════════════
+    # 「未来所有记忆更正都留痕」的落地点：任何会让记忆**内容或真值**发生变化的
+    # 写操作，都在同一个事务里追加一条不可变流水。设计说明与取证矩阵见
+    # docs/开发规划/记忆变更留痕_20261024.md。
+    #
+    # 两条不能让步的边界（写在这里防止以后被「补全」）：
+    # 1. **不记纯计数**——recall_count / last_recalled / total_chats / intimacy
+    #    微增是统计漂移，不是真值变更；记它们会让表按「召回次数 × 记忆数」爆炸，
+    #    而信息量已由这些列自己承载。但「显式设定 importance」要记，那是决策。
+    # 2. **不记新生**——insert_memory 的行本身就是它诞生的记录（timestamp /
+    #    ingested_at），再记一条只会让真正的更正被 22k 条流水淹没。
+
+    def _row_snapshot(self, conn, table: str, id_column: str, key) -> dict:
+        """取整行快照（删除前留底用）。
+
+        表名/列名只接受本文件内的字面常量，不来自外部输入。
+        不用 conn.row_factory——那是连接级设置，会在调用方的事务里留下副作用。
+        """
+        try:
+            cur = conn.execute(f"SELECT * FROM {table} WHERE {id_column}=?", (key,))
+            columns = [str(item[0]) for item in (cur.description or [])]
+            row = cur.fetchone()
+        except sqlite3.Error:
+            return {}
+        return dict(zip(columns, row)) if row else {}
+
+    def _record_revision(self, conn, *, entity: str, entity_id, qq_id: str = "",
+                         op: str, field: str = "", before: object = None,
+                         after: object = None, reason: str = "",
+                         actor: str = "") -> bool:
+        """在**调用方的事务里**追加一条记忆变更流水。
+
+        故意不 commit：留痕必须和业务写入同一个事务——否则崩溃时的四种半成品
+        状态里，「改了但没留痕」是最坏的一种（数据已经错了，还查不出错在哪）。
+        由调用方统一 commit。
+
+        `actor` 默认落 `unknown`：这是刻意的——没有 actor 的流水回答不了
+        「这次是谁改的」，等于只有一半价值。`test_memory_revision_trail.py`
+        断言生产代码里不存在 unknown（新增写路径忘记标就会红）。
+
+        返回是否写入成功。留痕失败只告警、不抛：观察数据不能反过来阻断记忆
+        本身；但必须留日志，否则缺行会静默到没人发现（教训 #30 同族）。
+        """
+        try:
+            target = _revision_text(entity_id).strip()
+            if not target:
+                return False
+            conn.execute(
+                "INSERT INTO memory_revisions "
+                "(entity, entity_id, qq_id, op, field, before_value, after_value, "
+                "reason, actor, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    _revision_text(entity).strip() or "memories",
+                    target,
+                    _revision_text(qq_id).strip(),
+                    _revision_text(op).strip() or "update",
+                    _revision_text(field).strip(),
+                    _revision_text(before),
+                    _revision_text(after),
+                    _revision_text(reason).strip(),
+                    _revision_text(actor).strip() or "unknown",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            return True
+        except sqlite3.Error:
+            logger.warning("记忆流水写入失败（业务写入保留）: %s", entity, exc_info=True)
+            return False
+
+    def memory_revisions(self, *, qq_id: str = "", entity: str = "",
+                         entity_id=None, actor: str = "", limit: int = 200) -> list[dict]:
+        """读记忆变更流水（新的在前）。全部条件可省略，用于演化史/审计。"""
+        wheres, params = [], []
+        if str(qq_id or "").strip():
+            wheres.append("qq_id=?")
+            params.append(str(qq_id).strip())
+        if str(entity or "").strip():
+            wheres.append("entity=?")
+            params.append(str(entity).strip())
+        if entity_id is not None and str(entity_id).strip():
+            wheres.append("entity_id=?")
+            params.append(str(entity_id).strip())
+        if str(actor or "").strip():
+            wheres.append("actor LIKE ?")
+            params.append(f"{str(actor).strip()}%")
+        sql = "SELECT * FROM memory_revisions"
+        if wheres:
+            sql += " WHERE " + " AND ".join(wheres)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, min(2000, int(limit or 200))))
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [dict(row) for row in rows]
+
+    def memory_revision_stats(self, qq_id: str = "") -> dict:
+        """流水总览：总数 / 按 actor / 按 op——用于「留痕真的在跑吗」的自检。
+
+        `qq_id` 为空时统计全库；给定时只看这个人的变更（演化史页要回答
+        「她的记忆被改过多少次、都是谁改的」）。
+        """
+        scope, params = "", ()
+        if str(qq_id or "").strip():
+            scope, params = " WHERE qq_id=?", (str(qq_id).strip(),)
+        with self._connect() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM memory_revisions" + scope, params
+            ).fetchone()
+            by_actor = conn.execute(
+                "SELECT actor, COUNT(*) FROM memory_revisions" + scope
+                + " GROUP BY actor ORDER BY COUNT(*) DESC LIMIT 40",
+                params,
+            ).fetchall()
+            by_op = conn.execute(
+                "SELECT op, COUNT(*) FROM memory_revisions" + scope
+                + " GROUP BY op ORDER BY COUNT(*) DESC LIMIT 40",
+                params,
+            ).fetchall()
+        return {
+            "total": int(total[0] if total else 0),
+            "by_actor": [{"actor": str(r[0] or ""), "count": int(r[1])} for r in by_actor],
+            "by_op": [{"op": str(r[0] or ""), "count": int(r[1])} for r in by_op],
+        }
+
+    def delete_stale_memories(self, days: int = 90, *,
+                              actor: str = "unknown", reason: str = "") -> int:
         """删除长期未回忆的低重要性记忆。
         条件：importance <= 2 且从未被回忆 且 超过 days 天。
         2026-08-16 Codex M2：只清 active 业务行（审计历史走专门 retention），
-        并成对删除 embedding。"""
+        并成对删除 embedding。
+
+        2026-10-24：删除前逐条写流水快照。被清掉的行里可能有「后来才发现
+        不该清」的内容（importance 是相关性判断，不是真值判断），没有快照
+        就再也拿不回来。
+        """
         with self._connect() as conn:
-            old_ids = [r[0] for r in conn.execute(
-                """SELECT id FROM memories
+            scanned = conn.execute(
+                """SELECT * FROM memories
                    WHERE importance <= 2
                    AND (recall_count IS NULL OR recall_count = 0)
                    AND datetime(timestamp) < datetime('now', ? || ' days')
                    AND COALESCE(status,'active')='active'
                    AND COALESCE(retention,'normal')!='permanent'""",
                 (f"-{days}",)
-            ).fetchall()]
+            )
+            columns = [str(item[0]) for item in (scanned.description or [])]
+            snapshots = [dict(zip(columns, row)) for row in scanned.fetchall()]
+            old_ids = [int(item["id"]) for item in snapshots]
+            for item in snapshots:
+                self._record_revision(
+                    conn, entity="memories", entity_id=item.get("id"),
+                    qq_id=str(item.get("qq_id") or ""), op="delete",
+                    before=item,
+                    reason=reason or f"陈旧清理：importance≤2 且从未回忆且 >{days} 天",
+                    actor=actor,
+                )
             if old_ids:
                 conn.execute(
                     "DELETE FROM memories WHERE id IN (%s)" % ",".join("?" * len(old_ids)),
@@ -9686,23 +11278,124 @@ class Store:
             conn.commit()
             return len(old_ids)
 
-    def delete_memory_by_id(self, memory_id: int):
+    def delete_memory_by_id(self, memory_id: int, *,
+                            actor: str = "unknown", reason: str = "") -> bool:
+        """物理删除一条记忆——删除前先把整行快照写进流水。
+
+        返回是否真的删掉了一行；False 表示 id 不存在（不做无快照的删除）。
+        """
         with self._connect() as conn:
+            snapshot = self._row_snapshot(conn, "memories", "id", memory_id)
+            if not snapshot:
+                return False
+            self._record_revision(
+                conn, entity="memories", entity_id=memory_id,
+                qq_id=str(snapshot.get("qq_id") or ""), op="delete",
+                before=snapshot, reason=reason or "按 id 删除", actor=actor,
+            )
             conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
             conn.execute("DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,))
             conn.commit()
+            return True
 
     # ═══ 批 2 纠正闭环（2026-08-16）═══
     # 撤销不改 importance（importance 是相关性不是真值，且 setter 钳最小值 1）——
     # 统一走 status 过滤，retracted/superseded 行保留作审计历史
 
-    def set_memory_status(self, memory_id: int, status: str = "retracted"):
-        """标记一条记忆的真值状态：active / retracted（被否定）/ superseded（被纠正替代）"""
+    def set_memory_status(self, memory_id: int, status: str = "retracted",
+                          *, actor: str = "unknown", reason: str = "") -> bool:
+        """标记一条记忆的真值状态：active / retracted（被否定）/ superseded（被纠正替代）
+
+        ⚠️ 只改状态、**不写** `superseded_by`。需要留下「被谁取代」时用
+        `link_superseded`——纠正流程是「先标旧行、后写新事实」，标记的那一刻
+        新事实还没有 id，所以指针只能晚一步补。
+
+        2026-10-24：状态变更写流水（旧状态 → 新状态 + actor + reason）。
+        status 是真值不是统计，改它必须能回答「谁改的、为什么」。
+        状态本来就等于目标值时不留流水（避免把幂等重放写成"变更"）。
+
+        返回是否发生了实际变更。
+        """
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT qq_id, COALESCE(status,'active') FROM memories WHERE id=?",
+                (memory_id,),
+            ).fetchone()
+            if not row:
+                return False
+            previous = str(row[1] or "active")
+            target = str(status or "")
+            if previous == target:
+                return False
+            self._record_revision(
+                conn, entity="memories", entity_id=memory_id,
+                qq_id=str(row[0] or ""), op="status", field="status",
+                before=previous, after=target, reason=reason, actor=actor,
+            )
             conn.execute("UPDATE memories SET status = ? WHERE id = ?", (status, memory_id))
             conn.commit()
+            return True
 
-    def fulfill_self_promise(self, promise_id: int, completion_id: int) -> bool:
+    def link_superseded(self, old_ids: list, new_id: int,
+                        valid_to: str = "", *, actor: str = "unknown",
+                        reason: str = "") -> int:
+        """给已标成 superseded 的旧记忆补上「被谁取代」的指针。
+
+        为什么单独一个方法而不是并进 `set_memory_status`：纠正流程先标旧行、
+        后写纠正事实——标记时新事实还没有 id。等拿到 id 再补这一刀，旧行已经
+        在 superseded 状态，只需 UPDATE 指针，不重复写 status。
+
+        返回实际更新的行数。`new_id` 非法时直接返回 0（演化史是观察数据，
+        不能因为补链失败影响纠正本身）。
+        """
+        ids = []
+        for item in (old_ids or []):
+            try:
+                value = int(item)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                ids.append(value)
+        try:
+            target = int(new_id)
+        except (TypeError, ValueError):
+            return 0
+        if not ids or target <= 0:
+            return 0
+        stamp = str(valid_to or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        placeholders = ",".join("?" * len(ids))
+        with self._connect() as conn:
+            # **单一判定点**：这里查出「真正会被补链的行」，流水与 UPDATE 共用这一个
+            # 集合。曾经写成「查询带幂等条件 + UPDATE 再带一遍」，两处条件一旦漂移
+            # 就会产生「UPDATE 了但没留痕」或「留痕了但没 UPDATE」——正是本机制要
+            # 防的事（变异对照 M4 用旧写法时判定为假变异，根因就是两处各判各的）。
+            pending = conn.execute(
+                f"SELECT id, qq_id FROM memories WHERE id IN ({placeholders}) "
+                f"AND COALESCE(superseded_by,'')=''",
+                tuple(ids),
+            ).fetchall()
+            if not pending:
+                return 0
+            pending_ids = [int(row[0]) for row in pending]
+            for mem_id, mem_qq in pending:
+                self._record_revision(
+                    conn, entity="memories", entity_id=mem_id,
+                    qq_id=str(mem_qq or ""), op="supersede", field="superseded_by",
+                    before="", after=str(target),
+                    reason=reason or f"被 #{target} 取代",
+                    actor=actor,
+                )
+            target_placeholders = ",".join("?" * len(pending_ids))
+            conn.execute(
+                f"UPDATE memories SET superseded_by=?, valid_to=? "
+                f"WHERE id IN ({target_placeholders})",
+                tuple([target, stamp, *pending_ids]),
+            )
+            conn.commit()
+            return len(pending_ids)
+
+    def fulfill_self_promise(self, promise_id: int, completion_id: int, *,
+                             actor: str = "system:fulfill", reason: str = "") -> bool:
         """用同对象、同作用域且有证据的已完成动作结算一条自我承诺。
 
         ``fulfilled`` 是承诺的历史终态，不等同于 ``retracted``（被否定）或
@@ -9721,8 +11414,8 @@ class Store:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             promise = conn.execute(
-                "SELECT key, origin, target_qq, COALESCE(source_group_id,''), status "
-                "FROM memories WHERE id=?",
+                "SELECT key, origin, target_qq, COALESCE(source_group_id,''), status, "
+                "qq_id FROM memories WHERE id=?",
                 (promise_id,),
             ).fetchone()
             completion = conn.execute(
@@ -9756,6 +11449,14 @@ class Store:
                 "superseded_by=? WHERE id=? AND status='active'",
                 (now, completion_id, promise_id),
             )
+            if int(cur.rowcount or 0) == 1:
+                self._record_revision(
+                    conn, entity="memories", entity_id=promise_id,
+                    qq_id=str(promise[5] or ""), op="fulfill", field="status",
+                    before="active", after="fulfilled",
+                    reason=reason or f"由完成事实 #{completion_id} 结算",
+                    actor=actor,
+                )
             conn.commit()
         return cur.rowcount == 1
 
@@ -9775,11 +11476,18 @@ class Store:
                                  importance: int = 4, confidence: float = 0.7,
                                  origin: str = "summarized",
                                  source_memory_ids: list[int] | None = None,
-                                 source_group_id: str = "") -> dict:
+                                 source_group_id: str = "",
+                                 *, actor: str = "synthesis:profile",
+                                 reason: str = "") -> dict:
         """2026-08-16 Codex I6：画像世代单事务——notes 换入、dirty 清零、
         两类合成行 supersede（含删 embedding）、新行插入，全部在一个连接
         一个事务内完成。读者只会看到完整旧世代或完整新世代，不存在
-        「新 notes + 旧事实」的半世代。返回 {"profile_id": int, "fact_ids": [..]}。"""
+        「新 notes + 旧事实」的半世代。返回 {"profile_id": int, "fact_ids": [..]}。
+
+        2026-10-24：旧世代的 status 变更与旧 notes 覆盖都写流水。画像重合成是
+        「糖糖对这个人是谁的认知」整体换版，旧版内容必须可追溯——尤其
+        `people.notes` 是被就地覆盖的，没有流水就等于上一个人生被抹掉了。
+        """
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         ingested_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         result = {"profile_id": 0, "fact_ids": []}
@@ -9894,41 +11602,78 @@ class Store:
                     f"WHERE id IN ({placeholders})",
                     tuple([ingested_at, result["profile_id"], *old_ids]),
                 )
+                for old_id in old_ids:
+                    self._record_revision(
+                        conn, entity="memories", entity_id=old_id, qq_id=str(qq_id),
+                        op="supersede", field="status", before="active",
+                        after="superseded",
+                        reason=reason or f"画像重合成：被 #{result['profile_id']} 取代",
+                        actor=actor,
+                    )
                 conn.executemany(
                     "DELETE FROM memory_embeddings WHERE memory_id=?",
                     [(item,) for item in old_ids],
                 )
+            previous_notes = conn.execute(
+                "SELECT COALESCE(notes,''), COALESCE(notes_trust_level,'') "
+                "FROM people WHERE qq_id=?",
+                (qq_id,),
+            ).fetchone()
             conn.execute(
                 "UPDATE people SET notes=?, notes_dirty=0, notes_trust_level=?, "
                 "notes_source_ids=? WHERE qq_id=?",
                 (profile, notes_trust, notes_sources, qq_id),
             )
+            old_notes = str(previous_notes[0] or "") if previous_notes else ""
+            old_trust = str(previous_notes[1] or "") if previous_notes else ""
+            if old_notes != str(profile or ""):
+                self._record_revision(
+                    conn, entity="people", entity_id=qq_id, qq_id=str(qq_id),
+                    op="update", field="notes", before=old_notes,
+                    after=str(profile or ""),
+                    reason=reason or "画像重合成换入", actor=actor,
+                )
+            if old_trust != notes_trust:
+                self._record_revision(
+                    conn, entity="people", entity_id=qq_id, qq_id=str(qq_id),
+                    op="update", field="notes_trust_level", before=old_trust,
+                    after=notes_trust,
+                    reason=reason or "画像重合成换入", actor=actor,
+                )
             conn.commit()
         return result
 
     def replace_synthesis_memories(self, qq_id: str, key: str, values: list[str],
                                    importance: int = 4, confidence: float = 0.7,
-                                   origin: str = "summarized") -> list[int]:
+                                   origin: str = "summarized", *,
+                                   actor: str = "synthesis:fact",
+                                   reason: str = "") -> list[int]:
         """批 3：合成快照事务化替换——同一事务内撤销旧集合并插入新集合。
+
         读者只会看到完整旧集合或完整新集合（无空窗/半套）；旧行标 superseded
-        保留审计历史，其 embedding 同步删除（不再可检索）。返回新行 id 列表。"""
+        保留审计历史，其 embedding 同步删除（不再可检索）。返回新行 id 列表。
+
+        2026-10-24 写入侧补链：旧行现在**必须**留下「被谁取代」的指针，否则
+        演化史里就是一条断链（实测全库 1261 条 `status='superseded'` 却
+        `superseded_by` 为空，绝大多数来自这里）。
+
+        **集合级取代，不做逐条配对**：旧集合和新集合之间没有稳定的一一映射
+        （归纳会让条目合并、拆分、重排），硬按序号配会造出一条看起来很真、
+        实际上错的版本链——那比断链更糟。所以整批旧行统一指向新集合的第一条，
+        并在演化史里按 N→1 的并入关系展示。
+
+        另一个边界：`values` 全空时**不能**记 superseded——没有替代品就不是
+        「被取代」，是「被否定」，改记 `retracted`。
+        """
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         with self._connect() as conn:
             old = conn.execute(
-                "SELECT id FROM memories WHERE qq_id=? AND key=? AND COALESCE(status,'active')='active'",
+                "SELECT id FROM memories WHERE qq_id=? AND key=? "
+                "AND COALESCE(status,'active')='active'",
                 (qq_id, key)
             ).fetchall()
-            if old:
-                old_ids = [r[0] for r in old]
-                conn.execute(
-                    "UPDATE memories SET status='superseded' WHERE qq_id=? AND key=? "
-                    "AND COALESCE(status,'active')='active'",
-                    (qq_id, key)
-                )
-                conn.executemany(
-                    "DELETE FROM memory_embeddings WHERE memory_id=?", [(i,) for i in old_ids]
-                )
-            ids = []
+            old_ids = [int(r[0]) for r in old]
+            ids: list[int] = []
             for v in values:
                 v = (v or "").strip()
                 if not v:
@@ -9938,7 +11683,41 @@ class Store:
                     "cognitive, confidence, origin, status) VALUES (?,?,?,?,?,?,?,?,'active')",
                     (qq_id, key, v, now, importance, "semantic", confidence, origin)
                 )
-                ids.append(cur.lastrowid)
+                ids.append(int(cur.lastrowid))
+            if old_ids:
+                placeholders = ",".join("?" * len(old_ids))
+                if ids:
+                    conn.execute(
+                        f"UPDATE memories SET status='superseded', valid_to=?, "
+                        f"superseded_by=? WHERE id IN ({placeholders})",
+                        tuple([now, ids[0], *old_ids]),
+                    )
+                    for old_id in old_ids:
+                        self._record_revision(
+                            conn, entity="memories", entity_id=old_id,
+                            qq_id=str(qq_id), op="supersede", field="status",
+                            before="active", after="superseded",
+                            reason=reason or f"合成快照替换（{key}）：被 #{ids[0]} 取代",
+                            actor=actor,
+                        )
+                else:
+                    conn.execute(
+                        f"UPDATE memories SET status='retracted', valid_to=? "
+                        f"WHERE id IN ({placeholders})",
+                        tuple([now, *old_ids]),
+                    )
+                    for old_id in old_ids:
+                        self._record_revision(
+                            conn, entity="memories", entity_id=old_id,
+                            qq_id=str(qq_id), op="retract", field="status",
+                            before="active", after="retracted",
+                            reason=reason or f"合成快照替换（{key}）：新集合为空，旧集合被否定",
+                            actor=actor,
+                        )
+                conn.executemany(
+                    "DELETE FROM memory_embeddings WHERE memory_id=?",
+                    [(i,) for i in old_ids],
+                )
             conn.commit()
         return ids
 
@@ -9981,23 +11760,54 @@ class Store:
             conn.commit()
             return True
 
-    def retract_cluster_fact(self, fact_id: int, status: str = "retracted") -> int:
+    def retract_cluster_fact(self, fact_id: int, status: str = "retracted", *,
+                             actor: str = "unknown", reason: str = "") -> int:
         """撤销一条簇内原子事实并清空所属簇摘要（摘要已不可信，禁止继续注入）。
-        返回所属 cluster_id（0 = 未找到）。"""
+        返回所属 cluster_id（0 = 未找到）。
+
+        2026-10-24：清空簇摘要前先把旧摘要写进流水——摘要是由多条原子事实
+        归纳出的结论，清了就再也拼不回来。同时记原子事实的 status 变更。
+        """
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT cluster_id FROM cluster_facts WHERE id=?", (fact_id,)
+                "SELECT cluster_id, subject_qq, COALESCE(status,'active'), fact "
+                "FROM cluster_facts WHERE id=?",
+                (fact_id,),
             ).fetchone()
             if not row:
                 return 0
+            cluster_id, subject_qq = row[0], str(row[1] or "")
+            previous_status = str(row[2] or "active")
+            fact_text = str(row[3] or "")
+            previous_summary = conn.execute(
+                "SELECT COALESCE(summary,'') FROM fact_clusters WHERE id=?",
+                (cluster_id,),
+            ).fetchone()
+            old_summary = str(previous_summary[0] or "") if previous_summary else ""
+            if previous_status != str(status or ""):
+                self._record_revision(
+                    conn, entity="cluster_facts", entity_id=fact_id,
+                    qq_id=subject_qq, op="status", field="status",
+                    before=previous_status, after=str(status or ""),
+                    reason=reason or f"簇事实撤销：{fact_text[:80]}",
+                    actor=actor,
+                )
             conn.execute("UPDATE cluster_facts SET status=? WHERE id=?", (status, fact_id))
             conn.execute(
                 "UPDATE fact_clusters SET summary='', updated_at=? WHERE id=?",
-                (now, row[0])
+                (now, cluster_id)
             )
+            if old_summary:
+                self._record_revision(
+                    conn, entity="fact_clusters", entity_id=cluster_id,
+                    qq_id=subject_qq, op="update", field="summary",
+                    before=old_summary, after="",
+                    reason=reason or "簇内事实被撤销，摘要已不可信故清空",
+                    actor=actor,
+                )
             conn.commit()
-            return row[0]
+            return cluster_id
 
     def search_cluster_facts_by_text(self, subject_qq: str, text: str, limit: int = 10) -> list[dict]:
         """纠正匹配用：事实文本包含给定内容的 active 原子事实。"""
@@ -10012,14 +11822,32 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def delete_memories_for_user(self, qq_id: str):
-        """清空某人的所有记忆"""
+    def delete_memories_for_user(self, qq_id: str, *, actor: str = "unknown",
+                                 reason: str = "") -> int:
+        """清空某人的所有记忆——删除前逐条写流水快照。返回删除行数。"""
         with self._connect() as conn:
+            scanned = conn.execute("SELECT * FROM memories WHERE qq_id = ?", (qq_id,))
+            columns = [str(item[0]) for item in (scanned.description or [])]
+            snapshots = [dict(zip(columns, row)) for row in scanned.fetchall()]
+            for item in snapshots:
+                self._record_revision(
+                    conn, entity="memories", entity_id=item.get("id"),
+                    qq_id=str(qq_id), op="delete", before=item,
+                    reason=reason or "清空该用户的全部记忆", actor=actor,
+                )
             conn.execute("DELETE FROM memories WHERE qq_id = ?", (qq_id,))
             conn.commit()
+            return len(snapshots)
 
     def reinforce_memory_by_id(self, memory_id: int, now: str):
-        """强化一条记忆：importance+1, 更新 last_recalled 和 recall_count（精确ID匹配）"""
+        """强化一条记忆：importance+1, 更新 last_recalled 和 recall_count（精确ID匹配）
+
+        ⚠️ 刻意**不写** memory_revisions：这是召回时的统计漂移（每条记忆每
+        30 分钟最多 +1），不是对记忆内容的更正。记它会让流水表按
+        「召回次数 × 记忆数」爆炸，而信息量已由 recall_count / last_recalled
+        这两列承载。要查「权重是怎么涨上去的」看这两列，不要往流水里捞。
+        对照：`set_memory_importance` 是显式设定，那个要记。
+        """
         with self._connect() as conn:
             conn.execute(
                 """UPDATE memories
@@ -10031,14 +11859,40 @@ class Store:
             )
             conn.commit()
 
-    def update_memory_value(self, memory_id: int, value: str):
-        """更新记忆内容并提升权重"""
+    def update_memory_value(self, memory_id: int, value: str, *,
+                            actor: str = "unknown", reason: str = "") -> bool:
+        """更新记忆内容并提升权重。
+
+        2026-10-24：这是**旧值会永久消失**的写点——语义去重命中（相似度>0.85）
+        时走这里，旧表述被新表述就地覆盖。所以必须先把旧值写进流水，
+        否则「她以前是怎么记这件事的」这个问题永远无法回答。
+
+        `importance+1` 是顺带的强化增量（与 `reinforce_memory_by_id` 同类），
+        不单独记流水。返回是否找到并写入了该行。
+        """
+        new_value = str(value or "")[:100]
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT qq_id, COALESCE(value,'') FROM memories WHERE id=?",
+                (memory_id,),
+            ).fetchone()
+            if not row:
+                return False
+            old_value = str(row[1] or "")
+            if old_value != new_value:
+                self._record_revision(
+                    conn, entity="memories", entity_id=memory_id,
+                    qq_id=str(row[0] or ""), op="update", field="value",
+                    before=old_value, after=new_value,
+                    reason=reason or "语义去重合并：高相似新记忆覆盖旧表述",
+                    actor=actor,
+                )
             conn.execute(
                 "UPDATE memories SET value = ?, importance = MIN(10, importance + 1) WHERE id = ?",
-                (value[:100], memory_id)
+                (new_value, memory_id)
             )
             conn.commit()
+            return True
 
     def record_memory_reverification_disposition(
             self, memory_id: int, disposition: str, *, reviewer: str,
@@ -10059,7 +11913,7 @@ class Store:
             ).fetchone()
             if (not row or str(row[0] or "") != "extracted"
                     or str(row[1] or "legacy_unverified")
-                    in {"verified", "manual", "corrected"}):
+                    in TRUSTED_TRUST_LEVELS):
                 return False
             conn.execute(
                 "INSERT INTO memory_reverification_dispositions "
@@ -10074,7 +11928,8 @@ class Store:
                                source_group_id: str = "",
                                evidence_quote: str = "",
                                *, allow_legacy_promotion: bool = False,
-                               reviewer: str = "", review_reason: str = "") -> bool:
+                               reviewer: str = "", review_reason: str = "",
+                               actor: str = "") -> bool:
         """校验并 union 记忆证据；成功时同步提升信任与事件时间。
 
         所有新增证据都必须给出被原文支持的 quote。legacy 行默认只保留为
@@ -10083,15 +11938,15 @@ class Store:
         """
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT qq_id, origin, target_qq, source_group_id, evidence_ids, trust_level "
-                "FROM memories WHERE id=? AND COALESCE(status,'active')='active'",
+                "SELECT qq_id, origin, target_qq, source_group_id, evidence_ids, trust_level, "
+                "confidence FROM memories WHERE id=? AND COALESCE(status,'active')='active'",
                 (memory_id,),
             ).fetchone()
             if not row:
                 return False
-            qq_id, origin, target_qq, old_group, old_evidence, old_trust = row
+            qq_id, origin, target_qq, old_group, old_evidence, old_trust, confidence = row
             requested_group = str(source_group_id or "")
-            trusted_levels = {"verified", "manual", "corrected"}
+            trusted_levels = TRUSTED_TRUST_LEVELS
             if old_trust in trusted_levels and str(old_group or "") != requested_group:
                 return False
             is_legacy = old_trust not in trusted_levels
@@ -10104,6 +11959,26 @@ class Store:
                 if (not allow_legacy_promotion or str(origin or "") != "extracted"
                         or not str(reviewer or "").strip()
                         or not str(review_reason or "").strip()):
+                    return False
+                # 2026-10-25 第五轮：**「说过这句」不等于「这是关于 ta 本人的事实」**。
+                #
+                # 语义回挂（`tools/语义回挂证据.py`）只验证一件事：这句话确实在
+                # `chat_log` 里被逐字说过。但同一句原话可以是小说情节、玩笑、
+                # 转述、引用、假设——**证据存在 ≠ 语义归属**。
+                #
+                # 现场（2026-10-25 抽样）：`mem#25510`「小说开头设定主角是广告公司
+                # 策划，凌晨三点改完第十八版方案后猝死（小说情节内容）」被升成
+                # verified 并进入注入；`mem#19337`「自称是Ezfic大神」（玩笑）同理。
+                # 这 155 条共同特征是 **confidence < 0.7**——提取它的 LLM 当时就
+                # 不确定这是不是真事实，回挂却把「说过」当成了「可信」。
+                #
+                # 判据来源：`insert_memory` 对新提取的 verified 就要求
+                # `claim_type == "stated" and confidence >= 0.75`（见该函数注释），
+                # 而重验证这条路**从来没有置信度门槛**——同一件事两套口径。
+                # 这里取 0.7（比 0.75 略宽）的理由：重验证额外拿到了原文证据，
+                # 证据强度更高；且 0.7 是常规提取的默认置信度，卡 0.75 会把
+                # 大量正常记忆一并挡在门外。
+                if float(confidence or 0) < LEGACY_PROMOTION_MIN_CONFIDENCE:
                     return False
 
             incoming = self._parse_evidence_ids(evidence_ids)
@@ -10143,6 +12018,33 @@ class Store:
                 "(memory_id, chat_id, relation, created_at) VALUES (?, ?, 'supports', ?)",
                 [(memory_id, item[0], created_at) for item in evidence_rows],
             )
+            # 证据链就是这个项目的「真值依据」：多一条原话 = 这条记忆从「听说」
+            # 变成「有据」。它变了必须留痕，否则事后问「这条事实当初凭什么可信」
+            # 只能靠 memory_evidence 的 created_at 猜。
+            if str(old_group or "") != requested_group:
+                self._record_revision(
+                    conn, entity="memories", entity_id=memory_id,
+                    qq_id=str(qq_id or ""), op="update", field="source_group_id",
+                    before=str(old_group or ""), after=requested_group,
+                    reason=review_reason or "证据补录：作用域随之确定",
+                    actor=actor or ("review:" + reviewer if reviewer else ""),
+                )
+            if str(old_evidence or "") != combined_csv:
+                self._record_revision(
+                    conn, entity="memories", entity_id=memory_id,
+                    qq_id=str(qq_id or ""), op="update", field="evidence_ids",
+                    before=str(old_evidence or ""), after=combined_csv,
+                    reason=review_reason or "证据补录：新增被原文支持的聊天证据",
+                    actor=actor or ("review:" + reviewer if reviewer else ""),
+                )
+            if str(old_trust or "") != new_trust:
+                self._record_revision(
+                    conn, entity="memories", entity_id=memory_id,
+                    qq_id=str(qq_id or ""), op="update", field="trust_level",
+                    before=str(old_trust or ""), after=new_trust,
+                    reason=review_reason or "证据补录：信任等级随之升级",
+                    actor=actor or ("review:" + reviewer if reviewer else ""),
+                )
             if is_legacy:
                 conn.execute(
                     "INSERT INTO memory_reverification_events "
@@ -10157,7 +12059,7 @@ class Store:
             return True
 
     def rollback_memory_reverification(self, memory_id: int, *, reviewer: str,
-                                       review_reason: str) -> bool:
+                                       review_reason: str, actor: str = "") -> bool:
         """撤回一次受控重验证，使记忆重新退出可信召回。
 
         不删除原始证据或既有审计记录；回退只降低 trust_level，因此可以
@@ -10169,11 +12071,11 @@ class Store:
             return False
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT trust_level,evidence_ids FROM memories "
+                "SELECT trust_level,evidence_ids,qq_id FROM memories "
                 "WHERE id=? AND COALESCE(status,'active')='active'",
                 (memory_id,),
             ).fetchone()
-            if not row or str(row[0] or "") not in {"verified", "manual", "corrected"}:
+            if not row or str(row[0] or "") not in TRUSTED_TRUST_LEVELS:
                 return False
             promotion = conn.execute(
                 "SELECT previous_trust_level,new_trust_level,evidence_ids,evidence_quote "
@@ -10200,17 +12102,49 @@ class Store:
                  str(evidence_ids or row[1] or ""), str(evidence_quote or ""),
                  reviewer, review_reason, created_at),
             )
+            # 重验证本身已进 memory_reverification_events，但它回答的是「复核流程」，
+            # 不是「这条记忆的信任等级变过几次」。流水补上后者，让信任漂移和
+            # 内容变更在同一个时间线上可读。
+            self._record_revision(
+                conn, entity="memories", entity_id=memory_id,
+                qq_id=str(row[2] or ""), op="update", field="trust_level",
+                before=str(promoted_trust or ""), after=str(previous_trust or ""),
+                reason=f"撤回受控重验证：{review_reason}",
+                actor=actor or f"review:{reviewer}",
+            )
             conn.commit()
             return True
 
-    def set_memory_importance(self, memory_id: int, importance: int):
-        """直接设置记忆的 importance（用于去重更新）"""
+    def set_memory_importance(self, memory_id: int, importance: int, *,
+                              actor: str = "unknown", reason: str = "") -> bool:
+        """直接设置记忆的 importance（用于去重更新）。
+
+        2026-10-24：显式设定是决策，写流水。与 `reinforce_memory_by_id`
+        的区别是语义上的——那是召回时的统计漂移（不记），这是有人（或某条
+        业务规则）明确决定了这条记忆的权重（记）。
+        """
+        target = min(10, max(1, importance))
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT qq_id, COALESCE(importance,0) FROM memories WHERE id=?",
+                (memory_id,),
+            ).fetchone()
+            if not row:
+                return False
+            previous = int(row[1] or 0)
+            if previous != target:
+                self._record_revision(
+                    conn, entity="memories", entity_id=memory_id,
+                    qq_id=str(row[0] or ""), op="update", field="importance",
+                    before=previous, after=target,
+                    reason=reason, actor=actor,
+                )
             conn.execute(
                 "UPDATE memories SET importance = ? WHERE id = ?",
-                (min(10, max(1, importance)), memory_id)
+                (target, memory_id)
             )
             conn.commit()
+            return True
 
     def get_memory_by_id(self, memory_id: int) -> dict | None:
         """根据 id 获取单条记忆"""
@@ -10840,11 +12774,16 @@ class Store:
             return int(cur.rowcount)
 
     def _apply_extraction_item(self, conn, job_id: int, qq_id: str,
-                               item: dict, origin: str) -> int:
+                               item: dict, origin: str,
+                               actor: str = "extract:llm") -> int:
         """在调用方事务内写一条自动提取结果；无有效原文证据则拒绝。"""
         type_map = {
             "identity": "fact", "preference": "like", "habit": "habit",
             "event": "event", "relationship": "fact", "note": "said",
+            # 2026-10-25 第 12 轮：open_loop 先按 event 记忆落库（她什么时候说过
+            # 这话），再在下面补一行 open_loops（哪件事没结）。此前这里没有
+            # open_loop，条目会落到默认的 "fact"——悬事被记成事实。
+            "open_loop": "event",
         }
         value = str(item.get("value") or "").strip()[:100]
         confidence = float(item.get("confidence", 0.7) or 0.7)
@@ -10934,11 +12873,17 @@ class Store:
                 int(row[0]) for row in evidence_rows if int(row[0]) not in old_ids
             ]
             combined_csv = ",".join(str(item_id) for item_id in combined)
+            effective_importance = max(importance, int(old_importance))
+            effective_trust = (
+                str(old_trust or "")
+                if str(old_trust or "") in {"manual", "corrected", "verified"}
+                else trust_level
+            )
             conn.execute(
                 "UPDATE memories SET importance=?, evidence_ids=?, source_group_id=?, "
                 "trust_level=CASE WHEN trust_level IN ('manual','corrected','verified') "
                 "THEN trust_level ELSE ? END, event_time=? WHERE id=?",
-                (max(importance, int(old_importance)), combined_csv,
+                (effective_importance, combined_csv,
                  source_group, trust_level, event_time, memory_id),
             )
             conn.executemany(
@@ -10946,6 +12891,23 @@ class Store:
                 "(memory_id,chat_id,relation,created_at) VALUES (?,?,'supports',?)",
                 [(memory_id, row[0], ingested_at) for row in evidence_rows],
             )
+            # 同值合并看起来「没改内容」，但它改了这条记忆的可信依据与权重——
+            # 「这条事实后来多了一条原话支持」是审计要回答的问题之一。
+            self._record_revision(
+                conn, entity="memories", entity_id=memory_id, qq_id=str(qq_id),
+                op="merge", field="evidence_ids",
+                before=",".join(str(item_id) for item_id in old_ids),
+                after=combined_csv,
+                reason=(
+                    f"同值提取合并证据（importance {old_importance}→{effective_importance}"
+                    f"，trust {old_trust}→{effective_trust}）"
+                ),
+                actor=actor,
+            )
+            # 同一件「未结的事」被再次提取到：记忆合并了，open_loops 也要跟上
+            # （否则 source_memory_id 停在旧行、expected_at 不更新）。
+            self._record_open_loop_if_needed(
+                conn, qq_id, item, memory_id, source_group)
             return 1
 
         import hashlib
@@ -10969,6 +12931,10 @@ class Store:
             "VALUES (?,?,'supports',?)",
             [(memory_id, row[0], ingested_at) for row in evidence_rows],
         )
+        # 记忆落好、拿到 memory_id 之后，同一事务里补 open_loops 行——
+        # 两问两答（「哪件事没结」/「她哪句话说的」）要么一起生效，要么一起回滚。
+        self._record_open_loop_if_needed(
+            conn, qq_id, item, memory_id, source_group)
         return 1
 
     def complete_extraction_job(self, job_id: int, origin: str = "extracted") -> dict:
@@ -11058,6 +13024,11 @@ class Store:
                     conn, int(job_id), job_dict["qq_id"], item, origin,
                 )
 
+            # P1（2026-10-24）：本次提取可能带回「名字是X」这类自述——归档成自称。
+            # 放在同一事务里：记忆和它的名字证据要么一起生效，要么一起回滚。
+            # 注意它**不改 nickname**（自述可能是角色扮演，见方法 docstring）。
+            self._promote_self_declared_names(conn, job_dict["qq_id"])
+
             current_row = conn.execute(
                 "SELECT cursor_chat_id FROM extraction_cursors "
                 "WHERE pipeline='memory' AND qq_id=? AND direction=?",
@@ -11141,8 +13112,13 @@ class Store:
     def insert_chat(self, qq_id: str, message: str, group_id: str = "",
                     is_bot: bool = False, timestamp: str = "",
                     raw_message: str = "", segments: str = "",
-                    event_key: str = ""):
+                    event_key: str = "", speaker_qq: str = ""):
         """记录一条聊天。非机器人消息同时更新 people 的 total_chats/last_chat（单事务）。
+
+        `speaker_qq`（2026-10-24）：真正的发言人账号。空 = 按 `is_bot` 推断
+        （历史行为不变）。桌面端「代发到 QQ」的行会同时是 `is_bot=True`（外部
+        事实：QQ 上显示是糖糖的号）+ `speaker_qq=主人`（内部事实：谁打的字），
+        镜像据此显示「你（代发）」而不是冒充糖糖。
 
         2026-08-10 修复计数链路断裂：之前只写 chat_log，从不更新计数——
         事实簇提取阈值、画像合成、里程碑、每日首次互动奖励长期不触发，
@@ -11161,9 +13137,10 @@ class Store:
             with self._connect() as conn:
                 cur = conn.execute(
                     "INSERT INTO chat_log (qq_id, group_id, is_bot_reply, message, timestamp,"
-                    " raw_message, segments, event_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    " raw_message, segments, event_key, speaker_qq) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (qq_id, group_id, 1 if is_bot else 0, message, timestamp,
-                     raw_message, segments, event_key)
+                     raw_message, segments, event_key, str(speaker_qq or ""))
                 )
                 if not is_bot:
                     # 非机器人消息：自增聊天计数 + 更新最后活跃时间（同一事务）
@@ -11259,6 +13236,204 @@ class Store:
                 "SELECT COUNT(*) FROM chat_log WHERE quarantined_at != ''"
             ).fetchone()
             return row[0] if row else 0
+
+    # ═══════════════════════════════════════════════════════════
+    # 会客厅镜像（2026-10-24）：把 chat_log 按会话聚合成可浏览的流
+    #
+    # 只读聚合，不改任何既有写入路径。会话 = chat_log 的一个分组
+    # （私聊按 qq_id、群聊按 group_id），消息按 id 单调递增。
+    # ═══════════════════════════════════════════════════════════
+
+    def list_chat_scopes(self, kind: str, limit: int = 100,
+                         exclude_id: str = "") -> list[dict]:
+        """列出活跃会话摘要（会客厅左侧列表）。
+
+        kind='private' 按 qq_id 分组，'group' 按 group_id 分组。
+        exclude_id：把糖糖自己的 QQ 从私聊列表剔除（否则会冒出「和糖糖的私聊」
+        这个空壳会话——她的自述消息 `is_bot_reply=1` 挂在 bot_qq 名下）。
+
+        排除隔离行（`quarantined_at`）：那是历史批处理把多人消息合并后才有的
+        脏行，不该出现在镜像里冒充某人说过的话。
+        """
+        kind = "group" if kind == "group" else "private"
+        limit = max(1, min(int(limit), 300))
+        col = "group_id" if kind == "group" else "qq_id"
+        where = [f"{col} != ''", "COALESCE(quarantined_at,'') = ''"]
+        if kind == "private":
+            # ⚠ 私聊口径必须限定 `group_id` 为空（2026-10-25 第 17 轮修）。
+            #
+            # 漏了这一条，`private:<qq>` 分组会把该 QQ 在**所有群**里的发言也算进来：
+            # 全库实测 21,435 条真私聊 vs 279,784 条群消息，按 `qq_id` 分组后
+            # 12 个活跃会话里 11 个的 83%~100% 是群消息（其中 4 个 100%）。
+            # 主人报「虽然标着私聊标签，但聊天记录显示的全是群里的内容」就是这个。
+            #
+            # 全项目私聊口径的统一约定是 `COALESCE(group_id,'')=''`——同文件另有
+            # 17 处（read_chat_feed / get_user_recent_messages / _chat_scope /
+            # 活跃统计 / 未读计数…）都写了，只有本函数和 read_chat_feed 漏了。
+            # 教训 #38：同一个物理量的换算点必须全部一致，漏一个就是静默错数据。
+            where.append("COALESCE(group_id,'') = ''")
+        params: list = []
+        if kind == "private" and exclude_id:
+            where.append("qq_id != ?")
+            params.append(str(exclude_id))
+        params.append(limit)
+        sql = (
+            f"SELECT {col} AS sid, MAX(id) AS last_id, COUNT(*) AS cnt "
+            f"FROM chat_log WHERE {' AND '.join(where)} "
+            f"GROUP BY {col} ORDER BY last_id DESC LIMIT ?"
+        )
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            if not rows:
+                return []
+            ids = [int(r[1]) for r in rows]
+            marks = ",".join("?" * len(ids))
+            tail = {
+                int(r[0]): (str(r[1] or ""), str(r[2] or ""))
+                for r in conn.execute(
+                    f"SELECT id, message, timestamp FROM chat_log "
+                    f"WHERE id IN ({marks})", tuple(ids))
+            }
+        out: list[dict] = []
+        for sid, last_id, cnt in rows:
+            message, timestamp = tail.get(int(last_id), ("", ""))
+            out.append({
+                "scope_id": str(sid),
+                "kind": kind,
+                "last_id": int(last_id),
+                "message_count": int(cnt),
+                "last_message": message,
+                "last_time": timestamp,
+            })
+        return out
+
+    def read_chat_feed(self, kind: str, scope_id: str, after_id: int = 0,
+                       limit: int = 100) -> tuple[list[dict], bool]:
+        """读某会话的消息流，并把该条的回合痕迹摘要挂上去。
+
+        返回 (messages, has_more)。`after_id>0` 时只取更新的消息（增量轮询）。
+        `trace` 只有糖糖的回复可能有——靠 `event_key` 关联 `turn_traces`，
+        只带摘要（思维链全文走 `/trace` 单独拉，避免一次传输几十 KB）。
+        """
+        kind = "group" if kind == "group" else "private"
+        limit = max(1, min(int(limit), 500))
+        scope_id = str(scope_id or "")
+        if not scope_id:
+            return [], False
+        try:
+            after = max(0, int(after_id or 0))
+        except (TypeError, ValueError):
+            after = 0
+        col = "c.group_id" if kind == "group" else "c.qq_id"
+        # ⚠ 私聊口径的第二半（2026-10-25 第 17 轮修，与 list_chat_scopes 同源）：
+        # 只按 `c.qq_id=?` 取，会把该 QQ 在**所有群**里的发言都塞进他的「私聊」——
+        # 实测 `private:2959482956` 最近 8 条全是 `群833475319` 的消息。
+        # 私聊 = `group_id` 为空串（全库 21,435 条；糖糖的私聊回复同样挂空串，
+        # 实测 bot 回复 10,505 条在空串 9,669 条在群，所以加这条不会误伤她的回复）。
+        scope_cond = (f"{col} = ?" if kind == "group"
+                      else f"{col} = ? AND COALESCE(c.group_id,'') = ''")
+        select = (
+            "SELECT c.id, c.qq_id, c.is_bot_reply, c.message, c.timestamp, "
+            "       COALESCE(c.event_key,'') AS event_key, "
+            "       COALESCE(p.nickname,'') AS nickname, "
+            "       t.run_id, t.duration_ms, "
+            "       LENGTH(COALESCE(t.reasoning_text,'')) AS reasoning_chars, "
+            "       t.tool_steps_json, COALESCE(d.status,'') AS run_status, "
+            "       COALESCE(c.speaker_qq,'') AS speaker_qq, "
+            "       COALESCE(c.segments,'') AS segments "
+            "FROM chat_log c "
+            "LEFT JOIN people p ON p.qq_id = c.qq_id "
+            # 糖糖回复的 event_key 是 `delivery:<触发消息id>:<气泡序号>`，而
+            # turn_traces 记的是**触发消息**的 `v2:` 键——直接 join 命中 0 条
+            # （2026-10-24 实测：380 条带键的 bot 回复，命中 0）。所以先按
+            # `delivery:` 解析出触发消息 id 找回那一行，再用它的键去关联。
+            # `CAST('299209:1' AS INTEGER)` 在 SQLite 里取前缀数字 = 299209。
+            "LEFT JOIN chat_log trig ON c.event_key LIKE 'delivery:%' "
+            "  AND trig.id = CAST(substr(c.event_key, 10) AS INTEGER) "
+            "LEFT JOIN turn_traces t "
+            "  ON t.event_key = COALESCE(NULLIF(trig.event_key,''), c.event_key) "
+            "LEFT JOIN decision_runs d ON d.run_id = t.run_id "
+        )
+        # 首次（after=0）要的是**最近** limit 条，不是最早的 limit 条——
+        # 镜像打开就该看到最新对话，往上翻才是历史。
+        if after > 0:
+            sql = (select + f"WHERE {scope_cond} AND COALESCE(c.quarantined_at,'') = '' "
+                   "AND c.id > ? ORDER BY c.id ASC LIMIT ?")
+            params = (scope_id, after, limit + 1)
+            reverse = False
+        else:
+            sql = (select + f"WHERE {scope_cond} AND COALESCE(c.quarantined_at,'') = '' "
+                   "ORDER BY c.id DESC LIMIT ?")
+            params = (scope_id, limit + 1)
+            reverse = True
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        if reverse:
+            rows = list(reversed(rows))
+        messages: list[dict] = []
+        for r in rows:
+            is_bot = bool(r[2])
+            steps = []
+            if r[10]:
+                try:
+                    steps = json.loads(r[10]) or []
+                except (ValueError, TypeError):
+                    steps = []
+            run_id = str(r[7] or "")
+            # speaker_qq 非空 = 桌面端代发：QQ 上显示是糖糖的号，但打字的是主人。
+            # 不显示成「糖糖」——那会让镜像撒谎（她本人根本没打过这段字）。
+            if r[12]:
+                speaker = "你（桌面代发）"
+            elif is_bot:
+                speaker = "糖糖"
+            else:
+                speaker = str(r[6] or "") or f"QQ{r[1]}"
+            messages.append({
+                "id": int(r[0]),
+                "role": "tangtang" if is_bot else "user",
+                "speaker": speaker,
+                "content": str(r[3] or ""),
+                "ts": _parse_chat_ts(str(r[4] or "")),
+                "event_key": str(r[5] or ""),
+                # 原始 segments 只给上层（console_api）解析媒体用，序列化前要去掉
+                "segments": str(r[13] or ""),
+                "trace": ({
+                    "run_id": run_id,
+                    "reasoning_chars": int(r[9] or 0),
+                    "tool_count": len(steps) if isinstance(steps, list) else 0,
+                    "duration_ms": int(r[8] or 0),
+                    "status": str(r[11] or "completed"),
+                    "event_key": str(r[5] or ""),
+                } if run_id else None),
+            })
+        # 痕迹归属修正：`DecisionRun.event_key` 是**入站**消息的键（这一轮由谁触发），
+        # 所以 LEFT JOIN 出来的 trace 天然挂在「用户那句」上。但读者要看的是
+        # 「她这条回复是怎么想出来的」——把它挪到紧随其后的糖糖消息上。
+        pending = None
+        for msg in messages:
+            if msg["role"] == "user":
+                if msg["trace"]:
+                    pending = msg["trace"]
+                    msg["trace"] = None
+            elif pending is not None:
+                msg["trace"] = pending
+                pending = None
+        return messages, has_more
+
+    def list_group_names(self) -> dict[str, str]:
+        """group_id → 群名（会客厅左侧显示用）。没有群名的群不返回。"""
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT group_id, group_name FROM group_info "
+                    "WHERE COALESCE(group_name,'') != ''"
+                ).fetchall()
+            return {str(r[0]): str(r[1]) for r in rows}
+        except Exception:
+            return {}
 
     def get_user_recent_messages(self, qq_id: str, limit: int = 20,
                                  group_id: str | None = None) -> list[str]:
@@ -11598,9 +13773,28 @@ class Store:
     # 关系档案
     # ═══════════════════════════════════════
 
-    def set_relationship_summary(self, qq_id: str, summary: str):
+    def set_relationship_summary(self, qq_id: str, summary: str, *,
+                                 actor: str = "unknown", reason: str = "") -> bool:
+        """更新关系摘要。
+
+        2026-10-24：这是就地覆盖——上一版「糖糖怎么看这段关系」会消失，
+        所以写流水保留旧版。
+        """
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(relationship_summary,'') FROM people WHERE qq_id=?",
+                (qq_id,),
+            ).fetchone()
+            previous = str(row[0] or "") if row else ""
+            if previous != str(summary or ""):
+                self._record_revision(
+                    conn, entity="people", entity_id=qq_id, qq_id=str(qq_id),
+                    op="update", field="relationship_summary",
+                    before=previous, after=str(summary or ""),
+                    reason=reason or "关系摘要重写", actor=actor,
+                )
             conn.execute("UPDATE people SET relationship_summary=? WHERE qq_id=?", (summary, qq_id))
+        return True
 
     def get_relationship_summary(self, qq_id: str) -> str:
         with self._connect() as conn:
@@ -11618,8 +13812,13 @@ class Store:
     # 生日管理
     # ═══════════════════════════════════════
 
-    def set_birthday(self, qq_id: str, birthday: str) -> bool:
-        """设置群友生日，格式: MM-DD 或 M月D日"""
+    def set_birthday(self, qq_id: str, birthday: str, *,
+                     actor: str = "unknown", reason: str = "") -> bool:
+        """设置群友生日，格式: MM-DD 或 M月D日
+
+        2026-10-24：生日被写错一次就再也没法对照（比如「10-24」被记成
+        「12-04」）。旧值写流水。
+        """
         import re
         # 统一为 MM-DD
         m = re.match(r'(\d{1,2})月(\d{1,2})日', birthday)
@@ -11637,6 +13836,17 @@ class Store:
         # 确保群友档案存在
         self.get_or_create_person(qq_id)
         with self._connect() as conn:
+            previous_row = conn.execute(
+                "SELECT COALESCE(birthday,'') FROM people WHERE qq_id=?", (qq_id,)
+            ).fetchone()
+            previous = str(previous_row[0] or "") if previous_row else ""
+            if previous != birthday:
+                self._record_revision(
+                    conn, entity="people", entity_id=qq_id, qq_id=str(qq_id),
+                    op="update", field="birthday",
+                    before=previous, after=birthday,
+                    reason=reason or "记录生日", actor=actor,
+                )
             conn.execute(
                 "UPDATE people SET birthday = ? WHERE qq_id = ?",
                 (birthday, qq_id)
@@ -12422,6 +14632,140 @@ class Store:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def list_journal(self, limit: int = 200) -> list[dict]:
+        """糖糖日记——按**写入顺序**倒序（会客厅独白频道的数据源，2026-10-24）。
+
+        与 `get_tangtang_journal` 的区别：那个按 `date DESC`，同一天写了两条时
+        先后不可知；独白是一条时间线，必须用自增 id 定序。
+        """
+        limit = max(1, min(int(limit or 200), 1000))
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, date, entry, mood, created_at FROM tangtang_journal "
+                "ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def search_chat(self, keyword: str, limit: int = 40) -> tuple[list[dict], int]:
+        """在 chat_log **正文**里搜关键词（会客厅搜索，2026-10-24）。
+
+        返回 `(hits, total)`，`total` 是精确命中数——实测 29.8 万行全表
+        `LIKE '%中文%'` 约 50~60ms（WAL，内存热），值得给准确数字，
+        不能拿「取到的条数」冒充总数（那是撒谎）。
+
+        搜的是**内容**不是会话标题。排除隔离行（`quarantined_at`）——那些是
+        历史批处理把多人消息合并出来的脏行，出现在搜索结果里等于伪造发言。
+        """
+        text = str(keyword or "").strip()
+        if not text:
+            return [], 0
+        limit = max(1, min(int(limit or 40), 200))
+        # LIKE 通配符转义：用户搜 "100%" 不能被当成通配
+        esc = (text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"))
+        pattern = f"%{esc}%"
+        base = ("FROM chat_log c "
+                "WHERE c.message LIKE ? ESCAPE '\\' "
+                "  AND COALESCE(c.quarantined_at,'') = ''")
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            total = int(conn.execute(
+                f"SELECT COUNT(*) {base}", (pattern,)).fetchone()[0])
+            rows = conn.execute(
+                "SELECT c.id, c.qq_id, c.group_id, c.is_bot_reply, c.message, "
+                "       c.timestamp, COALESCE(c.speaker_qq,'') AS speaker_qq, "
+                "       COALESCE(p.nickname,'') AS nickname "
+                "FROM chat_log c LEFT JOIN people p ON p.qq_id = c.qq_id "
+                "WHERE c.message LIKE ? ESCAPE '\\' "
+                "  AND COALESCE(c.quarantined_at,'') = '' "
+                "ORDER BY c.id DESC LIMIT ?", (pattern, limit)
+            ).fetchall()
+            return [dict(r) for r in rows], total
+
+    def get_chat_row(self, kind: str, scope_id: str, msg_id: int) -> dict | None:
+        """按 id 取一条 chat_log 行（媒体端点用：要 message + segments 解析附件）。
+
+        必须带 scope 校验——否则 `?scope=private:<那个人>&id=<别人群里的行>`
+        就能把不属于这个会话的内容读出去。
+        """
+        kind = "group" if kind == "group" else "private"
+        col = "group_id" if kind == "group" else "qq_id"
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                f"SELECT id, qq_id, group_id, is_bot_reply, message, timestamp, "
+                f"       COALESCE(segments,'') AS segments "
+                f"FROM chat_log WHERE id = ? AND {col} = ? "
+                f"  AND COALESCE(quarantined_at,'') = '' LIMIT 1",
+                (int(msg_id), str(scope_id or ""))
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_chat_by_event(self, event_key: str) -> dict | None:
+        """按 event_key 取那条 chat_log 行（回合回放用）。
+
+        `turn_traces` / `decision_runs` 都有 event_key，唯独没有 chat_log 的 id；
+        回放要显示「她说的是哪句话」就得从 event_key 反查回来。event_key 是
+        v2 格式的稳定键（`v2:<scope>:<ts>:<qq>:<msg_id>`），一条消息对应一条。
+        """
+        key = str(event_key or "").strip()
+        if not key:
+            return None
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT id, qq_id, group_id, is_bot_reply, message, timestamp, "
+                "       COALESCE(event_key,'') AS event_key, "
+                "       COALESCE(speaker_qq,'') AS speaker_qq "
+                "FROM chat_log WHERE event_key = ? LIMIT 1", (key,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_chat_by_id(self, msg_id: int) -> dict | None:
+        """按 id 取一行（内部用：解析 `delivery:` 键，找回触发这一回合的用户消息）。
+
+        为什么需要：糖糖回复的 event_key 是 `delivery:<触发消息id>:<气泡序号>`，
+        而 `turn_traces` 记的 event_key 是**触发消息**的 `v2:` 键——两者直接
+        join 不上（实测 380 条 bot 回复与 turn_traces 命中 0 条）。
+        """
+        try:
+            mid = int(msg_id)
+        except (TypeError, ValueError):
+            return None
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT id, qq_id, group_id, is_bot_reply, message, timestamp, "
+                "       COALESCE(event_key,'') AS event_key, "
+                "       COALESCE(speaker_qq,'') AS speaker_qq "
+                "FROM chat_log WHERE id = ? LIMIT 1", (mid,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_bot_reply_text_for_trigger(self, trigger_id: int) -> str:
+        """取糖糖针对某条消息发出去的**整段回复**（多气泡按序拼接）。
+
+        `chat_log` 里她的回复 event_key 是 `delivery:<触发消息id>:<气泡序号>`
+        ——同一次回复可能被拆成多条气泡（`[分段]` 协议），所以要按 id 升序拼。
+
+        **为什么需要它**（2026-10-25 第 17 轮）：`find_feedback_for_turn` 的
+        匹配条件是「两边文本有前缀关系」，而 `console_api.turn_replay` 原来把
+        **触发消息**（对方说的那句）当成 `reply_text` 传了进去 —— 对方的原话
+        与糖糖的回复前缀几乎不可能相同，于是 `feedback` 长期匹配不到，
+        回放里「对方怎么反应」和第 7 段永远是空的。改成先取回她真正说的话。
+        """
+        try:
+            tid = int(trigger_id)
+        except (TypeError, ValueError):
+            return ""
+        if tid <= 0:
+            return ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT message FROM chat_log WHERE event_key LIKE ? "
+                "ORDER BY id ASC", (f"delivery:{tid}:%",)).fetchall()
+        return "".join(str(r[0] or "") for r in rows)
+
     def search_similar_memories(self, query_vec, qq_id: str = "", top_k: int = 10) -> list[dict]:
         """语义搜索最相似的记忆——返回 [(memory_dict, similarity_score), ...]"""
         import numpy as np
@@ -12672,12 +15016,28 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def update_cluster_summary(self, cluster_id: int, summary: str, embedding=None):
-        """更新簇的摘要和向量"""
+    def update_cluster_summary(self, cluster_id: int, summary: str, embedding=None,
+                               *, actor: str = "unknown", reason: str = "") -> bool:
+        """更新簇的摘要和向量。
+
+        2026-10-24：摘要是由多条原子事实归纳出的结论，就地覆盖前留旧值。
+        """
         import numpy as np
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         blob = embedding.astype(np.float32).tobytes() if embedding is not None else None
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(subject_qq,''), COALESCE(summary,'') "
+                "FROM fact_clusters WHERE id=?",
+                (cluster_id,),
+            ).fetchone()
+            if row and str(row[1] or "") != str(summary or ""):
+                self._record_revision(
+                    conn, entity="fact_clusters", entity_id=cluster_id,
+                    qq_id=str(row[0] or ""), op="update", field="summary",
+                    before=str(row[1] or ""), after=str(summary or ""),
+                    reason=reason or "簇摘要重写", actor=actor,
+                )
             if blob:
                 conn.execute(
                     "UPDATE fact_clusters SET summary=?, embedding=?, updated_at=? WHERE id=?",
@@ -12689,22 +15049,63 @@ class Store:
                     (summary, now, cluster_id)
                 )
             conn.commit()
+        return True
 
-    def set_cluster_title(self, cluster_id: int, title: str):
-        """更新事实簇的标题"""
+    def set_cluster_title(self, cluster_id: int, title: str, *,
+                          actor: str = "unknown", reason: str = "") -> bool:
+        """更新事实簇的标题（就地覆盖前留旧值）。"""
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(subject_qq,''), COALESCE(title,'') "
+                "FROM fact_clusters WHERE id=?",
+                (cluster_id,),
+            ).fetchone()
+            if row and str(row[1] or "") != str(title or ""):
+                self._record_revision(
+                    conn, entity="fact_clusters", entity_id=cluster_id,
+                    qq_id=str(row[0] or ""), op="update", field="title",
+                    before=str(row[1] or ""), after=str(title or ""),
+                    reason=reason or "簇标题重写", actor=actor,
+                )
             conn.execute(
                 "UPDATE fact_clusters SET title=?, updated_at=? WHERE id=?",
                 (title, datetime.now().strftime("%Y-%m-%d %H:%M"), cluster_id)
             )
             conn.commit()
+        return True
 
-    def delete_cluster(self, cluster_id: int):
-        """删除一个事实簇及其所有原子事实（CASCADE）"""
+    def delete_cluster(self, cluster_id: int, *, actor: str = "unknown",
+                       reason: str = "") -> bool:
+        """删除一个事实簇及其所有原子事实（CASCADE）。
+
+        2026-10-24：删之前把簇行和它的原子事实逐条写进流水。外键 CASCADE 会把
+        原子事实一起带走——不先留底，这些事实就永久消失了。
+        """
         with self._connect() as conn:
             conn.execute("PRAGMA foreign_keys = ON")
+            cluster = self._row_snapshot(conn, "fact_clusters", "id", cluster_id)
+            if not cluster:
+                return False
+            subject = str(cluster.get("subject_qq") or "")
+            self._record_revision(
+                conn, entity="fact_clusters", entity_id=cluster_id, qq_id=subject,
+                op="delete", before=cluster,
+                reason=reason or "删除事实簇", actor=actor,
+            )
+            scanned = conn.execute(
+                "SELECT * FROM cluster_facts WHERE cluster_id=?", (cluster_id,)
+            )
+            columns = [str(item[0]) for item in (scanned.description or [])]
+            for raw in scanned.fetchall():
+                item = dict(zip(columns, raw))
+                self._record_revision(
+                    conn, entity="cluster_facts", entity_id=item.get("id"),
+                    qq_id=subject, op="delete", before=item,
+                    reason=reason or f"随簇 #{cluster_id} 级联删除", actor=actor,
+                )
             conn.execute("DELETE FROM fact_clusters WHERE id=?", (cluster_id,))
             conn.commit()
+            return True
 
     def get_all_fact_cluster_subjects(self) -> list[str]:
         """获取所有已被提取过事实簇的 QQ 号"""
@@ -12964,8 +15365,25 @@ class Store:
             ).fetchall()
         return [(str(row[0]), int(row[1]), int(row[2])) for row in rows]
 
+    #: 计入提取积压时**要排除**的「无内容消息」。
+    #:
+    #: 为什么（2026-10-15 提取积压调查）：图片消息在入口处被替换成
+    #: `（发了张图片）` 占位符（handler.py:3929 / :5084），识图没触发或写回失败时
+    #: 就只剩这个占位。实测积压 517 条里 **229 条（44.3%）是它**（全库基线仅 8.7%，
+    #: 富集 5.1 倍），另有 16 条空串。而提取准入是按「消息行数」数阈值的——
+    #: 一条没有任何内容的占位照样把计数灌满、照样触发一次 LLM 调用，
+    #: 换来一个必然为空的提取结果。`memory.py:840` 早就按「无内容」处理过它，
+    #: 这里把同一口径搬到**计数**上。
+    _NO_CONTENT_SQL = (
+        "TRIM(COALESCE(c.message,'')) <> '' "
+        "AND c.message <> '（发了张图片）'"
+    )
+
     def get_persisted_unprocessed_backlog(self) -> list[tuple[str, int, int]]:
-        """用数据库游标一次查询前向积压，供健康检查避免双连接和进程缓存。"""
+        """用数据库游标一次查询前向积压，供健康检查避免双连接和进程缓存。
+
+        只数**有内容**的消息（见 _NO_CONTENT_SQL）——否则占位符会把积压数字灌虚。
+        """
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT c.qq_id, COUNT(*), MAX(c.id) FROM chat_log c "
@@ -12973,6 +15391,7 @@ class Store:
                 "AND e.direction='forward' AND e.qq_id=c.qq_id "
                 "WHERE COALESCE(c.is_bot_reply,0)=0 "
                 "AND COALESCE(c.quarantined_at,'')='' "
+                f"AND {self._NO_CONTENT_SQL} "
                 "AND c.id>COALESCE(e.cursor_chat_id,0) "
                 "GROUP BY c.qq_id"
             ).fetchall()
@@ -12988,6 +15407,7 @@ class Store:
                 "AND e.direction='forward' AND e.qq_id=c.qq_id "
                 "WHERE COALESCE(c.is_bot_reply,0)=0 "
                 "AND COALESCE(c.quarantined_at,'')='' "
+                f"AND {self._NO_CONTENT_SQL} "
                 "AND c.id>COALESCE(e.cursor_chat_id,0) "
                 "GROUP BY c.qq_id "
                 "ORDER BY COALESCE(MIN(NULLIF(c.timestamp,'')),'9999-12-31'), "
@@ -13046,11 +15466,30 @@ class Store:
 
     def get_people_with_memories_gt(self, min_count: int = 10, empty_notes: bool = True,
                                     limit: int = 10,
-                                    include_dirty: bool = False) -> list[tuple]:
-        """记忆数 > min_count 的用户——画像补全/脏画像重试扫描用。"""
+                                    include_dirty: bool = False,
+                                    legacy_notes: bool = False) -> list[tuple]:
+        """记忆数 > min_count 的用户——画像补全/脏画像重试扫描用。
+
+        legacy_notes=True（2026-10-15 新增）：把「有画像但不可信」的人也算进候选。
+        为什么需要这个开关：注入门 `memory.active_notes` 只放行
+        verified/manual/corrected，而候选扫描原先只认「notes 为空」和「dirty」——
+        于是**非空 legacy 画像两头不靠**：既不会被注入（对，这是防事故的），
+        也永远不会被重合成刷新（不对，这是死角）→ 永久冻结。
+        查库实测（2026-10-15）：people 529 里 notes 非空 118（legacy 68 / verified 50），
+        其中 21 人已有 ≥10 条可信来源记忆（够重合成），16 人一条可信来源都没有
+        （重合成也只会再落回 legacy——但那是 fail-closed 的正确结果）。
+        打开它**不放宽注入门**，只是把「重合成」这条唯一的复活路径接通。
+        """
         notes_cond = "p.notes IS NULL OR p.notes = ''" if empty_notes else "1=1"
         if include_dirty:
             notes_cond = f"({notes_cond}) OR COALESCE(p.notes_dirty,0)=1"
+        if legacy_notes:
+            # COALESCE 把 NULL 也算成 legacy_unverified——与注入门同一口径
+            notes_cond = (
+                f"({notes_cond}) OR (COALESCE(p.notes,'')<>''"
+                f" AND COALESCE(p.notes_trust_level,'legacy_unverified')"
+                f" NOT IN ('verified','manual','corrected'))"
+            )
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT p.qq_id FROM people p"

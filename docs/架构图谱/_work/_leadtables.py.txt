@@ -1,0 +1,18 @@
+
+import sqlite3, sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+c = sqlite3.connect(r"D:\qq-小糖糖\memory.db")
+rows = c.execute("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') ORDER BY name").fetchall()
+print("tables/views:", len(rows))
+for n,t in rows: print(" ", t, n)
+print("---- row counts (top) ----")
+import collections
+cnt=[]
+for n,t in rows:
+    if t!='table': continue
+    try:
+        k=c.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0]
+        cnt.append((k,n))
+    except Exception as e: cnt.append((-1,n))
+for k,n in sorted(cnt, reverse=True)[:25]: print(f"  {k:>10} {n}")
+print("db size MB", round(__import__('os').path.getsize(r"D:\qq-小糖糖\memory.db")/1048576,1))

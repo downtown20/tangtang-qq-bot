@@ -1,0 +1,18 @@
+{
+  "target": "tools/knowledge_status.py",
+  "tests": "tests/test_knowledge_status.py",
+  "mutations": [
+    {
+      "name": "自己 glob 一遍磁盘（把敏感目录算进分母，界面报「索引缺 15 篇」假警报）",
+      "old": "    retrievable = discover_document_files(KNOWLEDGE_DIR)",
+      "new": "    retrievable = sorted(KNOWLEDGE_DIR.rglob(\"*\"))",
+      "expect_fail": "test_sensitive_dir_excluded"
+    },
+    {
+      "name": "needs_sync 恒真（明明齐全也一直提示要重载）",
+      "old": "        \"needs_sync\": bool(missing or orphan),",
+      "new": "        \"needs_sync\": True,",
+      "expect_fail": "test_no_gap_means_no_sync"
+    }
+  ]
+}

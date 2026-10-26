@@ -1,0 +1,18 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_memory_trust_visibility.py",
+  "mutations": [
+    {
+      "name": "G1-画像注入门不认信任等级",
+      "old": "        if person.get(\"notes_trust_level\") not in TRUSTED_TRUST_LEVELS:\n            return \"\"",
+      "new": "        if False:\n            return \"\"",
+      "expect_fail": "test_profile_gate_only_passes_trusted_levels"
+    },
+    {
+      "name": "G2-画像脏标不再拦注入",
+      "old": "        if not person or person.get(\"notes_dirty\"):\n            return \"\"",
+      "new": "        if not person:\n            return \"\"",
+      "expect_fail": "test_dirty_profile_is_counted_as_blocked"
+    }
+  ]
+}

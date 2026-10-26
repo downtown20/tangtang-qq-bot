@@ -70,6 +70,12 @@ def test_endpoint_never_double_slash_or_missing_v1():
 # 例外必须登记并写明理由（本仓惯例）。
 ALLOWLIST: dict[tuple[str, str], str] = {
     ("agent/handler.py", "_endpoint"): "它就是唯一的 URL 拼装点，理由见其 docstring",
+    # 图库打标的云端视觉 API（2026-10-26）：**不是她的对话端点**。
+    # base 是使用者在设置里自己填的通用 OpenAI 兼容地址，不由 `_endpoint()` 管理
+    # （那个函数只服务她的 LLM 客户端与 base_url 解析）。让它走 `_endpoint()`
+    # 反而会把「打标服务商」和「她的脑子」两件事绑死。
+    ("agent/image_tagger.py", "_ask_api"): "图库打标的视觉 API，与她的对话端点无关，base 由使用者配置",
+
 }
 
 ENDPOINT_HINTS = ("/chat/completions", "/messages")

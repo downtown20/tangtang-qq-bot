@@ -1,0 +1,743 @@
+/* ═══════════════════════════════════════════════════════════════
+   回合回放（TurnReplay）—— 右侧抽屉
+
+   点开糖糖的某条回复，看她那一回合经历了什么。
+   视觉沿用 Console.css 的 cs-* 规格：
+     · 0.5px 描边、12/13 小字号、圆角走 --radius-xs/sm/md
+     · 抽屉底 --bg-layer-2 → 区块 --bg-layer-3 → 内衬（思维链/pre/引用）
+       用 --bg-base，深色下自动翻转成「越往里越深」
+     · 颜色全部走 tokens.css，不写死主色（只有 warn 的柔光底色是
+       因为 tokens 里没有 --warn-soft）
+   类名统一 tr- 前缀，避开已有的 cs- / sb- / cmdk-。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 遮罩：半透明 + 轻模糊，盖住会话但不盖标题栏（标题栏是窗口拖拽区） ── */
+.tr-scrim {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  z-index: 500;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--bg-mask);
+  backdrop-filter: blur(2px);
+  animation: tr-scrim-in var(--dur-base) var(--ease);
+}
+
+@keyframes tr-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── 抽屉本体：右侧整高，从右边滑入 ──
+   2026-10-25 二次整改：520 → 960。主人要「像架构图谱一样」展示流程，
+   9 站 + 缩略图谱 + 参数解释在 520px 里会挤成一条竖线，读不出结构。
+   窄屏（<780px）由媒体查询退回 100%。 */
+.tr-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  height: 100%;
+  background: var(--bg-layer-2);
+  border-left: 0.5px solid var(--border-l3);
+  box-shadow: var(--elevation-prominent);
+  overflow: hidden;
+  color: var(--label-primary);
+  animation: tr-slide-in 0.24s var(--ease);
+}
+
+@keyframes tr-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+/* ── 头部：标题「她这一回合」+ 时间/模型/耗时 ── */
+.tr-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px 14px 13px 18px;
+  border-bottom: 0.5px solid var(--border-l2);
+}
+
+.tr-head-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.tr-title {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: 600;
+  line-height: 21px;
+  letter-spacing: -0.1px;
+}
+
+.tr-sub {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: var(--fs-11);
+  line-height: 15px;
+  color: var(--label-caption);
+}
+
+.tr-sub-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-sub-sep {
+  color: var(--border-l4);
+}
+
+.tr-sub-model {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+.tr-sub-dur {
+  font-variant-numeric: tabular-nums;
+  color: var(--label-tertiary);
+}
+
+.tr-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -2px;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tr-close:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+/* ── 内容区：唯一滚动容器 ── */
+.tr-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px 22px;
+}
+
+/* ── 错误条：顶部一行，不弹窗、不挡操作 ── */
+.tr-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--error-soft);
+  border: 0.5px solid rgba(236, 19, 19, 0.25);
+  color: var(--error);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.tr-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* ── 加载态：一行字 + 骨架 ── */
+.tr-loading-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0 0;
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+}
+
+.tr-spin {
+  flex: none;
+  color: var(--label-caption);
+  animation: tr-spin 0.9s linear infinite;
+}
+
+@keyframes tr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tr-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.tr-skel-line {
+  display: block;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--bg-module);
+  animation: tr-pulse 1.4s var(--ease) infinite;
+}
+
+@keyframes tr-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── 可折叠区块 ── */
+.tr-sec {
+  border: 0.5px solid var(--border-l1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-layer-3);
+  overflow: hidden;
+}
+
+.tr-sec + .tr-sec {
+  margin-top: 10px;
+}
+
+.tr-sec.is-open {
+  border-color: var(--border-l2);
+}
+
+.tr-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tr-sec-head:hover {
+  background: var(--bg-hover);
+}
+
+.tr-sec.is-open .tr-sec-head {
+  color: var(--label-primary);
+  padding-bottom: 6px;
+}
+
+.tr-caret {
+  flex: none;
+  color: var(--label-caption);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.tr-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.tr-sec-icon {
+  flex: none;
+  color: var(--label-caption);
+}
+
+.tr-sec-title {
+  flex: none;
+}
+
+.tr-sec-count {
+  flex: none;
+  min-width: 15px;
+  padding: 0 5px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: 999px;
+  background: var(--bg-module);
+  color: var(--label-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.tr-sec-body {
+  padding: 0 10px 10px;
+}
+
+/* ── 徽章 ── */
+.tr-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 6px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* 旧采集口径警告：浅色下用深琥珀保证对比度，深色下用 token 的 warn */
+.tr-badge.is-warn {
+  background: rgba(245, 158, 11, 0.16);
+  border: 0.5px solid rgba(245, 158, 11, 0.42);
+  color: #b45309;
+}
+
+:root[data-theme='dark'] .tr-badge.is-warn {
+  color: var(--warn);
+}
+
+/* 警告下方的解释小字 */
+.tr-warn-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: rgba(245, 158, 11, 0.1);
+  border: 0.5px solid rgba(245, 158, 11, 0.28);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-secondary);
+}
+
+.tr-warn-note svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+/* ── 思维链：等宽、保留换行、独立滚动 ── */
+.tr-reasoning {
+  margin: 0;
+  padding: 9px 10px;
+  max-height: 340px;
+  overflow-y: auto;
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  border: 0.5px solid var(--border-l1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* ── 段内空提示 ── */
+.tr-empty {
+  padding: 4px 0;
+  font-size: var(--fs-11);
+  line-height: 1.65;
+  color: var(--label-caption);
+}
+
+/* ── 工具步骤 ── */
+.tr-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tr-tool {
+  padding: 7px 9px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-2);
+  border: 0.5px solid var(--border-l1);
+}
+
+.tr-tool-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.tr-tool-idx {
+  flex: none;
+  min-width: 13px;
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-tool-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--label-primary);
+  user-select: text;
+}
+
+.tr-tool-ms {
+  flex: none;
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 参数 / 结果的折叠开关 */
+.tr-fold {
+  margin-top: 4px;
+}
+
+.tr-fold-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 1px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tr-fold-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-secondary);
+}
+
+.tr-fold-chars {
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 折叠后的原文：等宽、保留换行、超长内部滚动 */
+.tr-pre {
+  margin: 5px 0 0;
+  padding: 8px 9px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  border: 0.5px solid var(--border-l1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.62;
+  color: var(--label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* ── 决策段键值行（沿用 cs-kv 的排版） ── */
+.tr-kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: var(--fs-12);
+}
+
+.tr-kv span {
+  flex: none;
+  color: var(--label-tertiary);
+}
+
+.tr-kv b {
+  min-width: 0;
+  max-width: 68%;
+  text-align: right;
+  font-weight: 500;
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  word-break: break-all;
+}
+
+/* 工具名徽章行 */
+.tr-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 4px 0 2px;
+}
+
+.tr-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  height: 18px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-2);
+  color: var(--label-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ── 反馈段 ── */
+.tr-fb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0 5px;
+}
+
+.tr-senti {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 8px;
+  height: 18px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  color: var(--label-tertiary);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* 三色语义：绿 / 灰 / 红（浅色下加深文字保证对比度） */
+.tr-senti.is-positive {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.32);
+  color: #15803d;
+}
+
+.tr-senti.is-negative {
+  background: var(--error-soft);
+  border-color: rgba(236, 19, 19, 0.25);
+  color: var(--error);
+}
+
+/* is-neutral / is-unknown 用上面的基础灰即可，不需要额外规则 */
+
+:root[data-theme='dark'] .tr-senti.is-positive {
+  color: var(--success);
+}
+
+.tr-fb-conf {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 对方原话：引用块，左侧一道细线 */
+.tr-quote {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  border: 0.5px solid var(--border-l1);
+  border-left: 2px solid var(--border-l4);
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-secondary);
+  word-break: break-word;
+  user-select: text;
+}
+
+.tr-quote svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--label-caption);
+}
+
+.tr-note {
+  margin-top: 7px;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-caption);
+}
+
+/* ── 整体空态 ── */
+.tr-empty-state {
+  margin: 36px auto 0;
+  max-width: 300px;
+  text-align: center;
+  font-size: var(--fs-12);
+  line-height: 1.7;
+  color: var(--label-caption);
+}
+
+/* ── 动效降级：系统开了「减少动态效果」就不滑入/不转圈 ── */
+@media (prefers-reduced-motion: reduce) {
+  .tr-scrim,
+  .tr-drawer,
+  .tr-spin,
+  .tr-skel-line {
+    animation: none;
+  }
+}
+
+/* ── 窄窗口：抽屉占满剩余宽度 ── */
+@media (max-width: 560px) {
+  .tr-drawer {
+    width: 100%;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   第 47 轮：工具有效性 + 决策理由
+   ───────────────────────────────────────────────────────────────
+   主人原话：「这三个部分的有效信息太少了……我需要更多的参数显示，
+   以及有效的预警，作为一个取代日志的存在。」
+   所以工具段顶部先给一句结论（汇总），每一步再带性质与判定。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 错误徽章（决策失败 / error_code 非空） */
+.tr-badge.is-error {
+  background: var(--error-soft);
+  border: 0.5px solid rgba(236, 19, 19, 0.34);
+  color: #b91c1c;
+}
+
+:root[data-theme='dark'] .tr-badge.is-error {
+  color: #f87171;
+}
+
+/* ── 工具汇总条 ── */
+.tr-toolsum {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-layer-3);
+  border: 0.5px solid var(--border-l2);
+}
+
+.tr-toolsum.is-warn {
+  background: rgba(245, 158, 11, 0.07);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.tr-toolsum-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tr-toolsum-text {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--label-primary);
+}
+
+.tr-toolsum-rate {
+  flex: none;
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-tertiary);
+  cursor: help;
+}
+
+.tr-toolsum-rate.is-hot {
+  color: #b45309;
+  font-weight: 600;
+}
+
+:root[data-theme='dark'] .tr-toolsum-rate.is-hot {
+  color: var(--warn);
+}
+
+/* 她的决策理由：引用块，与「对方怎么反应」的原话引用区分开（左侧强调色） */
+.tr-rationale {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 9px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: var(--accent-soft);
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-secondary);
+}
+
+.tr-rationale svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+/* ── 单步工具：性质 / 判定 / 一句话摘要 ── */
+.tr-tool-kind {
+  flex: none;
+  padding: 0 5px;
+  height: 15px;
+  line-height: 15px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--label-tertiary);
+  background: var(--bg-active);
+}
+
+.tr-tool-verdict {
+  flex: none;
+  font-size: 10px;
+  color: var(--label-tertiary);
+}
+
+.tr-tool-verdict.is-empty {
+  color: #b45309;
+  font-weight: 600;
+}
+
+:root[data-theme='dark'] .tr-tool-verdict.is-empty {
+  color: var(--warn);
+}
+
+.tr-tool.is-empty {
+  border-left: 2px solid rgba(245, 158, 11, 0.6);
+}
+
+.tr-tool-brief {
+  margin: 4px 0 0;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-tertiary);
+  word-break: break-word;
+}
+
+/* 决策段：失败值 / 回合号 */
+.tr-bad {
+  color: #b91c1c;
+}
+
+:root[data-theme='dark'] .tr-bad {
+  color: #f87171;
+}
+
+.tr-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  user-select: text;
+}

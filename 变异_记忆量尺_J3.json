@@ -1,0 +1,25 @@
+{
+  "target": "tools/判据_J3抗干扰.py",
+  "tests": "tests/test_memory_metrics_tools.py",
+  "_about": "第 15 轮：J3 抗干扰检查器是「串忆率 = 0」这个结论的唯一依据。变异必须全红——绿了说明闸门看不出「检查条件被改松 / 方向被改反 / 阈值被改钝」。",
+  "mutations": [
+    {
+      "name": "check1 把 bot 自己的记忆也算成「用户自述」（条件被改松）",
+      "old": "        \"WHERE qq_id != ? AND COALESCE(target_qq,'') != '' AND target_qq != qq_id \"",
+      "new": "        \"WHERE 1 = 1 AND COALESCE(target_qq,'') != '' AND target_qq != qq_id \"",
+      "expect_fail": "test_j3_selftest_passes"
+    },
+    {
+      "name": "check2 幽灵对象判断方向反了（存在的判成幽灵）",
+      "old": "        if not exists:",
+      "new": "        if exists:",
+      "expect_fail": "test_j3_check2_catches_ghost_target"
+    },
+    {
+      "name": "check3 证据共享阈值改钝（>2 才算冲突）",
+      "old": "        \"GROUP BY me.chat_id HAVING c > 1\", (bot_qq,)).fetchall()",
+      "new": "        \"GROUP BY me.chat_id HAVING c > 2\", (bot_qq,)).fetchall()",
+      "expect_fail": "test_j3_check3_catches_shared_evidence"
+    }
+  ]
+}

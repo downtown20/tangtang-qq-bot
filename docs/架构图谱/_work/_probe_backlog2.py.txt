@@ -1,0 +1,33 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+from datetime import datetime
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+rows = c.execute("""
+SELECT c.qq_id, COUNT(*), MIN(NULLIF(c.timestamp,''))
+FROM chat_log c
+LEFT JOIN extraction_cursors e ON e.pipeline='memory' AND e.direction='forward' AND e.qq_id=c.qq_id
+WHERE COALESCE(c.is_bot_reply,0)=0 AND COALESCE(c.quarantined_at,'')=''
+  AND c.id > COALESCE(e.cursor_chat_id,0)
+GROUP BY c.qq_id
+""").fetchall()
+now = datetime.now()
+tot = sum(n for _, n, _ in rows)
+age_hist = {}
+for qq, n, o in rows:
+    try: a = (now - datetime.fromisoformat(o)).days
+    except Exception: a = -1
+    b = '>=21d' if a >= 21 else '>=14d' if a >= 14 else '>=7d' if a >= 7 else '>=1d' if a >= 1 else '<1d'
+    age_hist[b] = age_hist.get(b, 0) + 1
+bf = c.execute("""SELECT COUNT(*) FROM chat_log c
+LEFT JOIN extraction_cursors e ON e.pipeline='memory' AND e.direction='backfill' AND e.qq_id=c.qq_id
+WHERE COALESCE(c.is_bot_reply,0)=0 AND c.id > COALESCE(e.cursor_chat_id,0)""").fetchone()[0]
+jcols = [r[1] for r in c.execute('PRAGMA table_info(tangtang_journal)').fetchall()]
+print(json.dumps({
+ 'backlog_users': len(rows), 'backlog_messages': tot,
+ 'age_buckets': age_hist,
+ 'backfill_lag_messages': bf,
+ 'chat_log_total_user_msgs': c.execute("SELECT COUNT(*) FROM chat_log WHERE COALESCE(is_bot_reply,0)=0").fetchone()[0],
+ 'extraction_jobs_by_status': c.execute("SELECT status, COUNT(*) FROM extraction_jobs GROUP BY 1 ORDER BY 2 DESC").fetchall(),
+ 'episodes': c.execute("SELECT COUNT(*) FROM episodes").fetchone()[0],
+ 'journal_cols': jcols,
+}, ensure_ascii=False, indent=1))

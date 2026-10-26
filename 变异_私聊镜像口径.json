@@ -1,0 +1,24 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_console_mirror_scope.py",
+  "mutations": [
+    {
+      "name": "M1 会话列表去掉私聊限定（回到修复前的状态）",
+      "old": "            where.append(\"COALESCE(group_id,'') = ''\")",
+      "new": "            pass",
+      "expect_fail": "被当成了私聊会话"
+    },
+    {
+      "name": "M2 消息流去掉私聊限定（private 与 group 同口径）",
+      "old": "        scope_cond = (f\"{col} = ?\" if kind == \"group\"\n                      else f\"{col} = ? AND COALESCE(c.group_id,'') = ''\")",
+      "new": "        scope_cond = f\"{col} = ?\"",
+      "expect_fail": "增量拉取混进了群消息"
+    },
+    {
+      "name": "M3 私聊条件写反（只显示群消息）",
+      "old": "            where.append(\"COALESCE(group_id,'') = ''\")",
+      "new": "            where.append(\"COALESCE(group_id,'') != ''\")",
+      "expect_fail": "私聊预览显示的是群消息"
+    }
+  ]
+}

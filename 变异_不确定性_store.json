@@ -1,0 +1,24 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_uncertain_injection.py",
+  "mutations": [
+    {
+      "name": "M9-去掉互斥校验（同时为真静默返回空集）",
+      "old": "        if trusted_only and uncertain_only:\n            raise ValueError(\n                \"trusted_only 与 uncertain_only 互斥：同时为真只会得到空集，\"\n                \"空集会被误读成「没有记忆」\")",
+      "new": "        if False:\n            pass",
+      "expect_fail": "test_both_flags_raise_instead_of_returning_empty"
+    },
+    {
+      "name": "M10-反选写成正选（模糊路取到的是可信记忆）",
+      "old": "                f\"COALESCE(trust_level,'legacy_unverified') NOT IN {_TRUSTED_SQL_IN}\")",
+      "new": "                f\"COALESCE(trust_level,'legacy_unverified') IN {_TRUSTED_SQL_IN}\")",
+      "expect_fail": "test_uncertain_only_is_complement_of_trusted"
+    },
+    {
+      "name": "M11-质量门槛不下推 SQL（取回来再筛，噪声吃满窗口）",
+      "old": "        if min_importance:\n            conditions.append(\"importance >= ?\")\n            params.append(int(min_importance))",
+      "new": "        if False:\n            pass",
+      "expect_fail": "test_quality_gates_are_pushed_into_sql"
+    }
+  ]
+}

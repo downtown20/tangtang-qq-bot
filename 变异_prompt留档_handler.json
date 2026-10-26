@@ -1,0 +1,24 @@
+{
+  "target": "agent/handler.py",
+  "tests": "tests/test_turn_trace_prompt_digest.py",
+  "mutations": [
+    {
+      "name": "M10-_call_deepseek 不再生成 prompt 摘要（退回「只记怎么想、不记看到了什么」）",
+      "old": "        if trace is not None:\n            try:\n                trace[\"prompt\"] = _summarize_prompt(\n                    system_prompt, history_messages, user_message)\n            except Exception:\n                logger.debug(\"回合痕迹：prompt 摘要生成失败\", exc_info=True)",
+      "new": "        if trace is not None:\n            pass",
+      "expect_fail": "test_call_deepseek_writes_prompt_digest"
+    },
+    {
+      "name": "M11-落库时不传摘要（摘要生成了但没写进 turn_traces，等于白做）",
+      "old": "            if digest:\n                kwargs[\"prompt_chars\"] = int(digest.get(\"total_chars\") or 0)\n                kwargs[\"prompt_digest\"] = digest",
+      "new": "            if digest:\n                pass",
+      "expect_fail": "test_passes_digest_and_prompt_chars"
+    },
+    {
+      "name": "M12-段标题正则失效（摘要永远是空的段列表，看不见说明书缺了哪段）",
+      "old": "_PROMPT_SECTION_RE = re.compile(r\"^##\\s+(.+?)\\s*$\", re.M)",
+      "new": "_PROMPT_SECTION_RE = re.compile(r\"^@@NEVER@@\\s+(.+?)\\s*$\", re.M)",
+      "expect_fail": "test_extracts_section_titles"
+    }
+  ]
+}

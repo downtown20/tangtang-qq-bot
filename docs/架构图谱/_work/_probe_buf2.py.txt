@@ -1,0 +1,25 @@
+# -*- coding: utf-8 -*-
+"""只读取证 16：经验缓冲被内部消化占用（autonomy-tracer）"""
+import io, os, sys, json, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+d = json.load(io.open(os.path.join(root, '状态', '.tangtang_self.json'), encoding='utf-8'))
+buf = d.get('experience_buffer') or []
+byday = collections.defaultdict(lambda: collections.Counter())
+for e in buf:
+    day = (e.get('time') or '')[:10]
+    byday[day]['internal_digest' if e.get('type') == 'internal_digest' else 'real'] += 1
+for day in sorted(byday):
+    print(day, dict(byday[day]))
+print('total', len(buf), 'cap-trim threshold', 200, 'trim target', 150)
+print()
+print('--- 内部消化速率（全日志）---')
+import re
+base = os.path.join(root, '日志')
+c = collections.Counter()
+for f in sorted(os.listdir(base)):
+    if not f.startswith('tangtang.log'): continue
+    with io.open(os.path.join(base, f), 'r', encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if '内部消化:' in line: c[f[-10:]] += 1
+for k in sorted(c): print(' ', k, c[k])

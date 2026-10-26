@@ -1,0 +1,54 @@
+{
+  "target": "agent/console_api.py",
+  "tests": "tests/test_console_prompt_ledger.py",
+  "mutations": [
+    {
+      "name": "分母混算：工具定义也算进上下文预算（会出现「超支 54%」假警报）",
+      "old": "        if key in in_ctx:\n            ctx_used += tok",
+      "new": "        ctx_used += tok",
+      "expect_fail": "test_tools_section_is_outside_context_budget"
+    },
+    {
+      "name": "假绿：有摘要没分账时仍判 ok（等于说「这轮没花钱」）",
+      "old": "    partial_ledger = bool(dg) and not any(s[\"in_context\"] for s in sections)",
+      "new": "    partial_ledger = False",
+      "expect_fail": "test_missing_sections_is_not_green"
+    },
+    {
+      "name": "按长度判空手（把 7 次正常的沉默决定全标成异常）",
+      "old": "        is_empty = kind in (\"retrieval\", \"perception\") and bool(\n            _TOOL_EMPTY_RE.search(result))",
+      "new": "        is_empty = len(result.strip()) < 20",
+      "expect_fail": "test_decision_tool_short_result_is_not_empty"
+    },
+    {
+      "name": "预警不带证据（只能「信我」，不能自己核对）",
+      "old": "            \"evidence\": \"backgrounds.blocks[].status=truncated\",",
+      "new": "            \"evidence\": \"\",",
+      "expect_fail": "test_every_warning_has_evidence"
+    },
+    {
+      "name": "无账本判成 error（让人去修一个不存在的问题）",
+      "old": "    if not dg:\n        verdict = \"skip\"",
+      "new": "    if not dg:\n        verdict = \"error\"",
+      "expect_fail": "test_no_digest_is_skip_not_error"
+    },
+    {
+      "name": "预算取 digest 里的历史字段而不是代码常量（常量改了会悄悄失真）",
+      "old": "    ctx_budget = _context_budget_tokens()",
+      "new": "    ctx_budget = int(dg.get(\"token_limit\") or 3000)",
+      "expect_fail": "test_context_budget_comes_from_code_constant"
+    },
+    {
+      "name": "老 trace 下背景注入写「0 块进了 prompt」（同一站下面又列着 7 个标签）",
+      "old": "    if not blocks_measured and labels:\n        in_prompt = len(labels)",
+      "new": "    if False:\n        in_prompt = len(labels)",
+      "expect_fail": "test_inject_phase_counts_labels_when_blocks_missing"
+    },
+    {
+      "name": "记忆召回自相矛盾：items 说「已注入」、did 说「没进 prompt」",
+      "old": "    elif memory_injected:",
+      "new": "    elif False:",
+      "expect_fail": "test_recall_phase_is_not_self_contradictory"
+    }
+  ]
+}

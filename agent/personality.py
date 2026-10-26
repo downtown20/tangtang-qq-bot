@@ -11,7 +11,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 from functools import wraps
-import random
 import logging
 import threading
 
@@ -538,41 +537,36 @@ class PersonalityEngine:
     # ---- 时间感知 ----
 
     def _get_time_context(self) -> str:
-        """根据当前时间返回客观时段（2026-08-17 Codex 对齐）——
-        只报时间，不规定说话风格：状态感受由 mood/existence 单一投影，
-        时间层不再编「饭后懒散/深夜走心」（三个状态真源打架的根因之一）。"""
-        import datetime
-        hour = datetime.datetime.now().hour
+        """把「此刻」客观地告诉她——日期、星期、时分。
 
-        if hour < 6:
-            return "现在是凌晨。"
-        elif hour < 9:
-            return "现在是早上。"
-        elif hour < 12:
-            return "现在是上午。"
-        elif hour < 14:
-            return "现在是中午。"
-        elif hour < 18:
-            return "现在是下午。"
-        elif hour < 22:
-            return "现在是晚上。"
-        else:
-            return "现在是深夜。"
+        2026-08-17 Codex 对齐的约束仍然有效：**只报时间，不规定说话风格**
+        （状态感受由 mood/existence 单一投影，时间层不编「饭后懒散/深夜走心」）。
 
-    # ---- 情绪与风格 ----
+        2026-10-25 自查修正（原缺陷）：旧版只返回「现在是深夜。」——**没有日期、
+        没有星期、没有时分**。后果是她不知道「明天」是哪一天，只能猜。
+        取证：`turn_traces#25`（2026-10-24 16:11，实为周六下午）她的 reasoning
+        里自己写下「时间：周五上午」，星期和时段**两处都错**；而同一场景只要
+        真正调 `get_time` 就完全答对（`turn_traces#59` 答「25号星期日」）——
+        所以缺的不是能力，是**默认上下文里没有锚点**。
 
-    def get_mood_style(self) -> dict:
-        """随机获取当前的心情风格，让回复有变化"""
-        moods = [
-            {"mood": "甜甜的", "style": "今天心情超好，说话甜度+50%！"},
-            {"mood": "慵懒的", "style": "有点困困的，说话慢悠悠，想被人摸摸头。"},
-            {"mood": "黏人的", "style": "特别想找人撒娇贴贴，看到谁都想蹭过去。"},
-            {"mood": "小恶魔", "style": "今天特别想使坏，撩完就跑真刺激嘿嘿。"},
-            {"mood": "温柔的", "style": "心里软软的，想给每个人送温暖。"},
-            {"mood": "好奇宝宝", "style": "对群里的八卦和话题充满兴趣，总想插一句。"},
-            {"mood": "娇羞的", "style": "今天脸皮特别薄，被逗一下就脸红，但还是忍不住想靠近。"},
-        ]
-        return random.choice(moods)
+        给到分钟而不是只给日期：活人看一眼手机就知道几点，「我们聊了多久」
+        「刚才那句是半小时前说的」这类判断都要以它为锚。格式化逻辑与
+        `sensory.get_current_time()` 共用一份（单一口径，不再两套词表）。
+
+        **2026-10-25 第二步修正（关键）**：这一段过去**从来没进过她的上下文**。
+        `context_builder.build()` 在 system prompt 超预算时会 `_truncate_text`
+        从头保留、砍掉尾部，而这段话在 prompt 的 **97.1%** 位置（实测 2908/2994
+        字符；整段 4536 估计 tokens > 预算 3000）——必被砍掉。
+        取证：`turn_traces#67` 她自己的 reasoning 写着「我上一轮说了「10月26号，
+        星期一」，但这个日期可能是我编的？**我没有查时间**」——她连「现在是深夜」
+        都看不到，所以只能调 `get_time` 或者猜。
+        修法：升级成独立段 `## 此刻`，并加入 `context_builder` 的**不可裁白名单**
+        （与「## 必须遵守」同等待遇）。不放到稳定前缀之前，是因为它每分钟都变，
+        放前面会让 DeepSeek 隐式缓存永远 miss（输入成本 ×5）。
+        """
+        import datetime as _dt
+        from .sensory import get_current_time
+        return "## 此刻\n" + get_current_time(_dt.datetime.now())
 
     # ---- 特殊触发词（已禁用，让LLM自己发挥）----
     TRIGGERS = {}

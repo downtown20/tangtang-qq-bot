@@ -1,0 +1,13 @@
+# -*- coding: utf-8 -*-
+import io, os, sys
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+p = os.path.join(root, '日志', 'tangtang.log')
+out = []
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        t = line[11:16]
+        if t >= '13:00':
+            out.append(line.rstrip()[:200])
+print('lines from 13:00:', len(out))
+for l in out: print(l)

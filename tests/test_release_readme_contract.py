@@ -126,8 +126,7 @@ def test_claimed_numbers_match_reality():
     assert floor is not None, "README 徽章应声明测试数下限（形如 tests-1900%2B%20passing）"
     import subprocess
     import sys
-    out = subprocess.run([sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q"],
-                         cwd=BASE, capture_output=True, text=True)
+    out = _run_capture([sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q"])
     m = re.search(r"(\d+) tests? collected", out.stdout)
     assert m, f"无法取到测试数：{out.stdout[-300:]}"
     actual_tests = int(m.group(1))
@@ -238,12 +237,38 @@ def test_adr_count_matches_disk():
 GUARD_GREP = r"read_text\(|ast\.parse"
 
 
-def _collect(files: list[str]) -> int:
-    import subprocess
+def test_run_capture_pins_both_ends_of_the_encoding(monkeypatch):
+    """阳性对照：外部注入 `PYTHONIOENCODING=latin-1`，`_run_capture` 两端仍然可读。
+
+    判据必须让**子进程真的打印非 ASCII**——第一版对照只跑 `--collect-only`（输出纯 ASCII），
+    去掉 env 钉死照样绿 = **假对照**（2026-10-16 变异时当场抓到）。
+    """
+    monkeypatch.setenv("PYTHONIOENCODING", "latin-1")
     import sys
-    out = subprocess.run([sys.executable, "-m", "pytest", *files, "--collect-only", "-q"],
-                         cwd=BASE, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace")
+    out = _run_capture([sys.executable, "-c", 'print("扫描文件数 = 1")'])
+    assert out.returncode == 0, f"子进程连中文都打不出来：{out.stderr[-300:]}"
+    assert "扫描文件数 = 1" in out.stdout, \
+        "中文没读回来 —— 说明两端钉死没生效（环境变量赢了）"
+
+
+def _run_capture(args: list[str]):
+    """跑子进程并把**两端都钉死为 UTF-8**（2026-10-16 T2.9）。
+
+    父进程默认按 locale(GBK) 解子进程输出，而子进程一旦从环境继承了
+    `PYTHONIOENCODING=utf-8`（外部 shell / CI 包装会注入），中文就变成乱码 → 判据假红。
+    另一边若继承 latin-1，子进程自己都打不出中文 → 也红。故显式覆盖 env + encoding。
+    ⚠ 新加子进程调用请一律走这里，不要直接 `text=True`——那会让判据依赖环境变量。
+    """
+    import os
+    import subprocess
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    return subprocess.run(args, cwd=BASE, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env)
+
+
+def _collect(files: list[str]) -> int:
+    import sys
+    out = _run_capture([sys.executable, "-m", "pytest", *files, "--collect-only", "-q"])
     m = re.search(r"(\d+) tests? collected", out.stdout)
     assert m, f"收集失败：{out.stdout[-300:]}"
     return int(m.group(1))

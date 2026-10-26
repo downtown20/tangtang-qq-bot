@@ -1,0 +1,42 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_corrected_priority_injection.py",
+  "mutations": [
+    {
+      "name": "M-CP1-corrected 行不挂 ✏️（退回和 verified 一样的 💭）",
+      "old": "                    elif self.is_corrected(m):\n                        facts.append(f\"  {_protocols.CORRECTED_MARK} {v[:80]}\")\n                        corrected_lines += 1",
+      "new": "                    elif False:\n                        facts.append(f\"  {_protocols.CORRECTED_MARK} {v[:80]}\")\n                        corrected_lines += 1",
+      "expect_fail": "test_corrected_entry_gets_pen_mark"
+    },
+    {
+      "name": "M-CP2-不排序（纠正行留在传入位置，BGE 顺序说了算）",
+      "old": "        if selected:\n            selected = sorted(\n                selected,\n                key=lambda m: TRUST_INJECT_PRIORITY.get(\n                    str(getattr(m, \"trust_level\", \"\") or \"\"), 0),\n                reverse=True,\n            )\n",
+      "new": "        if selected:\n            selected = list(selected)\n",
+      "expect_fail": "test_corrected_line_comes_first"
+    },
+    {
+      "name": "M-CP3-把「优先」做成过滤（只留 corrected，等于系统替 LLM 判真假）",
+      "old": "        if selected:\n            selected = sorted(\n                selected,\n                key=lambda m: TRUST_INJECT_PRIORITY.get(\n                    str(getattr(m, \"trust_level\", \"\") or \"\"), 0),\n                reverse=True,\n            )\n",
+      "new": "        if selected:\n            selected = [m for m in selected\n                        if str(getattr(m, \"trust_level\", \"\") or \"\") == \"corrected\"]\n",
+      "expect_fail": "test_nothing_is_dropped"
+    },
+    {
+      "name": "M-CP4-is_corrected 改看 origin（信任等级被降级的纠正行会冒充纠正档）",
+      "old": "        return str(getattr(entry, \"trust_level\", \"\") or \"\").strip() == \"corrected\"",
+      "new": "        return str(getattr(entry, \"origin\", \"\") or \"\").strip() == \"corrected\"",
+      "expect_fail": "test_is_corrected_does_not_trust_origin"
+    },
+    {
+      "name": "M-CP5-仲裁契约漏注入（标记在但没有「冲突时以它为准」的解释）",
+      "old": "        if corrected_lines:\n            lines.append(f\"  {_protocols.CORRECTED_MEMORY_CONTRACT}\")",
+      "new": "        if False:\n            lines.append(f\"  {_protocols.CORRECTED_MEMORY_CONTRACT}\")",
+      "expect_fail": "test_corrected_entry_gets_pen_mark"
+    },
+    {
+      "name": "M-CP6-标记全挂（verified 也挂 ✏️——阴性对照必须红）",
+      "old": "                    else:\n                        facts.append(f\"  💭 {v[:80]}\")",
+      "new": "                    else:\n                        facts.append(f\"  {_protocols.CORRECTED_MARK} {v[:80]}\")",
+      "expect_fail": "test_verified_entry_has_no_pen_mark"
+    }
+  ]
+}

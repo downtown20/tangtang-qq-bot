@@ -13,6 +13,12 @@
     - 情绪词开头的文件名视为已处理，自动跳过（如 开心_撒娇_abc.png）
     - GIF 用本地多帧感知（可感知情绪变化）
     - 可指定目录：python tools/标注贴图情绪.py stickers_cg
+
+CG 图库（stickers_cg）走**场景轴**（2026-10-16）：
+    提问改成「这张图演的是什么」，答案用 agent/cg_scenes.py 的规范名（后入/骑乘/
+    口交/睡奸/野战…）过一遍归一化，写进 metadata 的 `scene_tags`，并落在文件名
+    首位（`场景_情绪_hash.ext`）。这样 `[贴图:后入]` 与 send_cg_sticker(tag="后入")
+    都能精确命中——标签体系、展示、获取方式与默认图库完全一致。
 """
 import asyncio
 import hashlib
@@ -22,6 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # agent 包可导入
+from agent.cg_scenes import SCENES, canonical, match_tags
 from agent.sticker import STICKER_EMOTION_PREFIXES as EMOTION_PREFIXES
 from agent.sticker import STICKER_EXTS
 from agent.vision_router import get_vision_router
@@ -39,6 +46,13 @@ STICKER_DIRS = [
 ]
 EXTS = STICKER_EXTS
 PROMPT = ("用空格分隔的情绪词描述这张图，如：开心 撒娇。最多3个词，只输出词。")
+# CG 图库用场景轴提问——「这张图演的是什么」，不是「她什么心情」（2026-10-16）
+CG_DIR_NAMES = frozenset({"stickers_cg"})
+CG_PROMPT = (
+    "用空格分隔的场景词描述这张成人向CG，可自由用词，但优先从这些词里选："
+    + " ".join(list(SCENES)[:40])
+    + "。最多4个词，只输出词。"
+)
 
 # 情绪词开头 = 已重命名处理过（跳过）——与原 retag_stickers.py 一致
 
@@ -50,6 +64,15 @@ def load_metadata(meta_file: Path) -> dict:
         except Exception:
             logger.warning(f"  ⚠ metadata.json 损坏，重新构建: {meta_file}")
     return {}
+
+
+def _dedup(words) -> list[str]:
+    """保持顺序去重（标签首位最重要，不能被 set 打乱）。"""
+    out: list[str] = []
+    for word in words:
+        if word and word not in out:
+            out.append(word)
+    return out
 
 
 def save_metadata(meta_file: Path, meta: dict):
@@ -75,6 +98,8 @@ async def label_dir(label: str, sticker_dir: Path) -> tuple[int, int, int]:
         logger.info(f"[{label}] 目录不存在，跳过: {sticker_dir}")
         return 0, 0, 0
 
+    is_cg = sticker_dir.name in CG_DIR_NAMES
+    prompt = CG_PROMPT if is_cg else PROMPT
     meta_file = sticker_dir / "metadata.json"
     meta = load_metadata(meta_file)
     files = []
@@ -85,6 +110,17 @@ async def label_dir(label: str, sticker_dir: Path) -> tuple[int, int, int]:
         if f.suffix.lower() not in EXTS:
             continue
         old = meta.get(f.name, {})
+        if isinstance(old, dict) and old.get("needs_label"):
+            # 抓取器收进来还没读图的图——即使带着来源标签也要走识图（2026-10-16）
+            old = {k: v for k, v in old.items() if k != "needs_label"}
+            meta[f.name] = old
+            files.append(f)
+            continue
+        # CG 图库的完整标签 = 场景轴；只有情绪、没有场景的条目同样要补（老条目兼容）
+        if is_cg and not old.get("scene_tags"):
+            meta.setdefault(f.name, {})
+            files.append(f)
+            continue
         if old.get("emotions"):
             skipped += 1
             continue
@@ -97,13 +133,32 @@ async def label_dir(label: str, sticker_dir: Path) -> tuple[int, int, int]:
             if not inferred:
                 first = next((emo for emo in EMOTION_PREFIXES if f.name.startswith(emo)), "日常")
                 inferred = [first]
-            meta[f.name] = {
+            # 保留 grabber 写入的 scene_tags / md5 / source_site（只补缺失字段）
+            rec = dict(old) if isinstance(old, dict) else {}
+            rec.update({
                 "emotions": inferred,
-                "desc": old.get("desc") or " ".join(inferred),
-                "source": old.get("source", ""),
-            }
+                "desc": rec.get("desc") or " ".join(inferred),
+                "source": rec.get("source", ""),
+            })
+            meta[f.name] = rec
             updated += 1
             continue
+
+        # 抓取器落库的 CG（文件名已含场景标签）同样可从名字恢复，不必识图
+        if is_cg:
+            from_name = match_tags(f.stem.replace("_", " "))
+            if from_name:
+                rec = dict(old) if isinstance(old, dict) else {}
+                scene = [t for t in from_name if t in SCENES]
+                rec.update({
+                    "emotions": [t for t in from_name if t not in SCENES] or ["色色"],
+                    "scene_tags": scene,
+                    "desc": rec.get("desc") or "、".join(from_name),
+                    "source": rec.get("source", ""),
+                })
+                meta[f.name] = rec
+                updated += 1
+                continue
 
         meta.setdefault(f.name, {"emotions": [], "desc": "", "source": ""})
         files.append(f)
@@ -117,15 +172,16 @@ async def label_dir(label: str, sticker_dir: Path) -> tuple[int, int, int]:
         return updated, skipped, failed
 
     router = get_vision_router()
-    logger.info(f"[{label}] 待标注 {total} 张（后端: {router.provider}）")
+    logger.info(f"[{label}] 待标注 {total} 张（后端: {router.provider}，轴: "
+                f"{'场景' if is_cg else '情绪'}）")
     for i, fp in enumerate(files):
         name = fp.name
         logger.info(f"  [{i+1}/{total}] {name}")
         try:
             if is_animated_image(fp):
-                emotions_str = router.describe_gif(fp, PROMPT)
+                emotions_str = router.describe_gif(fp, prompt)
             else:
-                emotions_str = router.describe(fp.read_bytes(), PROMPT)
+                emotions_str = router.describe(fp.read_bytes(), prompt)
         except Exception as e:
             logger.warning(f"  ✗ 识别失败: {e}")
             failed += 1
@@ -148,9 +204,26 @@ async def label_dir(label: str, sticker_dir: Path) -> tuple[int, int, int]:
             emotions = ["日常"]
 
         old_source = meta.get(name, {}).get("source", "")
+        rec = dict(meta.get(name) or {})
+        rec.pop("needs_label", None)          # 读图完成，待标注标记就地消费
+        scene_tags: list[str] = []
+
+        if is_cg:
+            # 场景轴归一化：模型给什么词都过一遍别名表，收敛成规范名（保持顺序去重）
+            scene_tags = _dedup([canonical(word) for word in emotions])
+            if not scene_tags:
+                scene_tags = [canonical(emotions[0])]
+            emotion_tag = next((t for t in scene_tags if t not in SCENES), "色色")
+            # 词表外的新词也保留（标签轴开放），但文件名首位只放规范名，保证可检索
+            rec.update({"scene_tags": scene_tags,
+                        "emotions": [t for t in scene_tags if t not in SCENES] or ["色色"],
+                        "desc": emotions_str, "source": old_source})
+            new_stem = "_".join([scene_tags[0], emotion_tag])
+        else:
+            rec.update({"emotions": emotions, "desc": emotions_str, "source": old_source})
+            new_stem = "_".join(emotions[:2])
 
         # 重命名：情绪_原hash.ext（已处理过的跳过逻辑依赖这个命名）
-        new_stem = "_".join(emotions[:2])
         old_hash = hashlib.md5(name.encode()).hexdigest()[:4]
         new_name = f"{new_stem}_{old_hash}{fp.suffix}"
         new_path = sticker_dir / new_name
@@ -158,10 +231,9 @@ async def label_dir(label: str, sticker_dir: Path) -> tuple[int, int, int]:
             fp.rename(new_path)
 
         meta.pop(name, None)
-        meta[new_name] = {"emotions": emotions, "desc": emotions_str, "source": old_source}
+        meta[new_name] = rec
         updated += 1
-        logger.info(f"  → {emotions} → {new_name}")
-
+        logger.info(f"  → {scene_tags or emotions} → {new_name}")
         if updated % 10 == 0:
             save_metadata(meta_file, meta)
 

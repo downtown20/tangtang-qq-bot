@@ -1,0 +1,65 @@
+/* 主区顶部：只做拖拽与窗口控制（DSH 的标题区很克制） */
+.titlebar {
+  height: var(--titlebar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 10px;
+  background: var(--bg-base);
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.titlebar-spacer {
+  flex: 1;
+}
+
+.titlebar-controls {
+  display: flex;
+  gap: 2px;
+}
+
+.tb-btn {
+  width: 34px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tb-btn:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.tb-btn-close:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+/* 讲解模式开关：带文字，比纯图标按钮宽；开启时用主色高亮（一眼看出当前状态） */
+.tb-explain {
+  width: auto;
+  min-width: 34px;
+  padding: 0 8px;
+  gap: 4px;
+  grid-auto-flow: column;
+  font-size: var(--fs-11);
+  letter-spacing: 0.02em;
+}
+
+.tb-explain.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tb-explain.is-on:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}

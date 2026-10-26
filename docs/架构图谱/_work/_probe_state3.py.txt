@@ -1,0 +1,40 @@
+# -*- coding: utf-8 -*-
+"""只读取证 4：daily_like 落盘 / 心情告警历史 / 缓冲标记（autonomy-tracer）"""
+import io, os, json, sqlite3, sys, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+c = sqlite3.connect(os.path.join(root, 'memory.db'))
+v = c.execute("select value from kv_store where key='state:daily_like_runs'").fetchone()
+d = json.loads(v[0]) if v else {}
+print('daily_like_runs days:', sorted(d.keys()))
+for k in sorted(d.keys())[-3:]:
+    print('  ', k, json.dumps(d[k], ensure_ascii=False)[:300])
+print('--- 心情告警 across logs ---')
+base = os.path.join(root, '日志')
+for f in sorted(os.listdir(base)):
+    if not f.startswith('tangtang.log'): continue
+    n = 0; last = None
+    with io.open(os.path.join(base, f), 'r', encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if '心情告警' in line:
+                n += 1; last = line.rstrip()[:180]
+    if n: print(' ', f, n, last)
+print('--- buffer flags ---')
+s = json.load(io.open(os.path.join(root, '状态', '.tangtang_self.json'), encoding='utf-8'))
+buf = s.get('experience_buffer') or []
+print('total', len(buf))
+print('is_at', sum(1 for e in buf if e.get('is_at')), 'name_mention', sum(1 for e in buf if e.get('is_name_mention')))
+print('with message', sum(1 for e in buf if e.get('message')))
+print('replied', sum(1 for e in buf if e.get('replied')))
+print('--- opinions ---')
+for t in ['opinion_campaigns', 'opinion_responses']:
+    try:
+        print(t, c.execute('select count(*) from ' + t).fetchone())
+    except Exception as e:
+        print(t, 'ERR', type(e).__name__)
+print('--- proactive events ---')
+try:
+    print(c.execute('select status, count(*) from proactive_events group by status').fetchall())
+    print(c.execute('select source, count(*) from proactive_events group by source').fetchall())
+except Exception as e:
+    print('ERR', e)

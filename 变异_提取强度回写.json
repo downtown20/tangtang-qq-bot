@@ -1,0 +1,42 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_memory_reinforcement.py",
+  "mutations": [
+    {
+      "name": "M-RF1-不调 reinforce（回写整条链路空转 = 第 11 轮修之前的原样）",
+      "old": "            try:\n                self.reinforce(qq_id, entries)\n            except Exception as e:",
+      "new": "            try:\n                pass\n            except Exception as e:",
+      "expect_fail": "test_recall_writes_retrieval_strength"
+    },
+    {
+      "name": "M-RF2-无视 reinforce_after 开关（统计/关系全量路径也会被写）",
+      "old": "        if reinforce_after and entries:",
+      "new": "        if entries:",
+      "expect_fail": "test_reinforce_after_false_skips_write"
+    },
+    {
+      "name": "M-RF3-模糊档也强化（用被检索次数伪造证据等级）",
+      "old": "            # 模糊档**绝不**回写提取强度：强化会 importance+1，让「她不确定的事」\n            # 一路爬到可信档——那等于用「被检索次数」伪造证据等级（第 11 轮）。\n            reinforce_after=False,",
+      "new": "            reinforce_after=True,",
+      "expect_fail": "test_uncertain_path_does_not_reinforce"
+    },
+    {
+      "name": "M-RF4-fail-open 改成 fail-closed（写库失败把召回一起带走）",
+      "old": "            except Exception as e:\n                logger.debug(f\"🧠 提取强度回写失败（不影响召回）: {e}\")",
+      "new": "            except Exception as e:\n                raise",
+      "expect_fail": "test_reinforce_failure_does_not_break_recall"
+    },
+    {
+      "name": "M-RF5-reinforce 直接返回（字段永远不写，休眠降权仍是死代码）",
+      "old": "        if not memory_entries:\n            return\n        now = datetime.now()",
+      "new": "        if not memory_entries:\n            return\n        return\n        now = datetime.now()",
+      "expect_fail": "test_recall_writes_retrieval_strength"
+    },
+    {
+      "name": "M-RF6-默认值改回 True（第一版写放大的原样：后台批量召回也会强化）",
+      "old": "               reinforce_after: bool = False) -> list[MemoryEntry]:",
+      "new": "               reinforce_after: bool = True) -> list[MemoryEntry]:",
+      "expect_fail": "test_default_is_off"
+    }
+  ]
+}

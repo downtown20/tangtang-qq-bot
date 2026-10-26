@@ -1,0 +1,29 @@
+# -*- coding: utf-8 -*-
+"""只读取证 10：反思完成日期分布 + 反思游标被测试改写的证据（autonomy-tracer）"""
+import io, os, sys, re, datetime, json
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+base = os.path.join(root, '日志')
+print('--- 反思完成/开始反思整合 出现在哪些日期 ---')
+for f in sorted(os.listdir(base)):
+    if not f.startswith('tangtang.log'): continue
+    hits = []
+    with io.open(os.path.join(base, f), 'r', encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if '反思完成' in line or '开始反思整合' in line:
+                hits.append(line.rstrip()[:150])
+    if hits:
+        print('==', f)
+        for h in hits: print('   ', h)
+print()
+print('--- 反思游标 mtime/内容（第二次采样）---')
+p = os.path.join(root, '状态', '.reflection_state.json')
+print('mtime', datetime.datetime.fromtimestamp(os.path.getmtime(p)))
+print('content', io.open(p, encoding='utf-8').read())
+print('now', datetime.datetime.now())
+print()
+print('--- 体检.py 跟随状态文件清单 ---')
+src = io.open(os.path.join(root, 'tools', '体检.py'), encoding='utf-8').read()
+m = re.search(r'FOLLOW_STATE_FILES\s*=\s*\[(.*?)\]', src, re.S)
+print(m.group(1).strip()[:600] if m else 'not found')
+print('mood_state 出现在体检清单:', '.mood_state.json' in src)

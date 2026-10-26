@@ -1,0 +1,24 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_history_excludes_current_message.py",
+  "mutations": [
+    {
+      "name": "M1-不返回 seq 锚点（调用方拿不到当前那条，排除失效）",
+      "old": "        self.short_term[group_id].append(entry)\n        return seq",
+      "new": "        self.short_term[group_id].append(entry)\n        return 0",
+      "expect_fail": "test_add_to_buffer_returns_seq_anchor"
+    },
+    {
+      "name": "M2-去掉 exclude_seq 过滤（当前消息重新回到历史里）",
+      "old": "        if exclude_seq:\n            selected = [\n                m for m in selected\n                if int(m.get('seq', 0) or 0) != int(exclude_seq)\n            ]",
+      "new": "        if False:\n            selected = [\n                m for m in selected\n                if int(m.get('seq', 0) or 0) != int(exclude_seq)\n            ]",
+      "expect_fail": "test_exclude_seq_drops_current_message_from_private_history"
+    },
+    {
+      "name": "M3-排除变成无条件砍最后一条（缺省调用方被误伤）",
+      "old": "        if exclude_seq:\n            selected = [\n                m for m in selected\n                if int(m.get('seq', 0) or 0) != int(exclude_seq)\n            ]",
+      "new": "        if True:\n            selected = selected[:-1]",
+      "expect_fail": "test_exclude_zero_is_noop"
+    }
+  ]
+}

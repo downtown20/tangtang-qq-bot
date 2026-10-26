@@ -1,0 +1,34 @@
+brain_marker_lines=2910
+--- brain line kinds (top 15) ---
+5  2026-10-15 00:21:45+0800 
+5  2026-10-15 04:03:52+0800 
+5  2026-10-15 06:49:40+0800 
+5  2026-10-15 06:50:14+0800 
+5  2026-10-15 08:41:34+0800 
+5  2026-10-15 09:01:15+0800 
+5  2026-10-15 09:07:21+0800 
+5  2026-10-15 10:07:35+0800 
+5  2026-10-15 11:43:49+0800 
+5  2026-10-15 12:03:07+0800 
+5  2026-10-15 12:22:47+0800 
+4  2026-10-15 00:21:47+0800 
+4  2026-10-15 00:21:50+0800 
+4  2026-10-15 04:03:53+0800 
+4  2026-10-15 06:49:43+0800 
+--- sample brain lines ---
+2026-10-15 00:00:06+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=104.4
+2026-10-15 00:00:21+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=100.9
+2026-10-15 00:00:36+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=101.8
+2026-10-15 00:00:51+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=102.2
+2026-10-15 00:01:06+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=102.3
+2026-10-15 00:01:21+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=100.4
+2026-10-15 00:01:36+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=101.4
+2026-10-15 00:01:52+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=100.7
+2026-10-15 00:01:56+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | WARNING | 🧠 Store SQLite 调用较慢 | op=daily_aggregate.zero_memory_list elapsed_ms=339.0 queue_wait_ms=0.0 limit=16
+2026-10-15 00:02:07+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=103.9
+2026-10-15 00:02:22+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=102.3
+2026-10-15 00:02:37+0800 | boot=00b13b85 cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=99.7
+--- last worker cycles ---
+2026-10-15 12:58:13+0800 | boot=37240c3f cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=120.5
+2026-10-15 12:58:28+0800 | boot=37240c3f cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=118.0
+2026-10-15 12:58:44+0800 | boot=37240c3f cid=- | 糖糖.Autonomy | INFO | 🧠 提取 worker 周期 | open=0 pending=0 leased=0 ready=0 admitted=0 completed=0 requeued=0 idle_reason=no_open elapsed_ms=135.4

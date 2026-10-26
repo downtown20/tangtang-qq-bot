@@ -1,0 +1,12 @@
+{
+  "target": "agent/personality.py",
+  "tests": "tests/test_self_location_context.py",
+  "mutations": [
+    {
+      "name": "M3-时间层退回「只报时段」（她重新变成不知道今天几号，只能猜「周五上午」）",
+      "old": "        import datetime as _dt\n        from .sensory import get_current_time\n        return \"## 此刻\\n\" + get_current_time(_dt.datetime.now())",
+      "new": "        import datetime as _dt\n        _h = _dt.datetime.now().hour\n        return \"## 此刻\\n现在是\" + (\"深夜\" if (_h >= 22 or _h < 6) else \"白天\") + \"。\"",
+      "expect_fail": "test_prompt_time_reuses_single_formatter"
+    }
+  ]
+}

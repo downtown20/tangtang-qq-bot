@@ -1,0 +1,24 @@
+{
+  "target": "agent/protocols.py",
+  "tests": "tests/test_bg_truncate_ruler.py",
+  "mutations": [
+    {
+      "name": "M-TB1-尺子退回 1.8（第 8 轮修之前的原始故障：只留 40% 预算）",
+      "old": "    char_limit = max(40, int(token_limit / 0.72))",
+      "new": "    char_limit = max(40, int(token_limit / 1.8))",
+      "expect_fail": "test_truncated_block_fills_its_budget"
+    },
+    {
+      "name": "M-TB2-尺子反向改小（0.36，裁得太少会超预算）",
+      "old": "    char_limit = max(40, int(token_limit / 0.72))",
+      "new": "    char_limit = max(40, int(token_limit / 0.36))",
+      "expect_fail": "test_truncated_block_fills_its_budget"
+    },
+    {
+      "name": "M-TB3-完全不裁（char_limit 取全文长度）",
+      "old": "    char_limit = max(40, int(token_limit / 0.72))",
+      "new": "    char_limit = max(40, len(text))",
+      "expect_fail": "test_never_harder_than_estimator_allows"
+    }
+  ]
+}

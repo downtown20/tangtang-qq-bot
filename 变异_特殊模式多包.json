@@ -1,0 +1,24 @@
+{
+  "target": "agent/scenario_packs.py",
+  "tests": "tests/test_scenario_packs.py",
+  "mutations": [
+    {
+      "name": "TTL 默认写回 6 小时（主人要的是默认永久）",
+      "old": "    # 0 = 永久。2026-10-26 主人定：「TTL 也在前端改，默认永久」。\n    \"ttl_seconds\": 0,",
+      "new": "    # 0 = 永久。2026-10-26 主人定：「TTL 也在前端改，默认永久」。\n    \"ttl_seconds\": 21600,",
+      "expect_fail": "test_ttl_defaults_to_forever"
+    },
+    {
+      "name": "多包退化成单包（只返回第一个）",
+      "old": "    if packs:\n        return packs",
+      "new": "    if packs:\n        return packs[:1]",
+      "expect_fail": "test_multiple_packs"
+    },
+    {
+      "name": "场景白名单（拦住 psychology 这类「不该配」的场景）",
+      "old": "            scenario = str(item.get(\"scenario\") or \"\").strip()",
+      "new": "            scenario = str(item.get(\"scenario\") or \"\").strip()\n            if scenario == \"psychology\":\n                continue",
+      "expect_fail": "test_scenario_is_free_of_judgement"
+    }
+  ]
+}

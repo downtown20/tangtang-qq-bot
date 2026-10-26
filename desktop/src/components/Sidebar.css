@@ -1,0 +1,557 @@
+/* 侧边栏 — 对齐 DSH：深色、260px、品牌区 + 主操作 + 导航 + 分组列表 + 底部 */
+.sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 6px var(--sidebar-inline-padding, 12px) 8px;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  overflow: hidden;
+}
+
+/* 品牌区 */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 4px 0 2px;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.brand-mark {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.brand-text {
+  font-size: var(--fs-15);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.brand-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--sidebar-text-faint);
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius-xs);
+  padding: 1px 4px;
+}
+
+.sidebar-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text-dim);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sidebar-icon-btn:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
+}
+.sidebar-icon-btn.is-active {
+  background: var(--sidebar-active);
+  color: var(--sidebar-text);
+}
+
+/* 群搜索框 */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 2px 4px 6px;
+  padding: 0 6px 0 9px;
+  border-radius: var(--radius-sm);
+  background: #ffffff10;
+  color: var(--sidebar-text-faint);
+}
+
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: var(--fs-12);
+  color: var(--sidebar-text);
+}
+
+.sidebar-search input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.sidebar-search input::placeholder {
+  color: var(--sidebar-text-faint);
+}
+
+/* 主操作（对应 DSH「新会话」） */
+.sidebar-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  margin-top: 4px;
+  border-radius: var(--radius-md);
+  background: var(--sidebar-bg-elevated);
+  color: var(--sidebar-text);
+  font-size: var(--fs-14);
+  font-weight: 500;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sidebar-primary:hover {
+  background: #303034;
+}
+:root[data-theme="dark"] .sidebar-primary:hover {
+  background: #2c2c30;
+}
+.sidebar-primary.is-running {
+  color: #4ade80;
+}
+
+/* 导航 */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 10px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text-dim);
+  font-size: var(--fs-14);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.nav-item:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
+}
+
+.nav-item.is-active {
+  background: var(--sidebar-active);
+  color: var(--sidebar-text);
+}
+
+/* 分组（工作区 → 群聊） */
+.sidebar-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 6px 0 10px;
+}
+
+.section-title {
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--sidebar-text-faint);
+}
+
+.section-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.sidebar-section:hover .section-actions {
+  opacity: 1;
+}
+
+.section-actions .sidebar-icon-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.sidebar-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   会话源列表（2026-10-24 侧栏重构：原来的「群聊」列表换成了
+   会客厅的会话源——本地 / QQ 私聊 / QQ 群聊。群列表整个删掉了，
+   因为它和这里重复，而且点它没有任何用处。
+   ═══════════════════════════════════════════════════════════ */
+
+.sb-group {
+  margin-bottom: 10px;
+}
+.sb-group:last-child {
+  margin-bottom: 2px;
+}
+
+/* 组标题：11px 灰 + 数量 */
+.sb-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--sidebar-text-faint);
+}
+.sb-group-n {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 新建本地会话：虚线框，DSH 式次级动作 */
+.sb-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: calc(100% - 8px);
+  height: 28px;
+  margin: 2px 4px 6px;
+  border: 1px dashed var(--sidebar-border);
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text-dim);
+  font-size: var(--fs-12);
+  transition: background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sb-new:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  border-color: var(--sidebar-text-faint);
+  color: var(--sidebar-text);
+}
+.sb-new:disabled {
+  opacity: 0.55;
+}
+
+/* 会话项：两行（标题行 + 预览行），当前项浅底 + 左侧 2px 竖条 */
+.sb-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 10px 7px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text-dim);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sb-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sb-item:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
+}
+.sb-item.is-active {
+  background: var(--sidebar-active);
+  color: var(--sidebar-text);
+}
+.sb-item.is-active::before {
+  background: var(--accent);
+}
+
+.sb-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 来源徽标：本地 / 私聊 / 群 */
+.sb-kind {
+  flex: none;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 3px;
+  color: var(--sidebar-text-faint);
+}
+
+.sb-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+}
+
+.sb-time {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--sidebar-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sb-sub {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--sidebar-text-faint);
+}
+
+/* 未读点（复用会客厅的 localStorage 已读位置） */
+.sb-unread {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(90, 160, 255, 0.16);
+}
+
+/* 置顶标记：标题前的小 Pin（只用图标，不再额外加 📌——两个都加太吵） */
+.sb-pin {
+  flex: none;
+  color: var(--sidebar-text-dim);
+}
+
+/* ── 搜索命中列表（2026-10-24：搜消息正文，不是搜会话标题）──────────
+   每条两行：会话名 + 类型徽标 + 相对时间 / 命中片段（关键词高亮）。
+   命中面板会替换整个会话列表区域，所以这些类不依赖 .sb-item。 */
+.sb-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text-dim);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sb-hit:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
+}
+
+.sb-hit-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sb-hit-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+}
+
+.sb-hit-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 糖糖自己说的话——轻量前缀，不抢视觉 */
+.sb-hit-who {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--sidebar-text-faint);
+}
+
+/* 命中片段：最多两行，关键词高亮不会被单行省略号裁掉 */
+.sb-hit-snippet {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  color: var(--sidebar-text-faint);
+  word-break: break-word;
+}
+
+/* 关键词高亮：底色用 accent-soft、文字用侧栏正文色——侧栏两套主题都是深色，
+   这样浅色主题下也不会出现一块看不清的深蓝字。 */
+.sb-hit-mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: var(--sidebar-text);
+  font-weight: 600;
+}
+
+/* 搜索状态行（转圈 / 没搜到） */
+.sb-search-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: var(--fs-12);
+  color: var(--sidebar-text-faint);
+}
+
+/* 网络搜索进行中：状态条压在本地过滤结果上方（先给即时结果，不让面板空着） */
+.sb-search-inline {
+  padding: 2px 10px 4px;
+  font-size: var(--fs-11);
+}
+
+/* 「共 N 条，只显示前 M 条」 */
+.sb-search-more {
+  padding: 6px 10px 10px;
+  font-size: var(--fs-11);
+  color: var(--sidebar-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-empty {
+  padding: 6px 10px;
+  font-size: var(--fs-12);
+  color: var(--sidebar-text-faint);
+}
+
+.sidebar-error {
+  margin: 6px 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(242, 90, 90, 0.16);
+  color: #ff9c9c;
+  font-size: var(--fs-11);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* 底部 */
+.sidebar-foot {
+  border-top: 1px solid var(--sidebar-border);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+
+.foot-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-12);
+  color: var(--sidebar-text-dim);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+.foot-row:hover {
+  background: var(--sidebar-hover);
+}
+
+.foot-model {
+  margin-left: auto;
+  max-width: 120px;
+  font-size: var(--fs-11);
+  color: var(--sidebar-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.status-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+.status-dot.offline {
+  background: var(--sidebar-text-faint);
+}
+
+/* 收起态：56px 图标轨（DSH collapsedWidth） */
+.sidebar.is-collapsed {
+  width: var(--sidebar-collapsed-w);
+  padding: 6px 8px 8px;
+}
+
+.sidebar.is-collapsed .brand-text,
+.sidebar.is-collapsed .brand-tag,
+.sidebar.is-collapsed .sidebar-primary span,
+.sidebar.is-collapsed .nav-item span,
+.sidebar.is-collapsed .sidebar-section,
+.sidebar.is-collapsed .foot-model,
+.sidebar.is-collapsed .sidebar-error,
+.sidebar.is-collapsed .sidebar-head .sidebar-icon-btn {
+  display: none;
+}
+
+.sidebar.is-collapsed .sidebar-head {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.is-collapsed .sidebar-primary,
+.sidebar.is-collapsed .nav-item,
+.sidebar.is-collapsed .foot-row {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.is-collapsed .sidebar-primary {
+  width: 40px;
+  margin: 4px auto 0;
+}
+

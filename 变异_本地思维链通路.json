@@ -1,0 +1,18 @@
+{
+  "target": "agent/console_api.py",
+  "tests": "tests/test_console_trace_local.py",
+  "mutations": [
+    {
+      "name": "M1 历史消息也硬造 trace（去掉 event_key 守卫）",
+      "old": "    event_key = str(meta.get(\"event_key\") or \"\")\n    if not event_key:\n        return None",
+      "new": "    event_key = str(meta.get(\"event_key\") or \"\")",
+      "expect_fail": "没有 event_key"
+    },
+    {
+      "name": "M2 feed 的 desktop 分支不投影 trace（回到修复前）",
+      "old": "                trace = _local_trace_from_meta(m.get(\"meta\"))",
+      "new": "                trace = None",
+      "expect_fail": "增量轮询丢了 trace"
+    }
+  ]
+}

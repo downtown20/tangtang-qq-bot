@@ -1,0 +1,10 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+print(json.dumps({
+ 'sample_index_rows': q("SELECT chat_id, qq_id, substr(clean_text,1,20), timestamp FROM chat_index ORDER BY chat_id DESC LIMIT 3"),
+ 'index_ts_nonempty': q("SELECT COUNT(*) FROM chat_index WHERE COALESCE(timestamp,'')<>''")[0][0],
+ 'index_ts_min_max': q("SELECT MIN(timestamp), MAX(timestamp) FROM chat_index WHERE COALESCE(timestamp,'')<>''"),
+ 'index_count_total': q("SELECT COUNT(*) FROM chat_index")[0][0],
+}, ensure_ascii=False, indent=1))

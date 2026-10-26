@@ -1,0 +1,18 @@
+{
+  "target": "agent/prompt_overrides.py",
+  "tests": "tests/test_prompt_overrides.py",
+  "mutations": [
+    {
+      "name": "不按分组排序（分组标题和条目顺序对不上，界面上一会儿「怎么回」一会儿「怎么理解」）",
+      "old": "    rows.sort(key=lambda r: order.get(r[\"group\"], len(order)))",
+      "new": "    pass",
+      "expect_fail": "test_list_overrides_is_sorted_by_group"
+    },
+    {
+      "name": "协议元数据漏一条（那条协议在界面上没有分组、没有作用说明，等于文档缺页）",
+      "old": "    \"grounding_no_topic\": (\"memory\", \"没有合适的往事可接，就聊现在\"),\n",
+      "new": "",
+      "expect_fail": "test_every_overridable_entry_has_meta"
+    }
+  ]
+}

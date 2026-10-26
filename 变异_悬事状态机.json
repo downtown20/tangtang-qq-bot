@@ -1,0 +1,19 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_open_loops.py",
+  "_about": "open_loops 状态机的两条安全闸门：跨人越权、终态不可逆。这两条一旦变绿，就是「甲的悬事被乙收尾」或「收了尾的事被重新提」——骚扰+串人。",
+  "mutations": [
+    {
+      "name": "跨人越权不再拒绝",
+      "old": "            if str(row[0] or \"\") != qq:\n                return False  # 跨人",
+      "new": "            if False:\n                return False  # 跨人",
+      "expect_fail": "test_cross_person_is_rejected"
+    },
+    {
+      "name": "终态可以被重新改写",
+      "old": "            if str(row[1] or \"\") in self._OPEN_LOOP_TERMINAL:\n                return False  # 终态不可逆",
+      "new": "            if False:\n                return False  # 终态不可逆",
+      "expect_fail": "test_terminal_state_is_irreversible"
+    }
+  ]
+}

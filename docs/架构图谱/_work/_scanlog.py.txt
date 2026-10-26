@@ -1,0 +1,25 @@
+
+import re, collections, os, glob, io, sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+root = r"D:\qq-小糖糖\日志"
+files = sorted(glob.glob(os.path.join(root, "*")))
+print("files:", [(os.path.basename(f), os.path.getsize(f)) for f in files])
+pat = re.compile(r"\| (ERROR|CRITICAL|WARNING) \|")
+cnt = collections.Counter()
+first = {}
+for p in files:
+    with open(p, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = pat.search(line)
+            if not m: continue
+            lvl = m.group(1)
+            msg = line.split("| ", 3)[-1].strip()
+            key = (lvl, re.sub(r"\d+", "N", msg)[:90])
+            cnt[key] += 1
+            first.setdefault(key, (os.path.basename(p), line.strip()[:230]))
+rows = sorted(cnt.items(), key=lambda x: -x[1])
+out = []
+for k, v in rows[:45]:
+    f, s = first[k]
+    out.append(f"{v:6d} [{k[0]}] {k[1]}\n        @{f}: {s[:200]}")
+print("\n".join(out))

@@ -1,0 +1,373 @@
+/* ═══════════════════════════════════════════════════════════════
+   高级调参（第 49 轮 B4）
+   ───────────────────────────────────────────────────────────────
+   布局：左侧 200px 分组导航 + 右侧参数列表（每项一行）。
+
+   行的信息层级按「用户要看什么」排：
+     标签 + 常量名（他在代码里/群里听到的是哪个名字）
+     → 作用（这是干什么的）
+     → 默认 / 范围 / 文件:行（改之前要的参照）
+     → 输入框（在最右，和上面的值同一视觉轴）
+   ═══════════════════════════════════════════════════════════════ */
+
+.tuning-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-base);
+}
+
+/* ── 顶栏 ── */
+.tuning-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px 12px;
+}
+
+.tuning-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--label-secondary);
+  min-width: 0;
+}
+
+.tuning-title h1 {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.tuning-count {
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「未保存」必须和「已保存」在视觉上分开——同一屏两个数字说同一件事
+   却不同值，就是自相矛盾（教训 #51）。 */
+.tuning-count-pending {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.tuning-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.tuning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tuning-toggle input {
+  accent-color: var(--brand-primary);
+  cursor: pointer;
+}
+
+/* ── 生效提示（常驻，不许藏） ── */
+.tuning-note {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 20px 12px;
+  padding: 8px 10px;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-secondary);
+  background: var(--bg-layer-3);
+  border: 0.5px solid var(--border-l2);
+  border-radius: 6px;
+}
+
+.tuning-note svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.tuning-note code {
+  padding: 0 3px;
+  font-size: 0.94em;
+  color: var(--label-primary);
+  background: var(--bg-layer-4);
+  border-radius: 3px;
+}
+
+/* ── 保存结果 ── */
+.tuning-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 20px 12px;
+  padding: 8px 10px;
+  font-size: var(--fs-11);
+  border-radius: 6px;
+  line-height: 1.5;
+}
+
+.tuning-notice.ok {
+  color: var(--success);
+  background: var(--success-soft);
+  border: 0.5px solid var(--success);
+}
+
+.tuning-notice.warn {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 0.5px solid var(--warning);
+}
+
+.tuning-notice.error {
+  color: var(--error);
+  background: var(--error-soft);
+  border: 0.5px solid var(--error);
+}
+
+/* ── 主体 ── */
+.tuning-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border-top: 1px solid var(--border-l2);
+}
+
+/* 左：分组导航 */
+.tuning-groups {
+  flex: none;
+  width: 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 8px 24px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-l2);
+  background: var(--bg-layer-3);
+}
+
+.tuning-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tuning-group:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.tuning-group.active {
+  background: var(--bg-active);
+  color: var(--label-primary);
+  font-weight: 600;
+}
+
+.tuning-group-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning-group-meta em {
+  padding: 0 5px;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--bg-base);
+  background: var(--brand-primary);
+  border-radius: 999px;
+}
+
+/* 右：参数列表 */
+.tuning-list {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 20px 40px;
+  overflow-y: auto;
+}
+
+.tuning-hint {
+  margin: 24px 0;
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+  text-align: center;
+}
+
+.tuning-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 12px 12px 14px;
+  border-bottom: 0.5px solid var(--border-l1);
+  border-left: 2px solid transparent;
+}
+
+.tuning-row:hover {
+  background: var(--bg-hover);
+}
+
+/* 改过的行：左侧竖条 —— 一眼看见「我动过这些」 */
+.tuning-row.dirty {
+  border-left-color: var(--brand-primary);
+  background: var(--bg-layer-3);
+}
+
+.tuning-row.bad {
+  border-left-color: var(--error);
+  background: var(--error-soft);
+}
+
+.tuning-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.tuning-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tuning-label {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.tuning-const {
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--label-tertiary);
+  background: var(--bg-layer-4);
+  border-radius: 3px;
+}
+
+.tuning-desc {
+  margin: 5px 0 0;
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-secondary);
+}
+
+.tuning-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0 0;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning-meta b {
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.tuning-meta .sep {
+  opacity: 0.5;
+}
+
+.tuning-source {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--label-tertiary);
+}
+
+.tuning-err {
+  margin: 6px 0 0;
+  font-size: var(--fs-11);
+  color: var(--error);
+}
+
+.tuning-row-input {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.tuning-row-input input {
+  width: 104px;
+  padding: 6px 8px;
+  font-size: var(--fs-12);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--label-primary);
+  background: var(--bg-layer-4);
+  border: 0.5px solid var(--border-l3);
+  border-radius: 5px;
+}
+
+.tuning-row-input input:focus {
+  outline: none;
+  border-color: var(--brand-primary);
+}
+
+.tuning-row-input input.invalid {
+  color: var(--error);
+  border-color: var(--error);
+  background: var(--error-soft);
+}
+
+.tuning-row-input .btn-ghost.tiny {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 28px;
+  padding: 0;
+  border-radius: 5px;
+}
+
+/* ── 空 / 错 ── */
+.tuning-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: auto;
+  color: var(--label-tertiary);
+}
+
+.tuning-empty p {
+  margin: 0;
+  font-size: var(--fs-12);
+  max-width: 420px;
+  text-align: center;
+  line-height: 1.6;
+}

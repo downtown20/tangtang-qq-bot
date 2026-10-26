@@ -1,0 +1,79 @@
+/* 右键菜单 — 复用 DSH 浮层菜单的尺寸（model_select_css 的 .menu / .cell） */
+.ctx-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 190px;
+  max-width: 320px;
+  padding: 4px;
+  background: var(--menu-bg);
+  -webkit-backdrop-filter: var(--menu-blur);
+  backdrop-filter: var(--menu-blur);
+  border: 0.5px solid var(--border-l3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-prominent);
+  animation: ctx-in 0.1s var(--ease);
+}
+
+@keyframes ctx-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+.ctx-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-13);
+  line-height: 20px;
+  color: var(--label-primary);
+  text-align: left;
+}
+
+.ctx-cell:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ctx-cell:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ctx-cell.is-danger {
+  color: var(--error);
+}
+
+.ctx-cell.is-danger:hover:not(:disabled) {
+  background: var(--error-soft);
+}
+
+.ctx-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--menu-icon);
+}
+
+.ctx-cell.is-danger .ctx-icon {
+  color: inherit;
+}
+
+.ctx-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-l2);
+}

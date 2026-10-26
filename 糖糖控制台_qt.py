@@ -2605,7 +2605,11 @@ class TangTangQtConsole(QMainWindow):
         # 分组结构
         groups = [
             ("核心配置", ["bot", "napcat", "groups", "blacklist", "memory"]),
-            ("AI 引擎",  ["llm", "vision", "web_search"]),
+            # ⚠ llm_seductive 必须留在这里：_add_section 只负责把页建出来，
+            # 导航按钮是**按 groups 生成**的（见下方 for group_title, keys in groups），
+            # 不进 groups 就等于建了一个永远切不到的死页（2026-10-15 文档核查发现：
+            # 2026-09-22 为修教训 #4 补了这个 section，却漏了登记 → 空转近一个月）。
+            ("AI 引擎",  ["llm", "llm_seductive", "vision", "web_search"]),
             ("人格行为", ["personality", "behavior", "mood"]),
             ("扩展功能", ["tasks", "image_share", "voice", "daily_report", "daily_like", "image_gen"]),
             ("外观定制", ["appearance"]),
@@ -2614,6 +2618,7 @@ class TangTangQtConsole(QMainWindow):
         labels = {
             "bot": "机器人", "napcat": "SnowLuma", "groups": "群管理",
             "blacklist": "黑名单", "memory": "记忆", "llm": "AI模型",
+            "llm_seductive": "亲密模式模型",
             "vision": "识图", "web_search": "搜索",
             "personality": "人格", "behavior": "行为", "mood": "情绪",
             "image_share": "图片分享", "voice": "语音",

@@ -1,0 +1,32 @@
+# -*- coding: utf-8 -*-
+"""只读取证 6：boot 时间线 + pytest 缓存 mtime + 各状态文件 mtime 对照（autonomy-tracer）"""
+import io, os, sys, datetime, json, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+p = os.path.join(root, '日志', 'tangtang.log')
+boots = collections.OrderedDict()
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        if 'boot=' in line:
+            b = line.split('boot=')[1][:8]
+            if b not in boots: boots[b] = line[:19]
+            boots[b + '_last'] = line[:19]
+print('boots today:')
+for k, v in boots.items():
+    if not k.endswith('_last'):
+        print('  ', k, v, '->', boots.get(k + '_last'))
+print()
+print('pytest cache mtimes:')
+for rel in ['.pytest_cache', '.pytest_cache/v/cache/lastfailed', '.pytest_cache/v/cache/nodeids']:
+    fp = os.path.join(root, rel)
+    if os.path.exists(fp):
+        print('  ', rel, datetime.datetime.fromtimestamp(os.path.getmtime(fp)))
+print()
+print('state file mtimes:')
+sd = os.path.join(root, '状态')
+for f in sorted(os.listdir(sd)):
+    print('  ', f, datetime.datetime.fromtimestamp(os.path.getmtime(os.path.join(sd, f))))
+print()
+lf = os.path.join(root, '.pytest_cache/v/cache/lastfailed')
+if os.path.exists(lf):
+    print('lastfailed:', io.open(lf, encoding='utf-8').read()[:300])

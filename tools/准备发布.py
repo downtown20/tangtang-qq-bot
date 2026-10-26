@@ -36,6 +36,15 @@ IGNORE_ALWAYS = shutil.ignore_patterns(
 
 COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg", "knowledge"]
 # knowledge/ 整目录拷时额外剔除（2026-09-05 主人裁决 v2）：
+#
+# ⚠ 2026-10-23 主人定案**取代**上面那条「只发软色情 2 篇」：
+#   **发蒸馏稿，不发原文。** 判据改用**前缀**，不再按文件名猜：
+#     · 色色参考/<数字>-xxx/ = 蒸馏槽位 ⇒ 发
+#     · 色色参考/_原文/      = 蒸馏溯源归档 ⇒ 不发（含 蒸馏说明.md）
+#   前缀语义与 agent/intimate_reference.py 的 ARCHIVE_PREFIX_BLOCK 是同一条（教训 #34：
+#   代码里已写明的语义不要在发布侧重新猜）。取证见 记录/T69-发布包剔除原文.md：
+#   旧名单按三个文件名写死，而 T47/T2.14 改结构 + 蒸馏改名后那三个名字只存在于 _原文/ 里，
+#   槽位侧新名字一个都不在名单里 ⇒ 旧规则实测会带出 11 篇，「官能技法不进公开」早已名存实亡。
 # 色色参考只发软色情 2 篇（丛雨对话范例/恋爱感氛围），BDSM/官能技法与直露写作指南不进公开；
 # learned_ 自动学习残留不进。
 #
@@ -56,6 +65,9 @@ COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg",
 #
 # 这里仍然忽略：开发机那份是旧的，拷过来就是 ①。
 KNOWLEDGE_IGNORE = shutil.ignore_patterns(
+    # 下划线前缀 = 蒸馏溯源归档（色色参考/_原文/ 整目录，含蒸馏说明.md）。
+    # 闸门：tests/test_release_knowledge_scope.py（含阳性对照 + 不误伤的反向闸门）
+    "_*",
     "技法摘录_中文百合BDSM.md", "技法摘录_日系官能.md", "色色_写作指南.md",
     "learned_*", "_order.json",
     # 末尾带 `*`：一并挡住 WAL 模式的 -wal / -shm 边车——现场重建后也会再清一次
@@ -245,7 +257,8 @@ SCAFFOLD_NOTES = {
     "不装语音也不影响聊天——糖糖自动以文字回复。\n",
     "songs/摆放说明.txt": "🎵 预录歌曲（已随安装包自带，装好就能点歌）\n\n"
     "本目录的音频是糖糖唱好的成品——点歌时直接播放，不是实时生成，也不需要额外模型。\n\n"
-    "想自己加歌：把音频命名为 歌名.wav 放 audio/，同名歌名.txt 放本目录写歌词（分段落参考现有 txt）。\n",
+    "想自己加歌：把音频命名为 歌名.wav 放进 audio/（糖糖声线）；原声放 covers/separated/歌名_FINAL.wav。\n"
+    "（2026-10-15 起不再读歌词：本目录不用放 歌名.txt。）\n",
     # 四个贴图目录共用一份说明（正文抽在 _sticker_note 里，只有「什么时候用哪个」不同）
     "stickers/摆放说明.txt": _sticker_note(
         "糖糖本体（默认角色）的表情包", "stickers",
@@ -902,7 +915,7 @@ def main() -> None:
                 extra_final.append(p.name)
     print(f"\n🎵 附件 A 歌包：songs/audio {n_audio} 首"
           + (f" + separated 补差 {len(extra_final)} 首 {extra_final}" if extra_final else "")
-          + " + songs/*.txt 歌词")
+          + "（只含音频；歌词能力已于 2026-10-15 删除）")
     gpt = BASE / "gpt-sovits"
     if gpt.is_dir():
         size_gb = sum(f.stat().st_size for f in gpt.rglob("*") if f.is_file()) / 2**30

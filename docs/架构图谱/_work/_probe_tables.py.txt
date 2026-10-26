@@ -1,0 +1,17 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json, datetime
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+tabs = [r[0] for r in q("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+counts = {}
+for t in tabs:
+    try: counts[t] = q('SELECT COUNT(*) FROM "%s"' % t)[0][0]
+    except Exception as e: counts[t] = str(e)
+key = ['memories','cluster_facts','fact_clusters','people','chat_log','chat_index','memory_embeddings',
+       'memory_evidence','extraction_jobs','extraction_cursors','episodes','feedback','kv_store','aliases',
+       'daily_digests','tangtang_journal','mood_log','memories_backup','inbound_events','decision_runs',
+       'conversation_window_events','reply_metrics','schema_migrations']
+print('as_of', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+print('n_tables', len(tabs))
+print(json.dumps({k: counts.get(k) for k in key}, ensure_ascii=False))
+print(json.dumps(counts, ensure_ascii=False))

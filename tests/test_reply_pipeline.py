@@ -149,18 +149,6 @@ class TestStickerResolution:
         assert result == "看看这个"
         mock_stickers.random_safe_sticker.assert_not_called()
 
-    def test_emotion_picker_uses_unified_matcher_without_random_fallback(
-        self, reply_pipeline, mock_stickers
-    ):
-        mock_stickers.match_by_emotion_text.return_value = []
-
-        assert reply_pipeline._pick_sticker_by_emotion("开心地笑了") is None
-        mock_stickers.match_by_emotion_text.assert_called_once_with(
-            "开心地笑了", embed_engine=reply_pipeline.embed_engine,
-            count=1, excluded={"色色"}
-        )
-        mock_stickers.random_safe_sticker.assert_not_called()
-
 
 class TestQuoteMarker:
     """引用判断归 LLM（2026-09-23）。

@@ -1,0 +1,13 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-electron/
+release/
+
+# 本地日志与缓存
+*.log
+.vite/
+
+# 编辑器
+.vscode/
+.idea/

@@ -1,0 +1,22 @@
+# -*- coding: utf-8 -*-
+"""只读取证 15：心跳/日志重复性检查（autonomy-tracer）"""
+import io, os, sys, re, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+p = os.path.join(root, '日志', 'tangtang.log')
+nums = collections.Counter(); lines_hb = []
+dig = collections.Counter()
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        m = re.search(r'自治循环心跳 #(\d+)', line)
+        if m: nums[m.group(1)] += 1; lines_hb.append(line[:19])
+        m2 = re.search(r'内部消化: ([^=]+)=([0-9.]+)->([0-9.]+)', line)
+        if m2: dig[(m2.group(1), m2.group(2), m2.group(3))] += 1
+print('今日心跳行数', len(lines_hb), '不同编号', len(nums))
+print('重复编号(>1):', [(k, v) for k, v in nums.items() if v > 1][:10])
+print('编号范围', min(int(k) for k in nums), '-', max(int(k) for k in nums))
+print('同一 from->to 出现多次:', [(k, v) for k, v in dig.items() if v > 1][:10])
+print()
+print('--- main.py 85-135 ---')
+for i, l in enumerate(io.open(os.path.join(root, 'main.py'), encoding='utf-8').read().splitlines()[84:135], start=85):
+    print(i, l)

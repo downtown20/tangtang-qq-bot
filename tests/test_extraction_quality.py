@@ -371,3 +371,44 @@ def test_extraction_health_reports_protocol_and_yield_rates(monkeypatch):
     assert result["status"] == "ok"
     assert "协议成功率 92%" in result["message"]
     assert "产出率 17%" in result["message"]
+
+
+def _run_extract_health(monkeypatch, **values):
+    from agent.health_check import _check_extract_success
+    import agent.health_check as _hc
+    monkeypatch.setattr(_hc, "_in_warmup", lambda: False)
+    defaults = {"extract_outcomes_total": 100, "extract_protocol_success": 100,
+                "extract_with_items": 0, "extract_invalid_json": 0,
+                "extract_transport_error": 0}
+    defaults.update(values)
+    metrics = type("Metrics", (), {
+        "get_current": lambda self, name: defaults.get(name, 0),
+    })()
+    return asyncio.run(_check_extract_success(type("Handler", (), {
+        "metrics": metrics,
+    })()))
+
+
+def test_extraction_health_warns_when_nothing_is_produced(monkeypatch):
+    """2026-10-15 T58 / 排查 D2：协议全绿但长期空产出，必须 warn。
+
+    现场：2026-10-13 之后 134 次提取里 129 次是 success_empty（96.3%），模型原样
+    回 `[]`；而 _check_extract_success 只判协议成功率，于是**一边在 message 里
+    印着「产出率 3%」一边返回 ok**——仪表在、阈值不在（教训 #30 同族）。"""
+    result = _run_extract_health(monkeypatch, extract_with_items=3)
+    assert result["status"] == "warn", result
+    assert "产出率 3%" in result["message"]
+    assert "地板" in result["message"]
+
+
+def test_extraction_health_accepts_low_but_alive_yield(monkeypatch):
+    """阳性对照：低产出但活着（6%）→ 仍然 ok，别把地板修成天花板。"""
+    result = _run_extract_health(monkeypatch, extract_with_items=6)
+    assert result["status"] == "ok", result
+
+
+def test_extract_produced_floor_is_a_floor():
+    import agent.health_check as _hc
+    assert 0 < _hc.MIN_EXTRACT_PRODUCED_RATE <= 0.1, (
+        "产出率地板必须在 (0, 0.1]——它只用来抓「提取器已死」，不是质量目标")
+

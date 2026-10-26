@@ -52,7 +52,8 @@ def test_truth_schema_and_indexes_exist(store):
     } <= memory_columns
     assert {
         "memory_evidence", "memory_reverification_events",
-        "memory_reverification_dispositions", "schema_migrations",
+        "memory_reverification_dispositions", "memory_revisions",
+        "schema_migrations",
     } <= tables
     assert "idx_memories_subject_truth" in indexes
 

@@ -123,3 +123,26 @@ class TestRecentDialogue:
         assert "execute_send_action" in relay and 'mode="relay"' in relay
         assert "recall_formatted(" in natural_action and "source_group_id=\"\"" in natural_action
         assert "self.memory.recall(" in constructor and "source_group_id=\"\"" in constructor
+
+    def test_private_injection_recall_crosses_scope(self):
+        """私聊**注入召回**跨作用域（None），群聊注入仍限本群——2026-10-24 决策。
+
+        单向性是这条改动的全部前提：
+          · 私聊召回群记忆安全——`memories.qq_id` 是记忆主体，召回的仍是「关于
+            当前对话对象」的记忆，只是跨了场景；「你在某个群说过的话」他本人都在场。
+          · 群聊召回私聊记忆**永远不允许**——那是当众复述私聊，
+            `memory_access` 已把「私聊查群记录」定成隐私红线（见本文件上面的用例）。
+
+        为什么用源码断言：这段逻辑在 `handle_private_message` 内部（一千多行的
+        协程），没有可单测的接缝；而"传了哪个 scope"正是唯一要钉住的东西。
+        """
+        import inspect
+        from agent.handler import MessageHandler
+
+        private_src = inspect.getsource(MessageHandler.handle_private_message)
+        group_src = inspect.getsource(MessageHandler.handle_group_message)
+
+        assert "source_group_id=None" in private_src, "私聊注入召回必须跨域"
+        assert "source_group_id=group_id" in group_src, "群聊注入召回必须锁本群"
+        # 反向红线：群聊路径里不许出现跨域召回
+        assert "source_group_id=None" not in group_src

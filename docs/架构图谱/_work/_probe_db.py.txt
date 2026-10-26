@@ -1,0 +1,21 @@
+# -*- coding: utf-8 -*-
+import sqlite3, os, sys, json
+p = r'D:\qq-小糖糖\memory.db'
+out = {}
+out['exists'] = os.path.exists(p)
+out['size'] = os.path.getsize(p) if out['exists'] else 0
+c = sqlite3.connect(p)
+rows = c.execute("select name, type from sqlite_master where type in ('table','view') order by name").fetchall()
+out['n_tables'] = len(rows)
+tabs = []
+for n, t in rows:
+    if n.startswith('sqlite_'):
+        continue
+    cols = c.execute('PRAGMA table_info("%s")' % n).fetchall()
+    try:
+        cnt = c.execute('select count(*) from "%s"' % n).fetchone()[0]
+    except Exception as e:
+        cnt = 'ERR:%s' % e
+    tabs.append({'table': n, 'count': cnt, 'cols': [x[1] for x in cols]})
+out['tables'] = tabs
+print(json.dumps(out, ensure_ascii=False, indent=1))

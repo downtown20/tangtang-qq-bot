@@ -236,9 +236,6 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
                 continue
             zf.write(p, f"songs/covers/separated/{p.name}")
             n += 1
-        for p in sorted(songs.glob("*.txt")):        # 歌词
-            zf.write(p, f"songs/{p.name}")
-            n += 1
     for name in BUNDLED_STICKER_DIRS:
         root = BASE / name
         if not root.is_dir():

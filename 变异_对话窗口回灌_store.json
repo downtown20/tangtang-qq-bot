@@ -1,0 +1,12 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_short_term_warmup.py",
+  "mutations": [
+    {
+      "name": "M17-读会话历史时不过滤框架合成行（14k 条提示词被当成聊天回灌进来）",
+      "old": "               f\"WHERE {where} AND COALESCE(quarantined_at,'')='' \"\n               \"AND COALESCE(is_synthetic,0)=0 ORDER BY id DESC LIMIT ?\")",
+      "new": "               f\"WHERE {where} AND COALESCE(quarantined_at,'')='' \"\n               \"ORDER BY id DESC LIMIT ?\")",
+      "expect_fail": "test_excludes_synthetic_rows"
+    }
+  ]
+}

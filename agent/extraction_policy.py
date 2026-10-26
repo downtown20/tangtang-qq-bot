@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .tuning import tuning_int
 
-IMMEDIATE_MESSAGES = 10
-STALE_MESSAGES = 3
+
+IMMEDIATE_MESSAGES = tuning_int("extraction_immediate_messages", 10)
+STALE_MESSAGES = tuning_int("extraction_stale_messages", 3)
 STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 ONE_OFF_AFTER_SECONDS = 21 * 24 * 60 * 60
 

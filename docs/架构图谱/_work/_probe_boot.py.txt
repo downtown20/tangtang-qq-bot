@@ -1,0 +1,16 @@
+# -*- coding: utf-8 -*-
+import io, os, sys
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+base = os.path.join(root, '日志')
+for day, b in [('2026-10-14', '00b13b85'), ('2026-10-15', '37240c3f'), ('2026-10-15', 'ed7a58ec')]:
+    p = os.path.join(base, 'tangtang.log' if day == '2026-10-15' else 'tangtang.log.' + day)
+    first = None; last = None; hb_first = None
+    with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if 'boot=' + b in line:
+                if first is None: first = line[:19]
+                last = line[:19]
+                if hb_first is None and '自治循环心跳' in line:
+                    hb_first = line[:19] + ' ' + line.split('| ')[-1].strip()
+    print(day, b, 'first', first, 'last', last, '| first_hb', hb_first)

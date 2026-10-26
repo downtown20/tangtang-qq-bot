@@ -1,0 +1,20 @@
+# -*- coding: utf-8 -*-
+"""只读取证 14：pytest 进程启动时间 + config scenario_targets + care_due 陈旧度（autonomy-tracer）"""
+import io, os, sys, json, sqlite3, datetime
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+print('--- config.yaml 165-185 ---')
+lines = io.open(os.path.join(root, 'config.yaml'), encoding='utf-8').read().splitlines()
+for i, l in enumerate(lines[164:186], start=165):
+    print(i, l)
+print()
+c = sqlite3.connect(os.path.join(root, 'memory.db'))
+v = c.execute("select value from kv_store where key='state:care_due'").fetchone()
+print('care_due raw:', v[0] if v else None)
+v2 = c.execute("select value from kv_store where key='state:auto_pending'").fetchone()
+print('auto_pending raw:', v2[0] if v2 else None)
+v3 = c.execute("select value from kv_store where key='state:auto_cold'").fetchone()
+print('auto_cold raw:', v3[0] if v3 else None)
+v4 = c.execute("select value from kv_store where key='autonomy:last_initiative_time'").fetchone()
+print('last_initiative:', v4[0] if v4 else None, datetime.datetime.fromtimestamp(float(v4[0])) if v4 else '')
+print('mood_log max date:', c.execute('select max(date) from mood_log').fetchone())

@@ -1,0 +1,18 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_short_term_warmup.py",
+  "mutations": [
+    {
+      "name": "M15-回灌时 bot 消息沿用 chat_log 的 qq_id（她自己的话会被渲染成对方说的，role 全错）",
+      "old": "                    \"qq_id\": str(bot_qq) if is_bot else uid,",
+      "new": "                    \"qq_id\": uid,",
+      "expect_fail": "test_bot_reply_gets_bot_qq_identity"
+    },
+    {
+      "name": "M16-回灌覆盖已有内存数据（活窗口被磁盘快照顶掉，刚聊的上下文消失）",
+      "old": "            if self.short_term.get(key):\n                continue  # 已有活数据，绝不覆盖",
+      "new": "            if False:\n                continue",
+      "expect_fail": "test_does_not_overwrite_live_buffer"
+    }
+  ]
+}

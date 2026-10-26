@@ -75,31 +75,53 @@ def test_log_path_defaults_to_tangtang_log_under_log_dir(tmp_path, monkeypatch):
 # ═══════════════════════════════════════════════════════════════════
 
 def test_runtime_state_constants_resolve_into_state_dir():
+    """各模块的状态常量必须**源码形态**走 state_path()，且文件名正确。
+
+    2026-10-15 事故后口径变更：这些常量的**运行时值在测试里一律是 tmp_path**——
+    conftest 的 isolate_runtime_state_files（autouse）会把它们全部 monkeypatch 掉，
+    好让「忘记隔离的测试」写不坏生产。既然运行时值被隔离，这里就只能断言源码形态
+    ＋文件名。scheduler.TASKS_FILE 从 2026-08 起就是这条先例（见下方注释原文），
+    现在把它扩到全部状态常量：
+      · 「落点是否在 状态/ 下」由 state_path() 自己的契约测试钉住
+        （test_state_path_lands_under_state_dir_and_creates_it）；
+      · 「有没有走 state_path()」由这里的源码形态断言钉住；
+      · 「测试会不会写生产」由 tests/test_runtime_state_isolation.py 钉住。
+    """
     from agent import catch_up, conversation_tracker, daily_report, reflection, scheduler
 
-    pairs = [
+    src_expectations = [
+        ('agent/catch_up.py', 'STATE_FILE = str(state_path(".catch_up_state.json"))'),
+        ('agent/catch_up.py', 'SENT_FILE = str(state_path(".catch_up_sent.json"))'),
+        ('agent/conversation_tracker.py',
+         'STATE_FILE = str(state_path(".conversation_state.json"))'),
+        ('agent/daily_report.py', 'STATE_FILE = str(state_path(".daily_report_state.json"))'),
+        ('agent/reflection.py', 'STATE_FILE = str(state_path(".reflection_state.json"))'),
+        ('agent/scheduler.py', 'TASKS_FILE = str(state_path(".scheduled_tasks.json"))'),
+    ]
+    for rel, needle in src_expectations:
+        src = (_ROOT / rel).read_text(encoding='utf-8')
+        assert needle in src, f'{rel} 的状态常量没走 state_path()：{needle}'
+
+    for actual, name in [
         (catch_up.CatchUpManager.STATE_FILE, '.catch_up_state.json'),
         (catch_up.CatchUpManager.SENT_FILE, '.catch_up_sent.json'),
         (conversation_tracker.ConversationTracker.STATE_FILE, '.conversation_state.json'),
         (daily_report.STATE_FILE, '.daily_report_state.json'),
         (reflection.ReflectionEngine.STATE_FILE, '.reflection_state.json'),
-    ]
-    for actual, name in pairs:
-        assert Path(actual) == paths_mod.STATE_DIR / name, f'{name} 没走 state_path()'
-
-    # scheduler.TASKS_FILE 的**运行时值**在测试里一定是临时目录——conftest 的
-    # isolate_scheduler_storage（autouse）把它 monkeypatch 成 tmp_path 下的同名文件。
-    # 所以这里只能断言源码形态；断言它的 basename 而不是目录。
-    sched_src = (_ROOT / 'agent' / 'scheduler.py').read_text(encoding='utf-8')
-    assert 'TASKS_FILE = str(state_path(".scheduled_tasks.json"))' in sched_src
-    assert Path(scheduler.TASKS_FILE).name == '.scheduled_tasks.json'
+        (scheduler.TASKS_FILE, '.scheduled_tasks.json'),
+    ]:
+        assert Path(actual).name == name, f'{name} 的落点文件名被改动了'
 
 
 def test_other_state_sites_resolve_into_state_dir():
     '''handler / health_check / main 的那几处——源码形态断言。'''
     from agent import self_state
 
-    assert Path(self_state.TangTangSelf.STATE_FILE) == paths_mod.STATE_DIR / '.tangtang_self.json'
+    # 同 test_runtime_state_constants_resolve_into_state_dir：运行时值在测试里
+    # 被 conftest 隔离成 tmp_path，所以这里断言源码形态 + 文件名。
+    self_state_src = (_ROOT / 'agent' / 'self_state.py').read_text(encoding='utf-8')
+    assert 'STATE_FILE = str(state_path(".tangtang_self.json"))' in self_state_src
+    assert Path(self_state.TangTangSelf.STATE_FILE).name == '.tangtang_self.json'
 
     health_src = Path(_ROOT / 'agent' / 'health_check.py').read_text(encoding='utf-8')
     assert 'state_path(".extraction_state.json")' in health_src, 'health_check 的兜底默认值没走 helper'

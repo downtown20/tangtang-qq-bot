@@ -1,0 +1,26 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_memory_revision_trail.py",
+  "mutations": [
+    {
+      "name": "M1-去掉update_memory_value的留痕",
+      "old": "            if old_value != new_value:\n                self._record_revision(\n                    conn, entity=\"memories\", entity_id=memory_id,\n                    qq_id=str(row[0] or \"\"), op=\"update\", field=\"value\",\n                    before=old_value, after=new_value,\n                    reason=reason or \"语义去重合并：高相似新记忆覆盖旧表述\",\n                    actor=actor,\n                )",
+      "new": "            if old_value != new_value:\n                pass"
+    },
+    {
+      "name": "M2-去掉delete_memory_by_id的删除快照",
+      "old": "            self._record_revision(\n                conn, entity=\"memories\", entity_id=memory_id,\n                qq_id=str(snapshot.get(\"qq_id\") or \"\"), op=\"delete\",\n                before=snapshot, reason=reason or \"按 id 删除\", actor=actor,\n            )",
+      "new": "            pass"
+    },
+    {
+      "name": "M3-actor兜底从unknown改成空串",
+      "old": "_revision_text(actor).strip() or \"unknown\",",
+      "new": "_revision_text(actor).strip(),"
+    },
+    {
+      "name": "M4-link_superseded去掉幂等判定",
+      "old": "                f\"SELECT id, qq_id FROM memories WHERE id IN ({placeholders}) \"\n                f\"AND COALESCE(superseded_by,'')=''\",",
+      "new": "                f\"SELECT id, qq_id FROM memories WHERE id IN ({placeholders}) \","
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# -*- coding: utf-8 -*-
+"""只读取证 17：内部消化/驱动力触发 小时分布 + maybe_reflect 调用点（autonomy-tracer）"""
+import io, os, sys, re, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+base = os.path.join(root, '日志')
+for day in ['2026-10-13', '2026-10-14', '2026-10-15']:
+    p = os.path.join(base, 'tangtang.log' if day == '2026-10-15' else 'tangtang.log.' + day)
+    h = collections.Counter(); drv = collections.Counter(); times = []
+    with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if '内部消化:' in line:
+                h[line[11:13]] += 1; times.append(line[11:19])
+            m = re.search(r'驱动力触发: (\S+) = ([0-9.]+)', line)
+            if m: drv[m.group(1)] += 1
+    print(day, 'internal_digest by hour:', sorted(h.items()))
+    print('   first/last:', times[:2], times[-2:] if times else '')
+    print('   drive triggers:', drv.most_common())

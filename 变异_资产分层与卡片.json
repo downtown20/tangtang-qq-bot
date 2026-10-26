@@ -1,0 +1,24 @@
+{
+  "target": "tools/asset_edit.py",
+  "tests": "tests/test_asset_edit.py",
+  "mutations": [
+    {
+      "name": "exclude 失效（同一批文件在「常驻直投」和「检索命中」各列一次，改一处另一处不同步）",
+      "old": "    return any(rel == ex or rel.startswith(ex + \"/\") for ex in spec.get(\"exclude\", ()))",
+      "new": "    return False",
+      "expect_fail": "test_pinned_pack_files_are_not_listed_twice"
+    },
+    {
+      "name": "卡片 display 不做回落（没写 display 的卡在界面上变成空白标题）",
+      "old": "            \"display\": str(data.get(\"display\") or data.get(\"name\") or p.stem),",
+      "new": "            \"display\": str(data.get(\"display\") or \"\"),",
+      "expect_fail": "test_card_missing_display_falls_back_to_name"
+    },
+    {
+      "name": "yaml 解析失败就把卡片丢掉（最该被改的那张卡从界面上消失）",
+      "old": "        except Exception as exc:  # noqa: BLE001 - 卡片要显示，不能因为解析失败就消失\n            warning = f\"yaml 解析失败：{getattr(exc, 'problem', exc)}\"",
+      "new": "        except Exception:  # noqa: BLE001\n            continue",
+      "expect_fail": "test_broken_yaml_card_is_still_listed"
+    }
+  ]
+}

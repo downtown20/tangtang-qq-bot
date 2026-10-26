@@ -10,9 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import logging
 import re
 
 from .interaction_contract import InboundEvent
+
+logger = logging.getLogger("糖糖.入站")
 
 
 @dataclass(frozen=True)
@@ -153,6 +156,19 @@ def persist_inbound_message(memory, message_type: str, msg: dict,
         segments=evidence.segments,
         event_key=evidence.event_key,
     )
+    # ── 媒体预取（2026-10-24）───────────────────────────────────
+    # QQ 图片/语音的 download url 带 rkey，实测几小时后就
+    # `retcode -5503007 "download url has expired"`（桌面端会客厅要显示
+    # 图片/语音，但不能指望链接还活着）。**收到消息的这一刻**是唯一能把
+    # 字节拿到手的时机，所以落库后立刻在后台线程存一份到
+    # `状态/media_cache/`。纯旁路：失败只记 debug，绝不影响消息处理。
+    if chat_id:
+        try:
+            from . import media_cache
+
+            media_cache.prefetch(int(chat_id), str(message or ""), evidence.segments)
+        except Exception:  # 旁路失败不得影响入站落库这条主链
+            logger.debug("媒体预取调度失败 chat_id=%s", chat_id, exc_info=True)
     return PersistInboundResult(
         chat_id=chat_id,
         duplicate=bool(evidence.event_key and chat_id is None),

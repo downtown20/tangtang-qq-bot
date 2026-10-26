@@ -2,7 +2,7 @@
 关系档案系统 — 维护「我和这个人的关系是怎样的」
 
 与 people.notes（她是谁）互补：这里存的是「我们之间」的事。
-每 100 条私聊触发一次 LLM 合成，生成稳定档案注入每轮上下文。
+每 80 条私聊触发一次 LLM 合成（阈值见 _update_threshold），生成稳定档案注入每轮上下文。
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from .async_io import run_bounded_store_io
+from .protocols import RELATIONSHIP_SUMMARY_MAX_TOKENS, truncate_bg_block
 
 logger = logging.getLogger("糖糖.Relationship")
 
@@ -126,9 +127,22 @@ class RelationshipManager:
                 await self._mark_failure_async(qq_id)
                 logger.info(f"⏭ 关系档案全「未知」跳过覆盖: {nickname}({qq_id})")
                 return False
+            # 2026-10-15 T56（C2「生产者没有体积契约」）：本仓唯一「合成长文本、
+            # 写库不设上限」的材料就在这一行——画像有 PROFILE_MAX_LEN、知识块 1500 字
+            # 封顶、记忆事实 80 字/条，只有关系档案没有，于是「消费端每轮兜底截断」
+            # 沦为常态，且截掉的是块尾的约束行。改为生产端按块预算先封顶，
+            # 裁法复用消费端那一个实现（truncate_bg_block）——两套规则必然对不上。
+            body = str(summary).strip()
+            capped = truncate_bg_block(body, RELATIONSHIP_SUMMARY_MAX_TOKENS)
+            if capped != body:
+                logger.info(
+                    f"✂ 关系档案按体积契约封顶: {nickname}({qq_id}) "
+                    f"{len(body)}→{len(capped)} 字"
+                )
             await self._run_store_io(
                 "relationship.set_summary", self._store.set_relationship_summary,
-                qq_id, summary.strip(),
+                qq_id, capped, actor="synthesis:relationship",
+                reason=f"关系档案重写（{nickname}）",
             )
             await self._run_store_io(
                 "relationship.update_timestamp",

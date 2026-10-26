@@ -302,7 +302,7 @@ def test_song_section_returns_false_and_records_uncertain_state(tmp_path):
     audio.write_bytes(b"audio")
     handler = object.__new__(MessageHandler)
     handler.songs = SimpleNamespace(
-        get_section_audio=lambda *_args: str(audio),
+        get_song_audio=lambda *_args: str(audio),
     )
     handler.napcat = SimpleNamespace(send_group_message=AsyncMock(return_value=SendResult(
         True, False, error="MESSAGE_ID_UNCONFIRMED",
@@ -323,9 +323,7 @@ def test_song_send_exception_is_uncertain_and_does_not_fallback_to_tts(tmp_path)
     audio.write_bytes(b"audio")
     handler = object.__new__(MessageHandler)
     handler.songs = SimpleNamespace(
-        get_default_section=lambda _title: {"name": "副歌"},
-        get_section_audio=lambda *_args: str(audio),
-        get_section=lambda *_args: {"text": "副歌歌词"},
+        get_song_audio=lambda *_args: str(audio),
     )
     handler.napcat = SimpleNamespace(
         send_group_message=AsyncMock(side_effect=RuntimeError("response lost after POST")),
@@ -347,10 +345,7 @@ def test_singing_failure_does_not_release_drive():
     from agent.handler import MessageHandler
 
     handler = object.__new__(MessageHandler)
-    handler.songs = SimpleNamespace(
-        get_default_section=lambda _title: {"name": "副歌"},
-        get_section=lambda *_args: {"text": "副歌歌词"},
-    )
+    handler.songs = SimpleNamespace()
     handler._send_song_section = AsyncMock(return_value=SendResult(
         False, False, error="SONG_AUDIO_MISSING",
     ))
@@ -376,9 +371,7 @@ def test_singing_success_releases_drive_once():
     from agent.handler import MessageHandler
 
     handler = object.__new__(MessageHandler)
-    handler.songs = SimpleNamespace(
-        get_default_section=lambda _title: {"name": "副歌"},
-    )
+    handler.songs = SimpleNamespace()
     handler._send_song_section = AsyncMock(return_value=SendResult(
         True, True, message_id=503,
     ))
@@ -435,8 +428,10 @@ def test_command_sing_keeps_raw_marker_for_action_plan_after_cleaning():
         "attempted": 1, "confirmed": 1, "uncertain": 0, "failed": 0,
     })
     handler = SimpleNamespace(
-        songs=SimpleNamespace(build_sing_prompt=lambda _song: "sing prompt"),
+        songs=SimpleNamespace(build_sing_prompt=lambda _song, **_kw: "sing prompt"),
         personality=SimpleNamespace(build_system_prompt=lambda **_kwargs: "system"),
+        voice_enabled=False,
+        _is_voice_blocked=lambda *_a: False,
         _call_llm=AsyncMock(return_value=raw_reply),
         reply=SimpleNamespace(clean=lambda text: text.replace("[SING:副歌]", "")),
         napcat=SimpleNamespace(send_group_message=sender),
@@ -460,8 +455,10 @@ def test_command_sing_does_not_append_audio_after_uncertain_text_delivery():
     from agent.handler_commands import CommandRouter
 
     handler = SimpleNamespace(
-        songs=SimpleNamespace(build_sing_prompt=lambda _song: "sing prompt"),
+        songs=SimpleNamespace(build_sing_prompt=lambda _song, **_kw: "sing prompt"),
         personality=SimpleNamespace(build_system_prompt=lambda **_kwargs: "system"),
+        voice_enabled=False,
+        _is_voice_blocked=lambda *_a: False,
         _call_llm=AsyncMock(return_value="歌词[SING:副歌]"),
         reply=SimpleNamespace(clean=lambda text: text.replace("[SING:副歌]", "")),
         napcat=SimpleNamespace(send_group_message=AsyncMock(return_value=SendResult(
@@ -488,9 +485,7 @@ def test_singing_actions_parse_marker_before_cleaning_and_persist_child_receipt(
     sender = AsyncMock(return_value=SendResult(True, True, message_id=777))
     handler = object.__new__(MessageHandler)
     handler.songs = SimpleNamespace(
-        get_section_audio=lambda *_args: str(audio),
-        get_default_section=lambda _title: {"name": "副歌"},
-        get_section=lambda *_args: {"text": "副歌歌词"},
+        get_song_audio=lambda *_args: str(audio),
     )
     handler.napcat = SimpleNamespace(send_group_message=sender)
     handler._persist_terminal_action_receipt = MagicMock(return_value=True)

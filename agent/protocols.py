@@ -15,6 +15,8 @@ import logging
 import re
 from enum import Enum
 
+from .tuning import tuning_float, tuning_int
+
 logger = logging.getLogger("糖糖.Protocols")
 
 # 纠正/元问题信号——只收元对话/纠正专用高精度短语。
@@ -97,6 +99,9 @@ def bg(label: str, content: str) -> str:
 
 # 引用解析状态（2026-08-15 Codex 复查：替代 "没取到" in quote_prefix 的字符串分流——
 # 用户消息里出现「外卖没取到」会误判；状态常量是单一事实源）
+# 亲密模式范本的标签（T2.14）：单一事实源——handler 挂载、测试断言、日志都用它
+INTIMATE_REFERENCE_LABEL = "色色范本"
+
 QUOTE_RESOLVED = "resolved"   # 原文已解析，前缀是自然语言，并入用户块
 QUOTE_MISSING = "missing"     # 有引用但原文取不到/没传过来——警告走背景块
 QUOTE_NONE = "none"           # 本条消息没有引用
@@ -140,7 +145,7 @@ PROFILE_CAVEAT_SHORT = "（画像，仅供参考）"  # 紧凑行（交叉上下
 # 改一处漏一处（教训表 #4）。profile_text 是全部画像出口的唯一截断契约，
 # 独立成行的 caveat 是统一口径。截断是止损不是根治——错误事实恰在前 120 字
 # 仍会注入，根治在批 2 的 status/dirty 语义（dirty 画像禁注入）。
-PROFILE_MAX_LEN = 120
+PROFILE_MAX_LEN = tuning_int("profile_max_len", 120)
 
 # 合成记忆 key（批 1b/2 共用）：LLM 合成物不是真实记录——读侧挂 🖼️/[合成]
 # 标记，批 2 起 status 非 active 的不再出现在任何出口
@@ -160,6 +165,56 @@ def normalize_image_placeholder(text: str) -> str:
     import re as _re
     # `\]+` 吃掉嵌套方括号的全部右括号——「[图片:[动画表情]]」内层还带一个 ]
     return _re.sub(r"\[图片\s*[:：]?\s*[^\]]*\]+", "（发了张图片）", str(text or ""))
+
+
+# ═══════════════════════════════════════════════════════════════
+# T59：媒体消息的「事实」判定（结构判定，不是语义判定）
+# ═══════════════════════════════════════════════════════════════
+# 为什么只判定「事实」：「这张图是表情包还是需要正经识别的图片」在数据上是
+# **平台事实**（NapCat 消息段自带 sub_type / summary），不是要靠理解得出的语义。
+# 分辨事实归系统（只有这一层看得到平台元数据）；**怎么理解、要不要评论、要不要
+# 细看**归 LLM。历史教训：系统越权把「情绪解释」写进永久历史
+# （`（发了张图片，内容是：震惊呆滞）`），她只能顺着系统的解释说话。
+MEDIA_ATTACH_WINDOW_S = tuning_float("media_attach_window_s", 120.0)
+
+_CQ_SEG_RE = re.compile(r"\[CQ:[^\]]*\]")
+# `\]+` 吃掉嵌套方括号的全部右括号——「[图片:[动画表情]]」内层还带一个 ]
+# （与 normalize_image_placeholder 同一手法，那里踩过这个坑）
+_MEDIA_ONLY_RE = re.compile(
+    r"\[图片\s*[:：]?\s*[^\]]*\]+|\[表情\]"
+    r"|（发了张图片[^）]*）|（发了张表情包[^）]*）"
+)
+
+
+def is_pure_media_message(text: str, raw: str = "") -> bool:
+    """这条消息是不是「纯媒体」——只有图/表情包等段，没有实质文本。
+
+    用途（T59）：判定它是不是**上一次发言的附件**，而不是一次新的发言。
+    ⚠ 这是**结构判定**（消息里有没有文本段），不是语义判定，也不做关键词匹配。
+    """
+    body = raw or text or ""
+    if "[CQ:" not in body and "[图片" not in (text or "") and "[表情]" not in (text or ""):
+        return False                        # 纯文本消息：快速返回
+    stripped = _CQ_SEG_RE.sub("", body)
+    stripped = _MEDIA_ONLY_RE.sub("", stripped)
+    stripped = _MEDIA_ONLY_RE.sub("", text or "")
+    return not stripped.strip()
+
+
+def looks_like_sticker(text: str, raw: str = "") -> bool:
+    """这条媒体消息是不是「表情包」（而不是需要正经识别的图片）。
+
+    判据全部来自平台元数据（事实），不猜画面内容：
+      - `sub_type=1` → QQ 内置表情（群路径既有代码已用这条判据）
+      - `summary` 含「表情」→ 动画表情以 image + summary 到达（生产实测 48606 行）
+    """
+    t = text or ""
+    if "sub_type=1" in (raw or ""):
+        return True
+    if "[表情]" in t or "[动画表情]" in t:
+        return True
+    m = re.search(r"\[图片\s*[:：]\s*([^\]]*)\]", t)
+    return bool(m and "表情" in m.group(1))
 
 
 def profile_text(notes: str, max_len: int = PROFILE_MAX_LEN) -> str:
@@ -196,19 +251,51 @@ def memory_block(nickname: str, memories: str) -> str:
     )
 
 
-def knowledge_block(knowledge: str) -> str:
-    """知识库块内容——群/私两条路径共用（2026-08-15 Codex Important 3：
-    防编造 caveat 此前两处逐字复制，与 memory_block 同一个复制粘贴坑）。
-    单一事实源边界：本文件管「背景块+根基契约」；关系档案/早期认识/聊天史
-    召回这类单点 caveat 留在各自组装现场，不搬进来（无重复，搬运只添间接层）。
-    2026-08-15 整体审查性能：知识块曾是单条 user message 最大的注入块
-    （3000 字 ≈ 5400 tokens）——封顶 1500 字，检索系统 small-to-big 已把
-    最相关段放在最前，截尾优先丢的是低相关段。"""
-    return (
-        "以下内容是你被问到时可以参考的真实信息。编造不存在的信息会让群友"
-        "在现实中遇到麻烦（比如告诉ta一个假的活动时间，ta白跑一趟）。"
-        f"不确定就说「我不确定这个」。\n{str(knowledge)[:1500]}"
-    )
+def clamp_recall_limit(raw, default: int = 0) -> int:
+    """把她给的条数收进可用区间（2026-10-15 T58）。
+
+    她说几条就几条——系统的职责只剩「读不出来时给个合理默认」与
+    「别让她把自己撑死」两条。上限是护栏不是预算：真正的预算是她的选择。
+    ⚠ default 走函数体内解析：本模块的常量定义在这些函数**之后**，
+    而默认参数是 **import 时**求值的——写成 `default: int = MEMORY_RECALL_FETCH`
+    会让整个模块 import 失败（静态检查当场报 undefined，正是它拦住的）。"""
+    fallback = default or MEMORY_RECALL_FETCH
+    try:
+        if raw is None or raw == "":
+            return fallback
+        value = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return max(1, min(value, MEMORY_RECALL_MAX))
+
+
+def normalize_recall_detail(raw) -> tuple[str, int]:
+    """把 detail 收进三档，返回 (档名, 每条字符上限)。0 = 全文。"""
+    name = str(raw or "").strip().lower()
+    if name not in MEMORY_RECALL_DETAIL:
+        name = "normal"
+    return name, MEMORY_RECALL_DETAIL[name]
+
+
+def memory_recall_hint(pushed: int, available: int) -> str:
+    """记忆块的「还有多少没拿出来」告知行（2026-10-15 T58）。
+
+    系统只报告事实：自动浮上来几条、这个人在库里还有几条没展开。要不要多回忆、
+    回忆多少条、每条多详细，**由她调 search_memories 的 limit/detail 决定**——
+    这里不写指令、不写建议，只写事实和能力入口（同「歌单只随 sing 工具出现」）。
+    没有剩余候选时返回空串：绝大多数轮次不占一个 token。"""
+    rest = int(available or 0) - int(pushed or 0)
+    if rest <= 0:
+        return ""
+    return (f"（另有 {rest} 条没列出来——要回忆多少、多详细由你定："
+            f"search_memories 的 limit/detail。）")
+
+
+# knowledge_block() 于 2026-10-16 T2.14 删除：它唯一的生产调用点是「色色范本进背景池」
+# 那两处，而那个用法本身就是错配（为「用户问知识库」写的 [:1500] + 防编造 caveat，
+# 用在亲密场景既跑偏又砍掉 86%）。亲密范本现在走 agent/intimate_reference.py + pinned。
+# 检索结果（search_knowledge 工具）本来就走 knowledge.format_evidence，不经过这里。
+# 若将来真需要「背景块形态的知识材料」，请连带它自己的 caveat 与预算测试一起加回来。
 
 
 def feedback_reflection_block(rows: list[dict]) -> str:
@@ -239,14 +326,81 @@ def feedback_reflection_block(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def assemble_user_message(backgrounds: list[tuple[str, str]], user_text: str) -> str:
+OPEN_LOOP_LABEL = "悬着的事"
+
+
+def render_open_loops(rows: list[dict], today: str = "") -> str:
+    """把「还没结的事」渲染成背景块内容（L3 注入，2026-10-25 第 13 轮）。
+
+    方案：docs/开发规划/未闭合事件_技术方案_20261024.md §2.3。三条纪律写在代码里：
+
+    1. **只提供事实，不判断「该不该问」**：说不说、怎么说是她的事（反模式 #9/#10）。
+       这里只有「有几件事没结、原定什么时候、问过几次」。
+    2. **本函数不回写任何状态**：渲染 ≠ 问过。把「被看见」记成 `asked_count+1`
+       会让上限 2 提前用光，而且属于第 11 轮写放大（启动两分钟 96 条被 +1）的同族错误。
+       真正记「问过了」只有一条路：她自己调 `resolve_open_loop` 工具。
+    3. **行内带 `#id`**：不是给她看的编号，是给她调收尾工具用的句柄——
+       没有 id，`resolve_open_loop(loop_id=…)` 就无从下手。
+
+    行格式（越小越好，背景预算按 token 计）：
+        - #12 明天要去医院复查（原定 2026-10-26，明天）——还没问过
+    """
+    lines = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        topic = str(row.get("topic") or "").strip()
+        if not topic:
+            continue
+        loop_id = int(row.get("id") or 0)
+        expected = str(row.get("expected_at") or "").strip()[:10]
+        asked = int(row.get("asked_count") or 0)
+        when = ""
+        if expected:
+            when = f"（原定 {expected}"
+            if today:
+                try:
+                    from datetime import date
+                    due = date.fromisoformat(expected)
+                    today_date = date.fromisoformat(str(today)[:10])
+                    delta = (today_date - due).days
+                    if delta > 0:
+                        when += f"，已过 {delta} 天"
+                    elif delta == 0:
+                        when += "，就是今天"
+                    else:
+                        when += f"，还有 {-delta} 天"
+                except (ValueError, TypeError):
+                    pass
+            when += "）"
+        else:
+            when = "（没说时间）"
+        asked_text = f"——已问过 {asked} 次" if asked else "——还没问过"
+        head = f"- #{loop_id} {topic}" if loop_id else f"- {topic}"
+        lines.append(f"{head}{when}{asked_text}")
+    return "\n".join(lines)
+
+
+def assemble_user_message(backgrounds: list[tuple[str, str]], user_text: str,
+                          pinned: list[tuple[str, str]] | None = None) -> str:
     """用户消息组装（2026-08-15）——背景块全部带标签前置，用户原文永远最后且无包裹。
-    backgrounds: [(标签, 内容), ...] 按最终展示顺序自上而下排列。"""
+    backgrounds: [(标签, 内容), ...] 按最终展示顺序自上而下排列。
+
+    pinned（2026-10-16 T2.14）：**不参与背景预算淘汰**的常驻材料（亲密模式的色色范本）。
+    它根本不进 fit_backgrounds —— 既不按优先级被丢，也不受单块 600t 上限与 1500 封顶。
+    位置固定在整条消息**最前**（内容随版本稳定 ⇒ 前缀缓存友好）。
+    为什么必须单独一条路：2026-10-16 实测，11,529 字的色色教材以 知识库=P15（全表最低）
+    进 1200t 公共池，06:21–07:02 的 33 条色色回合**33/33 被整块淘汰**——一个字都没到 LLM。
+    """
     # 2026-08-15 整体审查安全 I1：用户原文转译 <背景 开头标签——
     # 「无标签 = 对方说的」信任契约要求用户文本永远不可能伪装成系统块
     user_text = str(user_text).replace("<背景", "＜背景")
     msg = user_text
     for label, content in reversed(backgrounds):
+        if content and str(content).strip():
+            msg = bg(label, content) + "\n\n" + msg
+    # pinned 最后前置 ⇒ 落在最前（assemble 是自下而上拼的，见 docstring）
+    for label, content in reversed(list(pinned or [])):
         if content and str(content).strip():
             msg = bg(label, content) + "\n\n" + msg
     return msg
@@ -257,8 +411,198 @@ def assemble_user_message(backgrounds: list[tuple[str, str]], user_text: str) ->
 # 取样作答（坑 #17 复现土壤），且注意力稀薄后回复变成材料综述（演讲腔）。
 # 优先级越低越先被截断/淘汰；引用/协议是纠错信息，永不丢。
 
-BACKGROUND_BUDGET_TOKENS = 1200   # 每轮 user message 背景块总预算（≈660 汉字）
-MAX_BACKGROUND_BLOCK_TOKENS = 600  # 单块上限
+# 2026-10-25 第二轮自查：`estimate_tokens` 的中文系数从 1.8 改成实测值 0.72
+# （旧系数把真实 token 高估 2.36 倍，见 `context_builder.estimate_tokens` docstring）。
+# 这里的设计意图是「每轮背景块约 660 汉字」——按旧尺子 660×1.8≈1200，
+# 按新尺子 660×0.72≈475。当时取 480 保持「660 汉字」这个原始体感不变。
+#
+# **2026-10-25 第六轮：480 → 720 → 900（两档，第二档是被实测逼出来的）**
+# `prompt_digest` 上线后查日志：35 条背景块淘汰记录里 **27 条（77%）「记忆」块被淘汰**、
+# 94% 的回合预算打满。她的 reasoning 原话：
+# 「the background says memory is empty, need to search」——于是每轮都得现查
+# `search_facts`。体感不是「她记得我」，是「她随手翻了个档案」。
+#
+# 第一次只调到 720，实测结果：记忆块**进来了但被裁到 35t**（`预算 683/720`、
+# `裁=1（记忆 156→35t）`）——「有块但没内容」，等于还是没给她。块价按日志实测：
+# 关系档案 ~240 + 窗口 ~53 + 协议 ~30 + 缺口 ~70 + 记忆 ~215 = 608；
+# 加上被裁余量，**900 才够让记忆完整落座**。
+#
+# 上调幅度（480→900，估算≈460→≈833 真实 tokens）：这仍是 system prompt
+# （≈2100 真实 tokens）的三分之一，不是「一次塞十几个块」那种材料堆——
+# 2026-08-17 反对的是「块多而杂导致材料综述/演讲腔」，这里是「4 个有用的块装得下」。
+# **自忆** 曾经(P10)几乎总被淘汰，而当时把它写在这里的理由是「刻意」——
+# 那个理由建立在「自忆可以用 search_memories 取回」之上，而该前提是**假的**
+# （详见 _BG_RECOVERY_TOOLS 上方）。2026-10-25 第九轮已改 P6。
+#
+# **2026-10-25 第九轮：900 → 1100。**
+# 900 是「记忆能完整落座」的价（见上）；现在自忆也要进来（P6、且不可取回），
+# 4 个大块（关系档案 240 + 窗口 216 + 记忆 215 + 自忆 240）+ 协议 + 缺口 ≈ 1090t，
+# 900 装不下，必然有一个被整块淘汰。离线实测（同一份按日志取的真实块价）：
+#     预算  900 → used  868，自忆 ✅  记忆 ❌
+#     预算 1000 → used  883，自忆 ✅  记忆 ❌   ← 省下的钱被裁到别处，白加
+#     预算 1100 → used 1050，自忆 ✅  记忆 ✅   ← 「两块都要」的最小值
+#     预算 1200 → used 1119，与 1100 相同（已饱和，再给也不涨）
+# 所以取 **1100**：这是算出来的最小代价，不是拍脑袋的整数。
+# 相对 system prompt（≈2100 真实 tokens）仍是三分之一量级，没变成材料堆。
+BACKGROUND_BUDGET_TOKENS = tuning_int("background_budget_tokens", 1100)  # 每轮背景块总预算（≈1528 汉字 / ≈1100 真实 tokens）
+MAX_BACKGROUND_BLOCK_TOKENS = tuning_int("max_background_block_tokens", 240)  # 单块上限（≈250 真实 tokens）
+# 当前轮直接证据的保底配额，原来是 BACKGROUND 的 33%（400/1200）——同比例折算。
+# 不做这一步的话，400 会变成 720 的 56%，证据块几乎吃掉全部预算，行为大变。
+
+# 2026-10-15 T56（C2「生产者没有体积契约」）：关系档案**正文**允许的 token。
+# 它是本仓唯一「合成长文本、写库不设上限」的材料——画像有 PROFILE_MAX_LEN(120 字)、
+# 知识块 1500 字封顶、记忆事实 80 字/条，只有它没有；DB 实测全库 23 份非空档案正文
+# p50 360t / max 598t（正好贴着单块上限），于是「消费端每轮兜底截断」沦为常态。
+#
+# 上限 = 单块上限 − 块内固定开销。固定开销取 130t：反编造契约行 71t + 标题行 17t +
+# <背景·关系档案> 包装 27t = 115t（三处均为 estimate_tokens 实测），另留 ~15t 余量
+# 吃掉换行/省略号/昵称长度浮动——上限的算术要留误差带，否则「生产端封顶后整块 ≤ 600t」
+# 只在某个昵称长度下成立。落点 470t（≈262 汉字）只封住现存 9/23 份贴顶档案，
+# 且封顶走行/句边界（丢的是整条第 4 项，不是半句话）。
+# ⚠ 块结构若改（换契约文案/改标签），这个数要跟着改：
+# tests/test_relationship.py::test_block_with_capped_body_fits_single_block_ceiling
+# 按生产函数复算整块体积，改错即红。
+_RELATIONSHIP_BLOCK_FIXED_TOKENS = 130
+# 单块上限是**可调**的（`tuning.max_background_block_tokens`）：上限必须大于固定
+# 开销才有正文空间。调得太小则夹到 0——负数会让正文切片变成「去掉尾部」
+# （Python 的 `text[:负数]` 不是空串），比整块不注入更隐蔽。
+RELATIONSHIP_SUMMARY_MAX_TOKENS = max(
+    0, MAX_BACKGROUND_BLOCK_TOKENS - _RELATIONSHIP_BLOCK_FIXED_TOKENS
+)
+
+# ── 记忆召回预算（2026-10-15 T58：裁决权归 LLM）──
+# 记忆块的旧契约是「系统定死 top-6、每条 80 字」——注入多少记忆由代码决定，
+# 她只有接收权。这与「系统不替 LLM 做判断」是同一条原则：系统替她决定了
+# 「这一轮回忆多少」。人的记忆不是一股脑冒出来的：默认只浮上来最相关的两三条，
+# 想深挖就自己再回忆——所以这里只留一个**默认冒上来的量**，
+# 真正的用量由她调 search_memories 的 limit（要几条）与 detail（每条多详细）决定。
+# 两个数字都不是预算上限，是默认值与安全护栏；她给的量才是预算。
+MEMORY_RECALL_DEFAULT = tuning_int("memory_recall_default", 3)   # 每轮自动浮上来的条数（原为硬编码 6）
+MEMORY_RECALL_MAX = tuning_int("memory_recall_max", 20)          # 单次主动召回的条数上限（护栏，不是预算）
+MEMORY_RECALL_FETCH = tuning_int("memory_recall_fetch", 10)      # 检索侧取回条数下限（她少于这个数时不影响排序质量）
+
+# ── 不确定性三档（2026-10-24 设计二，`docs/开发规划/不确定性注入_技术方案_20261024.md`）──
+# 信任门此前是**二值**：verified/manual/corrected 注入，其余静默丢弃——10,060 条
+# 活跃记忆在对话里根本不存在。但真实的人会说「我印象里你提过去医院，是不是我
+# 记错了」：这是元认知，知道自己记得的东西有多可靠。所以补中间那一档：
+#   确定 → 💭 内容        模糊 → 💭~ 内容 + 块尾行为契约
+# ⚠ 标记与契约文本都只有这一份（不在 memory.py 里硬编码）——画面改一处漏一处
+#   是教训 #4；而契约文本是「这段标记什么意思」的唯一解释，散落即失效。
+UNCERTAIN_MARK = "💭~"        # 模糊档事实行前缀（确定档是 "💭"）
+UNCERTAIN_MEMORY_CONTRACT = (
+    "（带 ~ 的是你只模糊记得、没有原话佐证的事。可以提，但要留余地："
+    "「我印象里…」「是不是你说过…」。不确定就不要当成事实说。）"
+)
+
+# ── 纠正优先档（2026-10-25 主人决策「corrected 优先」）──
+# 不确定性三档解决的是「可信 / 模糊」的**纵轴**；这里补的是可信档内部的
+# **横轴**：同样是可信，但一条是 ta 亲口纠正过的结论（corrected），另一条是
+# 提取器当时以为对的事实（verified）。两者冲突时主人裁定 **corrected 优先**。
+#
+# 现场：`mem#18121`（verified「今年7月刚靠指标生名额考上一中，是高一新生」）
+# 其实是主人在转述**别人**（`chat#199048` 原文明指「穷到吃外卖」），被记成了
+# 2524950083 自己的事实；而 `mem#17589`（corrected）已经否定了它
+# （「成展是大学大二学生（不是高中生）」）。两条同时注入、文本毫无区别，
+# 她只能猜。
+#
+# 所以这里做的**不是替她判定**，而是让「哪条被纠正过」可见：
+#   确定 → 💭  纠正过 → ✏️  模糊 → 💭~
+# ⚠ 标记与契约文本也只有这一份——散落即失效（同 UNCERTAIN_* 的理由）。
+CORRECTED_MARK = "✏️"        # 纠正优先档事实行前缀
+CORRECTED_MEMORY_CONTRACT = (
+    "（带 ✏️ 的是 ta 亲口纠正过的结论，不是你自己记的。别的说法和它冲突时"
+    "以 ✏️ 为准；不要把它和旧说法并列成「两种可能」来说。）"
+)
+# 模糊档的召回量与质量闸门。**故意比可信档苛刻**：
+# 「0.55 种子」那类脏数据 confidence 低、importance 也低，双筛把它们挡在门外；
+# 配额固定为 2 条（不是 5）是因为注入面是「她模糊记得」的佐料，不是主料——
+# 每轮多带 5 条模糊记忆会把可信记忆的密度冲淡（教训：别让配角抢主角的戏）。
+UNCERTAIN_RECALL_LIMIT = tuning_int("uncertain_recall_limit", 5)    # 模糊路召回候选数（SQL 侧取这么多再精排）
+UNCERTAIN_INJECT_MAX = tuning_int("uncertain_inject_max", 2)        # 真正注入的模糊条数上限（独立配额，不占可信的额度）
+UNCERTAIN_MIN_IMPORTANCE = tuning_int("uncertain_min_importance", 6)  # 模糊档门槛之一（importance 低的多是随手记的碎片）
+UNCERTAIN_MIN_CONFIDENCE = tuning_float("uncertain_min_confidence", 0.7)  # 模糊档门槛之二（与 _bge_pick_memories 的 0.75 同族）
+MEMORY_RECALL_DETAIL = {      # 每条字符上限；0 = 全文不截断
+    "brief": 40,
+    "normal": 90,
+    "full": 0,
+}
+
+
+def _bg_est(text: str) -> int:
+    """背景块体积估算——模块内唯一入口。
+
+    context_builder 与本模块互相引用，故懒导入（沿用 fit_backgrounds 原写法）。"""
+    from .context_builder import estimate_tokens
+    return estimate_tokens(text)
+
+
+#: 块内容送进 `turn_traces.prompt_digest` 的预览长度（2026-10-25 第 17 轮 ④）。
+#: 界面要能回答「记忆块里到底有什么」「窗口块是不是空的」——只有标签名答不了。
+#: 但 digest 总上限是 4000 字符（`store.TRACE_DIGEST_LIMIT`），超了会被**硬切片**
+#: 成非法 JSON（既有隐患）。所以按块定长：记忆/自忆/反思这类「一行一条」的给得多，
+#: 关系档案/协议这类长文只给开头。总量控制在 ~2000 字符以内，留足余量。
+_BG_PREVIEW_CHARS = {
+    "记忆": 300, "自忆": 260, "反思": 260,
+    "窗口": 220, "悬着的事": 220, "缺口": 200,
+    "关系档案": 150, "日记": 150, "情绪": 100,
+}
+_BG_PREVIEW_DEFAULT = 100
+
+
+# 块标签 → 她自己能用来取回这块材料的工具（2026-10-16 T59/T57）。
+# 只登记确实存在的工具（handler 里注册的 search_* 五个）；取不回来的
+# （关系档案/反思/情绪）不写——不在这里替她发明能力。
+# 2026-10-23 T64：删掉「补读」——那个块自 T2.4 起不再产生（见 BACKGROUND_PRIORITY
+# 上方的说明），留着等于替她登记一个永远用不上的取回路径。
+#
+# **2026-10-25 第九轮：删掉「自忆」——那一行是假的取回路径。**
+# 它原来写 `"自忆": "search_memories"`，看着天经地义（自称「记忆搜索」嘛）。
+# 查执行体才发现作用域根本不对：`search_memories` 走的是
+# `self.memory.recall(qq_id, …)`，而 `qq_id` 是**当前对话对象**（主人/群友），
+# 自忆却写在 `bot_qq`（她自己的 QQ）名下——**用这个工具永远查不到自己的话**。
+#
+# 后果不是「多一行无害的提示」，而是一个闭环缺陷：
+#   自忆块 94% 的回合被整块淘汰（15 天 390 条淘汰记录里 365 条是自忆）
+#   → 缺口块照实告诉她「自忆没放进来，要的话用 search_memories 取回来」
+#   → 她照做，什么也查不到（查回来的是**对方**的记忆）
+#   → 她既没有自己的过去，也不知道自己其实没有
+# 这正是本函数上方那句「不在这里替她发明能力」要防的事，只是写这行的人
+# 只核了「工具名存在」，没核「工具检索的主体是不是这块材料的主体」。
+#
+# 删掉之后「自忆」变成**取不回来**的一类，于是按 BACKGROUND_PRIORITY 的
+# 定序原则（丢了能不能取回）跟着从 P10 提到 P6——两处是同一条推理的两半。
+_BG_RECOVERY_TOOLS = {
+    "窗口": "search_chat_history",
+    "记忆": "search_facts / search_memories",
+    "交叉": "search_relations",
+    "关系": "search_relations",
+    "日记": "search_episodes",
+}
+
+
+def _bg_gap_notice(dropped: list[str], truncated: list[str]) -> str:
+    """背景块「缺口」告知（2026-10-16 T59/T57）——系统丢材料，必须让她知道。
+
+    旧行为是静默丢块（T56 只让它进了日志）：她照常开口，不知道「ta 刚发的东西
+    没进来」；用户看到的是「你忘了」——可这根本不是她的错。
+    这里只报告事实：哪些块没放进来、其中哪些她能用工具自己取回；
+    不写指令、不写建议（同 memory_recall_hint /「歌单只随 sing 工具出现」）。
+    没有淘汰也没有裁剪时返回空串：非饱和回合逐字节不变。"""
+    if not dropped and not truncated:
+        return ""
+    names = [(label, "") for label in dropped]
+    names += [(label, "（只放了一部分）") for label in truncated]
+    listing = "、".join(f"{label}{suffix}" for label, suffix in names)
+    parts = [f"（这一轮有几块材料没放进来：{listing}。"]
+    recoverable = [(label, _BG_RECOVERY_TOOLS[label])
+                   for label, _suffix in names if label in _BG_RECOVERY_TOOLS]
+    if recoverable:
+        parts.append("要的话你可以自己取回来："
+                     + "；".join(f"{label}用 {tool}" for label, tool in recoverable)
+                     + "。")
+    parts.append("）")
+    return "".join(parts)
+
 
 # 2026-10-13 T1.3（审计 P1-3「保护块吃满预算、当前轮证据被静默饿死」）：
 # 当前轮直接证据的**保底配额**。
@@ -269,23 +613,68 @@ MAX_BACKGROUND_BLOCK_TOKENS = 600  # 单块上限
 # 语义与保护块同款（允许 overflow），但有上限：这组块最多额外占用这么多 token。
 # **只保证当前轮直接证据，不保证旧材料**——记忆/日记/知识库照旧按优先级淘汰。
 CURRENT_TURN_EVIDENCE = frozenset({"提及", "文件", "图片"})
-EVIDENCE_RESERVE_TOKENS = 400
+EVIDENCE_RESERVE_TOKENS = 160  # 原 400（= 背景预算的 33%）——2026-10-25 换尺子后同比例折算
 
 # 块标签 → 优先级（越小越优先保留；未知标签按 9 处理）
-# 2026-08-17 Codex 对齐+终审：当前轮直接证据（图片/提及/文件/补读）必须排在
+# 2026-08-17 Codex 对齐+终审：当前轮直接证据（图片/提及/文件）必须排在
 # 旧材料之前——旧版按 append 顺序淘汰，图片会被记忆挤掉；「姿态」是插话的
 # 当前轮指令（与协议块同级），漏登记会被旧记忆挤掉（终审 High 修复）。
+# 2026-10-16 T59/T57：定序原则从「谁更重要」改成「丢了能不能用工具取回」。
+# 关系档案 P9→P4 —— 它是全库唯一没有工具能取回的材料（relationship_summary
+# 只有「注入」这一个读取点，见 docs/审查/文档核查_20261015/关系档案注入调查.md §4）；
+# 而窗口/交叉/关系/日记都有工具路径，丢了下一句她自己就能取回来。
+#
+# ⚠ 这不是「靠提优先级把池子问题糊过去」——池子仍是 1200t，没有扩容。同文件 §6.5
+# 反对的是「假装解决了体积超订」，这里改的是取舍顺序：先丢的必须恰好是能捡回来的
+# 那些。体积问题由 T56 的生产端契约（RELATIONSHIP_SUMMARY_MAX_TOKENS ≤ 470t）解决，
+# 两者互补：一个管「进来时多大」，一个管「不够时先丢谁」。
+#
+# 「缺口」= 1：fit_backgrounds 在真有淘汰/裁剪时注入的一行事实（见 _bg_gap_notice），
+# 与引用/协议同级——允许 overflow、永不被裁，否则它会被自己报告的那个问题先吃掉。
+# 它是本表里**唯一**不由 handler 的 backgrounds.append 产生、而由 fit_backgrounds
+# 内部插入的标签（闸门 test_every_priority_label_has_a_producer 为此开了这一个例外）。
+#
+# 2026-10-23 T64：清掉三个**登记-消费漂移**（表里有、生产无）的键：
+#   · 「画像」——画像行在记忆块内部渲染（同文件 §4 的 C4），从来没有独立块；
+#   · 「补读」——T2.4 把关键词门控换成 get_offline_summary 工具后，这个块不再产生；
+#   · 「知识库」——T2.14 把色色范本改走 pinned 之后，backgrounds 里已无该块追加。
+# 留着的代价不是「多一个数字」，而是**下一个人会以为这三个块存在**：
+# 去改它们的优先级、或在 _BG_RECOVERY_TOOLS 里登记取回工具（「补读」就登过）。
+# 现在由闸门钉住：本表的每个键都必须有生产点（或显式列进白名单）。
+#
+# **2026-10-25 第九轮：自忆 P10 → P6。**
+# P10 的来历是一句「它最低优先，这是刻意的」——而那个「刻意」的前提是
+# 「自忆能用 search_memories 取回来」。查执行体后该前提被推翻：`search_memories`
+# 检索的是**当前对话对象**的 `qq_id`，自忆存在 `bot_qq` 名下，**根本取不回来**
+# （见 `_BG_RECOVERY_TOOLS` 上方的完整推导）。前提伪，结论也就不成立。
+#
+# 按本表自己的定序原则「丢了能不能用工具取回」，取不回来的材料必须优先保留
+# （这就是「关系档案 P9→P4」的先例）。落点 **P6**：
+#   · 排在窗口(P5)之后——窗口是当前对话的直接延续，比历史自忆更即时；
+#   · 与交叉(P6)同级、排在反思/记忆(P7)之前——后两者都能用工具补回来。
+#
+# 实测依据（390 条淘汰记录 / 15 天）：**自忆整块淘汰 365 次，是第一名**
+# （记忆 236、反思 200）；同一份 900 预算下离线复现，现状淘汰自忆，P6 后自忆
+# 以 215t 落座、改成「挤掉记忆」——而记忆恰恰是能 `search_facts` 取回的那个。
 BACKGROUND_PRIORITY = {
-    "引用": 0, "协议": 1, "证据纪律": 1, "姿态": 1, "窗口姿态": 1,
-    "提及": 2, "文件": 3, "图片": 4,
-    "窗口": 5, "补读": 5, "交叉": 6, "反思": 7, "记忆": 7,
-    "画像": 8, "关系档案": 9,
-    "自忆": 10, "日记": 11, "关系": 13, "情绪": 14, "知识库": 15,
+    "引用": 0, "协议": 1, "证据纪律": 1, "姿态": 1, "窗口姿态": 1, "缺口": 1,
+    "提及": 2, "文件": 3, "图片": 4, "关系档案": 4,
+    # 2026-10-25 第 13 轮（L3 注入）：悬着的事定 P5。
+    # 定序原则是本表自己的那句「丢了能不能用工具取回」——而它**没有取回工具**：
+    # `resolve_open_loop` 是「收尾」不是「取回」，所以不登记进 `_BG_RECOVERY_TOOLS`
+    # （登记一条取不回材料的路径正是第 9 轮的错，见 #39）。取不回来 ⇒ 必须优先保留，
+    # 与窗口(P5)同级：窗口是当前对话的直接延续，悬事是当前关系的未结线索，都该在。
+    # 排在关系档案(P4)之后是刻意的——档案是「我认识你」，悬事是「我们还有事没完」，
+    # 前者失了她会答错人，后者失了她只是少问一句。
+    "悬着的事": 5,
+    "窗口": 5, "交叉": 6, "自忆": 6, "反思": 7, "记忆": 7,
+    "日记": 11, "关系": 13, "情绪": 14,
 }
 
 
 def fit_backgrounds(backgrounds: list[tuple[str, str]],
-                    budget_tokens: int = BACKGROUND_BUDGET_TOKENS) -> list[tuple[str, str]]:
+                    budget_tokens: int = BACKGROUND_BUDGET_TOKENS,
+                    report: dict | None = None) -> list[tuple[str, str]]:
     """背景块预算淘汰（2026-08-17 Codex 对齐重写，三步）：
     ① 保护块（引用/协议，优先级≤1）计量入账，允许 overflow；
     ② flex 块按优先级从高到低选择（同优先级按原始顺序），超单块上限按
@@ -296,10 +685,41 @@ def fit_backgrounds(backgrounds: list[tuple[str, str]],
 
     2026-10-13 T1.3（审计 P1-3）：② 之外补一条**保底配额**——当前轮直接证据
     （提及/文件/图片）在保护块 overflow 吃光预算时不再被静默饿死；被淘汰的块
-    进日志（只有真有淘汰才记，避免正常回合产生噪声）。"""
+    进日志（只有真有淘汰才记，避免正常回合产生噪声）。
+
+    2026-10-15 T56（C5 观测盲区）：**被裁的块也进同一条日志**——原先只记淘汰，
+    裁剪在全仓 40 万行日志里零痕迹，于是「契约行到底有没有进上下文」只能靠复刻
+    实验倒推。体积估算统一走模块级 _bg_est（单一入口，不再函数内懒导入）。
+
+    2026-10-16 T59/T57（裁决权与可见性）：④ 真有淘汰/裁剪时注入一行「缺口」事实
+    （哪些材料没放进来、哪些她能自己取回，见 _bg_gap_notice）——旧行为是静默
+    丢块，她照常开口却不知道材料不全。这一行的 token 也入账（会把日志里的 used
+    推高一点；保护块允许 overflow，所以不会因此挤掉任何块）。
+
+    ## `report`：这一轮背景注入的**完整参数**（2026-10-25 第 17 轮 ④ 补）
+
+    出参而非改返回值——返回值形态被群/私两条回复路径和一批测试钉着，
+    改签名会让所有调用点都要跟着动。调用方传一个空 dict 进来，函数填：
+
+        {
+          "budget": {"limit": 1100, "used": 683,
+                     "protected_overflow": False, "evidence_reserve_used": False},
+          "blocks": [                          # 每一块的最终命运
+            {"label": "关系档案", "priority": 4, "tokens": 240, "status": "kept"},
+            {"label": "记忆", "priority": 7, "tokens": 35,
+             "tokens_before": 156, "status": "truncated"},
+            {"label": "反思", "priority": 7, "tokens": 0,
+             "tokens_before": 90, "status": "dropped"},
+          ],
+          "gap_notice": True                   # 是否给她注入了「缺口」告知
+        }
+
+    为什么必须落这份数据：在有 `report` 之前，「记忆块这轮被裁到 35t」
+    「反思被淘汰」只存在于日志的一行 INFO 里，界面完全看不到——
+    而第 8 轮那个「裁剪尺子差 2.5 倍、藏了 9 天」正是这种「有事实、没出口」。
+    """
     if not backgrounds:
         return backgrounds
-    from .context_builder import estimate_tokens as _est
     indexed = [(i, label, str(c or ""))
                for i, (label, c) in enumerate(backgrounds)
                if str(c or "").strip()]
@@ -309,12 +729,13 @@ def fit_backgrounds(backgrounds: list[tuple[str, str]],
         prio = BACKGROUND_PRIORITY.get(label, 9)
         if prio <= 1:
             protected.append((idx, label, text))
-            used += _est(text) + _bg_wrap_tokens(label)
+            used += _bg_est(text) + _bg_wrap_tokens(label)
         else:
             flex.append((prio, idx, label, text))
     # ② flex 按优先级选择
     selected = []
     selected_idx = set()
+    truncated = []          # 2026-10-15 T56：(label, 裁前t, 裁后t)——裁剪留痕
     evidence_used = 0
     evidence_reserve_used = False
     for _prio, idx, label, text in sorted(flex, key=lambda x: (x[0], x[1])):
@@ -333,39 +754,110 @@ def fit_backgrounds(backgrounds: list[tuple[str, str]],
         limit = min(MAX_BACKGROUND_BLOCK_TOKENS, allowance - wrap_t)
         if limit < 120:
             break  # 预算耗尽（含保护块 overflow）
-        if _est(text) > limit:
-            text = _truncate_bg_block(text, limit)
+        before_t = _bg_est(text)
+        if before_t > limit:
+            text = truncate_bg_block(text, limit)
             if not text:
                 continue
+            # 2026-10-15 T56：裁剪必须留痕（由来说明见 _log_bg_degradation）
+            truncated.append((label, before_t, _bg_est(text)))
         selected.append((idx, label, text))
         selected_idx.add(idx)
-        cost = _est(text) + wrap_t
+        cost = _bg_est(text) + wrap_t
         used += cost
         if label in CURRENT_TURN_EVIDENCE:
             evidence_used += cost
     # ③ 恢复原始展示顺序
     merged = protected + selected
     merged.sort(key=lambda x: x[0])
-    _log_bg_evictions(flex, selected_idx, used, budget_tokens, evidence_reserve_used)
+    # ④ 缺口告知（2026-10-16 T59/T57）：真有淘汰/裁剪时插在**最前**——
+    # 「协议紧贴用户原文」是 ③ 的既有不变量，插在末尾会把它挤开一格。
+    notice = _bg_gap_notice(
+        [label for _p, idx, label, _t in flex if idx not in selected_idx],
+        [label for label, _b, _a in truncated],
+    )
+    if notice:
+        used += _bg_est(notice) + _bg_wrap_tokens("缺口")
+        merged.insert(0, (-1, "缺口", notice))
+    _log_bg_degradation(flex, selected_idx, used, budget_tokens,
+                        evidence_reserve_used, truncated)
+    if report is not None:
+        # 每一块的最终命运：保留 / 被裁 / 被淘汰。三态都要给——
+        # 只报「保留了什么」等于把裁掉和丢掉的那部分藏起来（教训 #40）。
+        dropped_rows = [(label, prio, _bg_est(text))
+                        for prio, idx, label, text in flex
+                        if idx not in selected_idx]
+        trunced = {label: (before, after) for label, before, after in truncated}
+        rows: list[dict] = []
+        for _idx, label, text in merged:
+            if label == "缺口":       # 缺口是我们自己插的提示，不是材料
+                continue
+            row = {
+                "label": label,
+                "priority": BACKGROUND_PRIORITY.get(label, 9),
+                "tokens": _bg_est(text),
+                "status": "kept",
+                # 块内容预览：界面要能看出「这一块里到底有什么」。
+                # 长度按块类型定（见 _BG_PREVIEW_CHARS），控制 digest 总量。
+                "preview": text[:_BG_PREVIEW_CHARS.get(label, _BG_PREVIEW_DEFAULT)],
+            }
+            if label in trunced:
+                row["tokens_before"] = trunced[label][0]
+                row["status"] = "truncated"
+            rows.append(row)
+        for label, prio, tok in dropped_rows:
+            rows.append({
+                "label": label,
+                "priority": prio,
+                "tokens": 0,
+                "tokens_before": tok,
+                "status": "dropped",
+            })
+        report["budget"] = {
+            "limit": int(budget_tokens),
+            "used": int(used),
+            "protected_overflow": bool(used > budget_tokens),
+            "evidence_reserve_used": bool(evidence_reserve_used),
+        }
+        report["blocks"] = rows
+        report["gap_notice"] = bool(notice)
     return [(label, text) for _, label, text in merged]
 
 
-def _log_bg_evictions(flex, selected_idx, used, budget_tokens, evidence_reserve_used):
-    """背景块淘汰明细（2026-10-13 T1.3）。
+def _log_bg_degradation(flex, selected_idx, used, budget_tokens,
+                        evidence_reserve_used, truncated):
+    """背景块降级明细（2026-10-13 T1.3 记淘汰；2026-10-15 T56 补**裁剪**）。
 
-    只在**真有块被淘汰**时记一条：P1-3 的失败形态是「静默饿死」，所以淘汰本身
-    必须留下可查的事实；而正常回合（无淘汰）不该多出噪声。
-    末位字段是证据保底有没有被用上——它为真即说明这个回合的保护块已吃满预算，
-    正是 P1-3 的现场。"""
-    dropped = [(label, prio) for prio, idx, label, _ in flex
-               if idx not in selected_idx]
-    if not dropped:
+    只在**真有块被淘汰或被裁**时记一条：失败形态是「静默饿死 / 静默裁掉」，
+    所以降级本身必须留下可查的事实；而正常回合（无损）不该多出噪声。
+
+    2026-10-15 补裁剪的由来（C5 观测盲区）：关系档案的反编造契约行原先在**块尾**，
+    而截断从尾部切——被裁掉的恰好是唯一约束材料的那一行，偏偏全仓 40 万行日志里
+    **一条裁剪记录都没有**（裁剪事实只能靠复刻实验倒推）。现在裁前/裁后 token
+    都进日志：哪一块被裁、裁掉多少，一眼可见。
+    行首「🧺 背景块淘汰」保持不变——既有的日志检索方式与回归测试都挂在它上面。
+    末两个标记：保护块是否已超顶（池子被挤占的真现场）、证据保底是否被动用。"""
+    dropped = [(label, prio, _bg_est(text))
+               for prio, idx, label, text in flex if idx not in selected_idx]
+    if not dropped and not truncated:
         return
-    detail = "、".join(f"{label}(P{prio})"
-                       for label, prio in sorted(dropped, key=lambda x: x[1]))
+    parts = []
+    if dropped:
+        parts.append("淘汰=%d（%s）" % (
+            len(dropped),
+            "、".join(f"{label}(P{prio},{tok}t)"
+                      for label, prio, tok in sorted(dropped, key=lambda x: x[1])),
+        ))
+    if truncated:
+        parts.append("裁=%d（%s）" % (
+            len(truncated),
+            "、".join(f"{label} {before}→{after}t"
+                      for label, before, after in truncated),
+        ))
     logger.info(
-        "🧺 背景块淘汰: 保留flex=%d 淘汰=%d（%s）| 预算 %d/%d%s",
-        len(selected_idx), len(dropped), detail, used, budget_tokens,
+        "🧺 背景块淘汰/裁剪: 保留flex=%d %s| 预算 %d/%d%s%s",
+        len(selected_idx), " ".join(parts), used, budget_tokens,
+        " ⚠保护块已超顶" if used > budget_tokens else "",
         " ⚠已动用证据保底" if evidence_reserve_used else "",
     )
 
@@ -375,10 +867,35 @@ def _bg_wrap_tokens(label: str) -> int:
     return int((len(str(label)) + 14) * 1.5)
 
 
-def _truncate_bg_block(text: str, token_limit: int) -> str:
+def truncate_bg_block(text: str, token_limit: int) -> str:
     """按 token 预算截断背景块——优先整行（记忆条目/role pair 通常一行），
-    再退到句边界；不硬切半条事实（中文 1 字 ≈ 1.8t 估）。"""
-    char_limit = max(40, int(token_limit / 1.8))
+    再退到句边界；不硬切半条事实。
+
+    2026-10-15 T56：从 _truncate_bg_block 改公开名——它现在是**消费端与生产端共用**
+    的裁剪规则：消费端在 fit_backgrounds 里兜底（本文件），生产端在 relationship.py
+    按体积契约先封顶（RELATIONSHIP_SUMMARY_MAX_TOKENS）。两边共用同一实现，才不会
+    「生产端以为自己 ≤600t、消费端按另一套规则再切一刀」。
+
+    ⚠ 它只裁**尾部**——所以任何背景块的「不要编造」契约行必须在块**首**，
+    否则预算一紧，先丢的正是唯一约束材料的那一行（2026-10-15 C3）。
+
+    ## 2026-10-25 第 8 轮：这把尺子曾经和估算尺子差了 2.5 倍
+
+    这里原来写 `char_limit = token_limit / 1.8`（「中文 1 字 ≈ 1.8t」——那是
+    **旧的** `estimate_tokens` 口径）。第 6 轮把 `estimate_tokens` 的中文系数
+    改成 **0.72**（旧估算高估 2.36 倍，实测 API `prompt_tokens` 1926 vs 旧估算
+    4542），`context_builder._truncate_text` 跟着改成了 `/ 0.72`——**唯独这里漏了**。
+
+    后果是「按新尺子量出来 70t 的块，按旧尺子只准留 38 个字」：记忆块
+    `294t → 70t` 之后实际只剩标题行 `📋 名字(ID:xxxx) | 聊N次 | 等级`，
+    连一条记忆都没有。第 8 轮把它查出来是因为新加的 `✏️` 标记**一个都没进
+    prompt**（`turn_traces.prompt_digest.memory_marks.corrected = 0`），
+    而离线调 `format_compact_memories` 明明有——差的就是这一步。
+
+    **教训**：同一物理量如果有两个换算点，改一处必须 grep 另一处（教训 #4/#35）。
+    现在两边都是 `estimate_tokens` 的 0.72 口径。
+    """
+    char_limit = max(40, int(token_limit / 0.72))
     if len(text) <= char_limit:
         return text
     cut = text[:char_limit]
@@ -563,7 +1080,7 @@ _BLANK_LINE_RE = re.compile(r"\n[ \t]*\n[ \t\n]*")
 # 依据：私聊回复里 26.4% 内部本来就有 3 段以上，3 段是她自然话量的上界；
 # 4 个以上气泡在真实 IM 里会被读成刷屏（2026-09-22 调研：多条同瞬上屏被
 # 三方独立验证为「出戏」）。要放开只需改这一个数。
-MAX_REPLY_PARTS = 3
+MAX_REPLY_PARTS = tuning_int("max_reply_parts", 3)
 
 
 def parse_split_markers(text: str) -> list[str]:
@@ -738,6 +1255,19 @@ def strip_mood_report(text: str) -> str:
     return _MOOD_REPORT_STRIP_RE.sub("", str(text or ""))
 
 
+# ── 被戳回应（2026-10-16 T2.7）──
+# 被戳时的反应由她自己给：回一句话 / 反戳回去（写 [戳回去]）/ 只丢个表情 / 干脆不理。
+# 反戳是**动作**，必须在她的话进 clean() 之前解析（clean 会剥方括号，之后再也读不到
+# 她的意图）——与 [分段]/[引用]/[心情] 同一条规矩。
+POKE_BACK_MARKER = "[戳回去]"
+_POKE_BACK_STRIP_RE = re.compile(r"[\[［]\s*戳回去\s*[\]］]")
+
+# LLM 不可用时的**降级兜底**（不是我替她写台词）：一个字，中性，不冒充她的语气。
+# 只在她「生成失败」时用；她自己输出空回复 = 她的选择（不理），不走这条（教训 #27：
+# 静默不是降级，是丢事件；但把失败伪装成她说了句话，比说一句「？」更坏）。
+POKE_DEGRADED_REPLY = "？"
+
+
 def strip_protocol_markers(text: str) -> str:
     """发送前「一次把协议标记剥干净」的统一出口。
 
@@ -755,6 +1285,7 @@ def strip_protocol_markers(text: str) -> str:
     out = strip_split_markers(out)
     out = strip_quote_marker(out)
     out = strip_silence_marker(out)
+    out = _POKE_BACK_STRIP_RE.sub("", out)   # T2.7：[戳回去] 也不能漏到用户眼前
     return strip_mood_report(out)
 
 
@@ -870,3 +1401,34 @@ CONVERSATION_CRAFT = (
     "你不需要「巧妙地」接每一句，累了可以短，不想聊可以岔开，被戳到可以顶回去。\n"
     "**你是在跟人相处，不是在完成一次优秀回复。**\n"
 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 协议文本覆盖层（2026-10-26 第 49 轮）
+#
+# 主人要「规则自由度拉满」：22 条协议条文可以被 `prompts/<name>.md` 覆盖，
+# 文件存在且非空就用文件，否则用上面这些内置默认值。
+#
+# **为什么放在文件末尾一次性应用，而不是逐个改成 `_use(...)`**：
+#   1. 22 个常量一个字节都不用改（改动越小，出错面越小）；
+#   2. 内置默认值**始终留在源码里**——覆盖层永远毁不掉默认值，删掉 md 就回滚；
+#   3. `globals()` 在模块级有效，import 完成后其他模块拿到的就是覆盖后的值。
+#
+# **哪些能覆盖写在 `agent/prompt_overrides.py::OVERRIDABLE`**，
+# 那 13 个标记/枚举常量（`SPLIT_MARKER` / `UNCERTAIN_MARK` / `QUOTE_RESOLVED`…）
+# 是**代码契约**，改了会让解析器静默失配，所以不在白名单里。
+# ═══════════════════════════════════════════════════════════════
+from . import prompt_overrides as _prompt_overrides  # noqa: E402
+
+#: 本次 import 实际被覆盖的常量名（排查用：启动日志会打出来）
+APPLIED_PROMPT_OVERRIDES: list[str] = _prompt_overrides.apply_overrides(globals())
+
+#: 22 条协议文本的覆盖状态（覆盖中 / 内置默认）。**私有**：结构随时可改，
+#: 对外要的是「哪几条被改了」这一个事实，不是这张表的形状。
+#: 这里调一次而不是让界面现算：`read_override()` 要读 22 个文件，
+#: 界面轮询不该反复碰盘；启动时读一次、写进日志，异常一眼可见。
+_PROMPT_OVERRIDE_STATUS: list[dict] = _prompt_overrides.list_overrides()
+if APPLIED_PROMPT_OVERRIDES:
+    logger.info("📝 协议文本覆盖生效 %d/%d 条：%s",
+                len(APPLIED_PROMPT_OVERRIDES), len(_PROMPT_OVERRIDE_STATUS),
+                ", ".join(APPLIED_PROMPT_OVERRIDES))

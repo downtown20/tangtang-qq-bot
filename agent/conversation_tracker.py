@@ -22,14 +22,15 @@ from typing import Callable
 
 from agent.async_io import run_bounded_blocking, run_bounded_store_io
 from agent.paths import state_path  # 状态文件落盘位置单一事实源（2026-10-15 T55-F）
+from agent.tuning import tuning_int
 
 logger = logging.getLogger("糖糖.Conversation")
 
-ENGAGED_WINDOW = 120      # 对话窗口秒数——允许自然的对话停顿
-GRACE_PERIOD = 10           # 容差秒数
-FADE_PERIOD = 300           # 窗口过期后 5 分钟内仍给部分加分（渐变退出）
-MAX_CONSECUTIVE = 5        # 连续回复上限
-MAX_LLM_SILENCES = 2       # LLM 连续两次选择沉默后，窗口进入渐变期
+ENGAGED_WINDOW = tuning_int("engaged_window", 120)      # 对话窗口秒数——允许自然的对话停顿
+GRACE_PERIOD = tuning_int("grace_period", 10)           # 容差秒数
+FADE_PERIOD = tuning_int("fade_period", 300)           # 窗口过期后 5 分钟内仍给部分加分（渐变退出）
+MAX_CONSECUTIVE = tuning_int("max_consecutive", 5)     # 连续插话上限（只作用于主动插话的退让）
+MAX_LLM_SILENCES = tuning_int("max_llm_silences", 2)   # LLM 连续两次选择沉默后，窗口进入渐变期
 MAX_ACTIVE_WINDOWS = 5000  # 软上限；只回收已完成 FADE 的窗口，不驱逐活跃会话
 
 

@@ -1,0 +1,14 @@
+
+import re, glob, os, sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+root = r"D:\qq-小糖糖\日志"
+pat = re.compile(r"反思")
+hits = []
+for p in sorted(glob.glob(os.path.join(root, "*"))):
+    with open(p, "r", encoding="utf-8", errors="replace") as f:
+        for i, line in enumerate(f):
+            if pat.search(line):
+                hits.append((os.path.basename(p), i+1, line.strip()[:180]))
+print("total 反思 lines:", len(hits))
+for h in hits[-25:]:
+    print(h[0], h[1], h[2])

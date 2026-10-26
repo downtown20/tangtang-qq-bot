@@ -62,10 +62,9 @@ def pack_voice(out_dir: Path) -> list[Path]:
 
 
 def pack_songs(out_dir: Path) -> Path:
-    """audio 40 首 + separated 补差 1 首 + 歌词 txt。"""
+    """audio 40 首 + separated 补差 1 首。（2026-10-15 起不再打包歌词 txt。）"""
     audio = BASE / "songs" / "audio"
     sep = BASE / "songs" / "covers" / "separated"
-    txts = sorted((BASE / "songs").glob("*.txt"))
     audio_stems = {p.stem for p in audio.glob("*.wav")}
     extra = [p for p in sep.glob("*_FINAL.wav")
              if p.stem.removesuffix("_FINAL") not in audio_stems]
@@ -76,9 +75,7 @@ def pack_songs(out_dir: Path) -> Path:
             _add_zip(zf, wav, BASE / "songs")
         for wav in extra:
             _add_zip(zf, wav, BASE / "songs")
-        for t in txts:
-            _add_zip(zf, t, BASE / "songs")
-    print(f"🎵 预录歌曲包: audio {n} 首 + 补差 {len(extra)} 首 + 歌词 {len(txts)} 个")
+    print(f"🎵 预录歌曲包: audio {n} 首 + 补差 {len(extra)} 首（不含歌词，2026-10-15 起）")
     print(f"  ✅ {out.name}（{out.stat().st_size / 2**20:.0f}M）")
     return out
 

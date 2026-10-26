@@ -1,0 +1,35 @@
+# -*- coding: utf-8 -*-
+"""只读日志取证：统计状态层关键事件出现次数（逐行流式，不载入全文）。"""
+import io, re, collections, os
+p = r'D:\qq-小糖糖\日志\tangtang.log'
+pats = {
+ '提取worker周期': '提取 worker 周期',
+ 'idle_busy': 'idle_reason=busy',
+ 'idle_no_open': 'idle_reason=no_open',
+ 'idle_open_waiting': 'idle_reason=open_waiting',
+ '语义提取入库': '🧠 语义提取:',
+ '关系档案更新': '📝 关系档案更新:',
+ '关系全未知跳过': '⏭ 关系档案全「未知」跳过覆盖',
+ '关系LLM失败': '关系档案 LLM 调用失败',
+ '画像补全触发': '📝 画像补全触发:',
+ '提取任务恢复失败': '恢复提取任务#',
+ '超时': '超时',
+ 'SQLITE_BUSY': 'database is locked',
+ 'meta张量': 'meta tensor',
+ '未回复': 'ignore',
+}
+cnt = collections.Counter()
+first = {}
+last = {}
+size = os.path.getsize(p)
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        for k, s in pats.items():
+            if s in line:
+                cnt[k] += 1
+                ts = line[:19]
+                if k not in first: first[k] = ts
+                last[k] = ts
+print('log size MB', round(size/1048576,1))
+for k in pats:
+    print(f'{k}: {cnt[k]}  first={first.get(k,"-")} last={last.get(k,"-")}')

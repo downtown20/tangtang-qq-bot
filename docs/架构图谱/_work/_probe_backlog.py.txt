@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+"""只读：前向积压的老化年龄分布——判断准入策略是否把积压永久压在门槛下。"""
+import sqlite3, json
+from datetime import datetime
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+rows = c.execute("""
+SELECT c.qq_id, COUNT(*), MIN(NULLIF(c.timestamp,'')), MAX(NULLIF(c.timestamp,''))
+FROM chat_log c
+LEFT JOIN extraction_cursors e ON e.pipeline='memory' AND e.direction='forward' AND e.qq_id=c.qq_id
+WHERE COALESCE(c.is_bot_reply,0)=0 AND COALESCE(c.quarantined_at,'')=''
+  AND c.id > COALESCE(e.cursor_chat_id,0)
+GROUP BY c.qq_id
+""").fetchall()
+now = datetime.now()
+import collections
+buckets = collections.Counter()
+oldest_overall = None
+ready10 = 0; ready7d = 0; deferred = 0
+for qq, n, oldest, newest in rows:
+    try:
+        age = (now - datetime.fromisoformat(oldest)).days
+    except Exception:
+        age = -1
+    if n >= 10: ready10 += 1
+    elif n >= 3 and age >= 7: ready7d += 1
+    else: deferred += 1
+    buckets[(n, min(age, 30))] += 1
+    if oldest_overall is None or (oldest and oldest < oldest_overall): oldest_overall = oldest
+print(json.dumps({
+ 'backlog_users': len(rows),
+ 'ready_by_count_ge10': ready10,
+ 'ready_by_age_ge7d': ready7d,
+ 'deferred': deferred,
+ 'oldest_backlog_message': oldest_overall,
+ 'deferred_examples': [{'qq': q, 'n': n, 'oldest': o} for q, n, o, _ in rows][:6],
+ 'cursor_forward_max': c.execute("SELECT MAX(cursor_chat_id) FROM extraction_cursors WHERE direction='forward'").fetchone()[0],
+ 'chat_log_max': c.execute("SELECT MAX(id) FROM chat_log").fetchone()[0],
+ 'chat_log_max_ts': c.execute("SELECT MAX(timestamp) FROM chat_log").fetchone()[0],
+}, ensure_ascii=False, indent=1))

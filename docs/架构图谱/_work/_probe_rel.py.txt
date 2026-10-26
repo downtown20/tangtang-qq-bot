@@ -1,0 +1,17 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s,*a: c.execute(s,*a).fetchall()
+out = {}
+# 有私聊历史的人（relationship 合成只能取私聊最早 50 条）
+out['people_with_private_msg'] = q("SELECT COUNT(DISTINCT qq_id) FROM chat_log WHERE COALESCE(group_id,'')='' AND COALESCE(is_bot_reply,0)=0")[0][0]
+# 群活跃但零私聊的人
+out['group_only_users'] = q("SELECT COUNT(*) FROM (SELECT qq_id FROM chat_log WHERE COALESCE(group_id,'')<>'' AND COALESCE(is_bot_reply,0)=0 GROUP BY qq_id HAVING SUM(CASE WHEN COALESCE(group_id,'')='' THEN 1 ELSE 0 END)=0)")[0][0]
+# total_chats>=80 但无关系档案者里，有多少从没私聊过
+out['stale_no_rel_total'] = q("SELECT COUNT(*) FROM people WHERE total_chats>=80 AND COALESCE(relationship_summary,'')=''")[0][0]
+out['stale_no_rel_no_private'] = q("SELECT COUNT(*) FROM people p WHERE p.total_chats>=80 AND COALESCE(p.relationship_summary,'')='' AND NOT EXISTS(SELECT 1 FROM chat_log c WHERE c.qq_id=p.qq_id AND COALESCE(c.group_id,'')='')")[0][0]
+out['stale13_detail'] = q("SELECT qq_id, total_chats, COALESCE(relationship_updated,0), total_chats-COALESCE(relationship_updated,0) FROM people WHERE COALESCE(relationship_summary,'')<>'' AND total_chats-COALESCE(relationship_updated,0)>=80 ORDER BY 4 DESC LIMIT 6")
+out['fail_backoff_entries'] = q("SELECT key, value FROM kv_store WHERE key LIKE 'rel_syn_fail_until:%' ORDER BY value DESC LIMIT 6")
+out['fail_backoff_future'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'rel_syn_fail_until:%' AND value > datetime('now','localtime')")[0][0]
+out['legacy_notes_never_scanned'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>'' AND COALESCE(notes_trust_level,'legacy_unverified') NOT IN ('verified','manual','corrected') AND COALESCE(notes_dirty,0)=0")[0][0]
+print(json.dumps(out, ensure_ascii=False, indent=1))

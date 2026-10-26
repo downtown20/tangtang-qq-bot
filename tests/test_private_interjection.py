@@ -30,9 +30,12 @@ class FakeHandler(AutonomyMixin):
         self.memory = MemorySystem(store=store)
         self.scenarios = ScenarioManager("scenarios")
         self.config = {
-            "scenario_targets": {"10003": "心理陪伴"},
+            # 这里必须用 scenarios/psychology.yaml **当前的 display**——
+            # `scenarios.get()` 按 display 匹配（scenario.py:138-150），
+            # 写旧名字会让这个 fixture 自己先失效，而测试还以为在测别的东西。
+            "scenario_targets": {"10003": "陪伴"},
             "groups": {
-                "10005": {"scenario_targets": {"10008": "🧠 心理陪伴"}},
+                "10005": {"scenario_targets": {"10008": "🧠 陪伴"}},
             },
         }
         self.bot_qq = "10000"

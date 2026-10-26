@@ -1,0 +1,28 @@
+# -*- coding: utf-8 -*-
+"""只读取证 9：自然衰减 dt 分布 / 自治动作计数 / 反思日志（autonomy-tracer）"""
+import io, os, sys, re, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+base = os.path.join(root, '日志')
+files = [f for f in os.listdir(base) if f.startswith('tangtang.log')]
+dt = collections.Counter(); acts = collections.Counter()
+keys = ['自治循环心跳', '驱动力触发', '内部消化', '自然衰减', '私聊插话', '自治冷场', '自治回应',
+        '反思完成', '开始反思整合', '自治循环异常', '内部消化', '主动开窗', '插话命中']
+for f in sorted(files):
+    with io.open(os.path.join(base, f), 'r', encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            m = re.search(r'自然衰减 dt=([0-9.]+)h', line)
+            if m: dt[m.group(1)] += 1
+            for k in keys:
+                if k in line: acts[k] += 1
+print('自然衰减 dt 分布:', dt.most_common())
+print()
+print('全日志计数（所有 tangtang.log*）:')
+for k in keys: print('  ', k, acts[k])
+print()
+p = os.path.join(base, 'tangtang.log')
+first_hb = None
+for line in io.open(p, 'r', encoding='utf-8', errors='replace'):
+    if '自治循环心跳' in line:
+        first_hb = line[:19] + ' ' + line.split('| ')[-1].strip(); break
+print('today first heartbeat:', first_hb)

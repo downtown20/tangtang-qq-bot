@@ -33,6 +33,9 @@ GROUP_SCOPED_TOOLS = frozenset({
     "get_essence_msgs",
     "get_group_activity",
     "search_episodes",
+    # 2026-10-16 T2.4：离线摘要也是**群作用域材料**——它在群里才成立，
+    # 私聊不能拿（非主人私聊直接拒；主人私聊也没有群 id → 拿不到摘要）。
+    "get_offline_summary",
 })
 
 MEMORY_ACCESS_TOOLS = (

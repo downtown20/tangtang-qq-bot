@@ -1,0 +1,24 @@
+{
+  "target": "tools/判据_J4错误记忆.py",
+  "tests": "tests/test_memory_metrics_tools.py",
+  "mutations": [
+    {
+      "name": "现造探针不查污染（拿库里已有的词当虚构词，测的就成了回忆）",
+      "old": "            if int(stat.get(\"memories\") or 0) or int(stat.get(\"chat_log\") or 0):",
+      "new": "            if False:",
+      "expect_fail": "test_fresh_probes_skips_dirty_keywords"
+    },
+    {
+      "name": "探测失败混进「待人工判」（报告看着完整，其实有探针压根没跑到）",
+      "old": "                         (\"probe_failed\", \"probe_failed\")):",
+      "new": "                         (\"probe_failed\", \"unclear\")):",
+      "expect_fail": "test_j4_probe_failure_is_not_counted_as_unclear"
+    },
+    {
+      "name": "词表退回旧版（真实诚实回答又被判成 unclear，等于判据失明）",
+      "old": "             \"没这件事\", \"没那件事\", \"没这回事\", \"没那回事\",",
+      "new": "             \"__never_matches__\",",
+      "expect_fail": "test_j4_real_honest_reply_is_classified_correct_unknown"
+    }
+  ]
+}

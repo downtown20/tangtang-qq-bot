@@ -1,0 +1,476 @@
+/* ═══════════════════════════════════════════════════════════════
+   她这一轮「收到的 prompt」账本（第 47 轮）
+   ───────────────────────────────────────────────────────────────
+   视觉取向：**仪表盘**，不是列表。一眼能看出三件事——花在哪、离上限多远、
+   哪块被打折了。所以主体是横条而不是文字行。
+
+   四态色沿用 `.is-ok / is-warn / is-error / is-skip`，
+   `skip` 用灰（`--label-caption`）而不是绿——「没采到」不等于「健康」。
+   ═══════════════════════════════════════════════════════════════ */
+
+.pl-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-md);
+  background: var(--bg-layer-3);
+}
+
+.pl-wrap.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--border-l2));
+}
+
+.pl-wrap.is-error {
+  border-color: color-mix(in srgb, var(--error) 40%, var(--border-l2));
+}
+
+.pl-empty {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--label-tertiary);
+  font-size: var(--fs-12);
+  padding: 10px 12px;
+  background: transparent;
+  border-style: dashed;
+}
+
+/* ── 头部：徽章 + 一句话结论 ── */
+.pl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pl-badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  line-height: 18px;
+  border: 1px solid transparent;
+}
+
+.pl-badge.is-ok {
+  color: #15803d;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.pl-badge.is-warn {
+  color: #b45309;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 34%, transparent);
+}
+
+.pl-badge.is-error {
+  color: #b91c1c;
+  background: var(--error-soft);
+  border-color: color-mix(in srgb, var(--error) 34%, transparent);
+}
+
+.pl-badge.is-skip {
+  color: var(--label-tertiary);
+  background: var(--bg-hover);
+  border-color: var(--border-l2);
+}
+
+.pl-headline {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.pl-flag {
+  margin-left: auto;
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-11);
+  color: #b45309;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  cursor: help;
+}
+
+/* ── 上下文预算（主进度条） ── */
+.pl-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pl-ctx-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pl-ctx-label {
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.pl-ctx-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.pl-ctx-num b {
+  font-size: var(--fs-14);
+  color: var(--label-primary);
+}
+
+.pl-pct {
+  margin-left: 6px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.pl-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  overflow: hidden;
+}
+
+.pl-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width var(--dur-base) var(--ease);
+}
+
+.pl-bar-fill.is-over {
+  background: var(--error);
+}
+
+.pl-bar-fill.is-hot {
+  background: linear-gradient(90deg, var(--warn), #f97316);
+}
+
+.pl-ctx-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fs-11);
+}
+
+/* ── 通用小字 ── */
+.pl-dim {
+  color: var(--label-tertiary);
+  font-size: var(--fs-11);
+  font-weight: 400;
+}
+
+/* ── 分段：花在哪 ── */
+.pl-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.pl-sec-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.pl-sec-hint {
+  font-weight: 400;
+}
+
+.pl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pl-row {
+  display: grid;
+  grid-template-columns: 84px 1fr 58px 38px;
+  align-items: center;
+  gap: 8px;
+}
+
+.pl-row-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
+.pl-fixed-tag {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 13px;
+  color: var(--label-tertiary);
+  background: var(--bg-active);
+}
+
+.pl-row-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--bg-active);
+  overflow: hidden;
+}
+
+.pl-row-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.pl-row-fill.is-fixed {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--label-caption) 0 4px,
+    transparent 4px 8px
+  );
+  border: 1px solid var(--label-caption);
+  box-sizing: border-box;
+}
+
+.pl-row:nth-child(2) .pl-row-fill:not(.is-fixed) {
+  background: var(--success);
+}
+
+.pl-row:nth-child(3) .pl-row-fill:not(.is-fixed) {
+  background: #a855f7;
+}
+
+.pl-row:nth-child(4) .pl-row-fill:not(.is-fixed) {
+  background: #0ea5e9;
+}
+
+.pl-row-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12);
+  color: var(--label-primary);
+  text-align: right;
+}
+
+.pl-row-share {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  text-align: right;
+}
+
+.pl-note {
+  margin: 0;
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+  line-height: 1.5;
+}
+
+.pl-note b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-primary);
+}
+
+/* ── 背景块：每块的命运 ── */
+.pl-rows-block {
+  gap: 3px;
+}
+
+.pl-block {
+  display: grid;
+  grid-template-columns: 1fr auto 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 7px;
+  border-radius: var(--radius-xs);
+  border-left: 2px solid var(--border-l3);
+  background: var(--bg-base);
+  font-size: var(--fs-12);
+}
+
+.pl-block.is-keep {
+  border-left-color: var(--success);
+}
+
+.pl-block.is-cut {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 6%, var(--bg-base));
+}
+
+.pl-block.is-drop {
+  border-left-color: var(--error);
+  background: color-mix(in srgb, var(--error) 5%, var(--bg-base));
+  opacity: 0.86;
+}
+
+.pl-block-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
+.pl-prio {
+  flex: none;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 13px;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--label-tertiary);
+  background: var(--bg-active);
+}
+
+.pl-block-cost {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+.pl-block-cost s {
+  color: var(--label-caption);
+}
+
+.pl-cut {
+  margin-left: 4px;
+  font-style: normal;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.pl-block-status {
+  text-align: right;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+/* ── 小事实 chips ── */
+.pl-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pl-fact {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--fs-11);
+  line-height: 17px;
+  color: var(--label-secondary);
+  background: var(--bg-base);
+  border: 1px solid var(--border-l2);
+  cursor: help;
+}
+
+.pl-fact.is-warn {
+  color: #b45309;
+  border-color: color-mix(in srgb, var(--warn) 34%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+/* ── 内容 chips（身份提示词小节 / 背景标签） ── */
+.pl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pl-chip {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-11);
+  line-height: 16px;
+  color: var(--label-secondary);
+  background: var(--bg-hover);
+}
+
+.pl-chip.is-bg {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ── 预警 ── */
+.pl-warns {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 2px;
+  border-top: 1px dashed var(--border-l2);
+}
+
+.pl-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-12);
+  line-height: 1.55;
+  cursor: help;
+}
+
+.pl-warn svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.pl-warn.is-warn {
+  color: #b45309;
+}
+
+.pl-warn.is-error {
+  color: #b91c1c;
+}
+
+/* 深色主题下这两档要提亮，否则在 #35 背景上糊成一团 */
+:root[data-theme='dark'] .pl-badge.is-ok {
+  color: #4ade80;
+}
+
+:root[data-theme='dark'] .pl-badge.is-warn,
+:root[data-theme='dark'] .pl-cut,
+:root[data-theme='dark'] .pl-warn.is-warn,
+:root[data-theme='dark'] .pl-fact.is-warn {
+  color: #fbbf24;
+}
+
+:root[data-theme='dark'] .pl-badge.is-error,
+:root[data-theme='dark'] .pl-warn.is-error {
+  color: #f87171;
+}
+
+:root[data-theme='dark'] .pl-block {
+  background: var(--bg-layer-2);
+}

@@ -1,0 +1,18 @@
+{
+  "target": "agent/sensory.py",
+  "tests": "tests/test_self_location_context.py",
+  "mutations": [
+    {
+      "name": "M4-丢掉星期（日期对了但星期缺，她仍然算不出「明天是周几」）",
+      "old": "    weekday = weekdays[now.weekday()]",
+      "new": "    weekday = \"\"",
+      "expect_fail": "test_formatter_output_has_date_weekday_and_clock"
+    },
+    {
+      "name": "M5-忽略注入的 now（测试只能读真实时间 = 假绿，教训 #37 家族）",
+      "old": "    now = now or datetime.now()",
+      "new": "    now = datetime.now()",
+      "expect_fail": "test_formatter_output_has_date_weekday_and_clock"
+    }
+  ]
+}

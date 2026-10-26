@@ -1,0 +1,1405 @@
+/* ═══════════════════════════════════════════════════════════════
+   会客厅 v3（Console）—— 对话主界面 + 可输入 + 回合痕迹
+
+   两栏：消息流 + 输入 | 糖糖状态
+   （会话源列表在**应用侧栏**，2026-10-24 从本页搬过去的）
+   视觉对齐 DSH 会话界面：克制、留白、0.5px 描边、12/13/14 小字号。
+   所有颜色/圆角/动效走 tokens.css，不写死色值（深色靠 token 自动翻转）。
+   ═══════════════════════════════════════════════════════════════ */
+
+.cs-page {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-base);
+  color: var(--label-primary);
+}
+
+/* ══════════════ 中栏：消息流（左栏已搬到应用侧栏） ══════════════ */
+.cs-stream {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+}
+
+.cs-stream-head {
+  flex: none;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px 0 20px;
+  border-bottom: 0.5px solid var(--border-l2);
+}
+
+.cs-stream-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cs-title {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  line-height: 20px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 连接状态点：绿=在线可用 / 灰=未连接 */
+.cs-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  white-space: nowrap;
+}
+
+.cs-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--label-caption);
+  flex: none;
+}
+
+.cs-conn.is-online {
+  color: var(--label-secondary);
+}
+
+.cs-conn.is-online .cs-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 2.5px rgba(34, 197, 94, 0.16);
+}
+
+/* 模型 / 来源 chip */
+.cs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 180px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  color: var(--label-tertiary);
+  font-size: var(--fs-11);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.cs-head-actions .btn {
+  height: 26px;
+}
+
+.cs-head-actions .icon-btn.is-on {
+  color: var(--label-primary);
+  background: var(--bg-active);
+}
+
+/* 内联错误提示：不弹窗，不挡操作 */
+.cs-err {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 20px 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--error-soft);
+  border: 0.5px solid rgba(236, 19, 19, 0.25);
+  color: var(--error);
+  font-size: var(--fs-12);
+}
+
+.cs-err-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-err-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-xs);
+  color: var(--error);
+  opacity: 0.7;
+}
+
+.cs-err-x:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+
+.cs-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px 16px;
+}
+
+/* ── 消息气泡 ── */
+.cs-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.cs-msg + .cs-msg {
+  margin-top: 18px;
+}
+
+.cs-msg.is-tangtang {
+  align-items: flex-start;
+}
+
+.cs-msg.is-user {
+  align-items: flex-end;
+}
+
+.cs-name {
+  margin: 0 0 4px 2px;
+  font-size: var(--fs-11);
+  line-height: 14px;
+  color: var(--label-caption);
+}
+
+.cs-msg.is-user .cs-name {
+  margin: 0 2px 4px 0;
+}
+
+.cs-bubble {
+  max-width: min(74%, 660px);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-14);
+  line-height: 1.68;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* 糖糖：左、中性底、左下角收一点 */
+.cs-msg.is-tangtang .cs-bubble {
+  background: var(--bg-layer-3);
+  border: 0.5px solid var(--border-l1);
+  border-bottom-left-radius: var(--radius-xs);
+  color: var(--label-primary);
+}
+
+/* 群友/主人：右、淡蓝（accent-soft） */
+.cs-msg.is-user .cs-bubble {
+  background: var(--accent-soft);
+  border: 0.5px solid transparent;
+  border-bottom-right-radius: var(--radius-xs);
+  color: var(--label-primary);
+}
+
+/* 消息下方：时间 */
+.cs-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 5px 2px 0;
+  font-size: var(--fs-11);
+  line-height: 15px;
+  color: var(--label-caption);
+}
+
+.cs-msg.is-user .cs-foot {
+  margin: 5px 2px 0 0;
+}
+
+.cs-time {
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* ══════════════ 媒体附件：图片 / 语音 ══════════════
+   QQ 图片/语音的 url 带 rkey 会过期——过期时 React 把 <img>/<audio>
+   换成 .cs-media-dead 那一行，这里只负责两种状态都好看。 */
+.cs-media {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: min(74%, 660px);
+  margin-top: 6px;
+}
+
+.cs-msg.is-user .cs-media {
+  justify-content: flex-end;
+}
+
+/* 图片缩略图：包成按钮，键盘也能聚焦放大 */
+.cs-media-thumb {
+  display: block;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  overflow: hidden;
+  line-height: 0;
+  cursor: zoom-in;
+  transition: filter var(--dur-fast) var(--ease);
+}
+
+.cs-media-thumb:hover {
+  filter: brightness(0.94);
+}
+
+.cs-media-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 大图会撑爆气泡——限死宽高，超出的部分裁掉 */
+.cs-media-img {
+  display: block;
+  max-width: 260px;
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 0.5px solid var(--border-l1);
+  background: var(--bg-module);
+}
+
+/* 语音条：浏览器原生播放器 + 时长，宽度受限 */
+.cs-media-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 3px 10px 3px 4px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-l1);
+  background: var(--bg-module);
+}
+
+.cs-media-audio audio {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: 32px;
+}
+
+/* 原生播放器控件跟随深色主题，别在深色卡片里亮一块白 */
+:root[data-theme="dark"] .cs-media-audio audio {
+  color-scheme: dark;
+}
+
+.cs-media-dur {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 过期/加载失败的媒体：一行提示，不留裂图、不留破播放器 */
+.cs-media-dead {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 0.5px dashed var(--border-l2);
+  background: var(--bg-module);
+  color: var(--label-caption);
+  font-size: var(--fs-11);
+}
+
+.cs-media-dead svg {
+  flex: none;
+}
+
+/* ══════════════ 独白频道：一条条卡片，不是左右气泡 ══════════════ */
+.cs-diario {
+  width: 100%;
+  max-width: 720px;
+  padding: 12px 16px 14px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-3);
+  user-select: text;
+}
+
+.cs-diario + .cs-diario {
+  margin-top: 14px;
+}
+
+/* 内心消化（digest）：不是写出来的日记，视觉上更淡 */
+.cs-diario.is-digest {
+  background: var(--bg-base);
+  border-style: dashed;
+  border-color: var(--border-l1);
+}
+
+.cs-diario-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cs-diario-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.cs-diario.is-digest .cs-diario-title {
+  font-weight: 500;
+  color: var(--label-tertiary);
+}
+
+/* 情绪标签（mixed / thoughtful …）原样显示 */
+.cs-diario-mood {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 8px;
+  height: 19px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.cs-diario-time {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-diario-body {
+  font-size: var(--fs-14);
+  line-height: 1.78;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--label-primary);
+}
+
+.cs-diario.is-digest .cs-diario-body {
+  font-size: var(--fs-13);
+  line-height: 1.72;
+  color: var(--label-tertiary);
+}
+
+.cs-diario .cs-media {
+  max-width: 100%;
+}
+
+.cs-diario .cs-trace {
+  max-width: 100%;
+}
+
+/* ══════════════ 独白频道：只读提示（替代输入框） ══════════════ */
+.cs-mono-note {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 14px 20px 16px;
+  border-top: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-2);
+  color: var(--label-caption);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.cs-mono-note svg {
+  flex: none;
+}
+
+/* ══════════════ 搜索命中高亮（1.6 秒后由 React 摘掉类） ══════════════ */
+.cs-msg.is-focus .cs-bubble,
+.cs-diario.is-focus {
+  position: relative;
+  isolation: isolate;
+}
+
+/* 一圈明显轮廓 + 短暂高亮底色；z-index:-1 在 isolate 里落在文字之下 */
+.cs-msg.is-focus .cs-bubble::before,
+.cs-diario.is-focus::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  z-index: -1;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  pointer-events: none;
+  animation: cs-focus-flash 1.6s var(--ease) both;
+}
+
+.cs-msg.is-focus .cs-name {
+  color: var(--accent);
+}
+
+@keyframes cs-focus-flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ══════════════ 图片放大预览层 ══════════════ */
+.cs-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px;
+  background: rgba(0, 0, 0, 0.78);
+  cursor: zoom-out;
+  animation: cs-lightbox-in var(--dur-base) var(--ease);
+}
+
+@keyframes cs-lightbox-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.cs-lightbox-img {
+  max-width: min(88vw, 1200px);
+  max-height: 78vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  cursor: default;
+  user-select: none;
+}
+
+.cs-lightbox-x {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.cs-lightbox-x:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.cs-lightbox-x:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* 点开之后才过期的情况：也要给一行字，不留裂图 */
+.cs-lightbox-dead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 32px;
+  border-radius: var(--radius-md);
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: var(--fs-13);
+  cursor: default;
+}
+
+.cs-lightbox-name {
+  max-width: min(88vw, 1200px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: default;
+}
+
+/* ══════════════ 回合痕迹卡片 ══════════════ */
+.cs-trace {
+  margin-top: 6px;
+  max-width: min(74%, 660px);
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-layer-2);
+  overflow: hidden;
+}
+
+/* 失败的一轮：红色左边框——她没说出话，但痕迹往往信息量最大 */
+.cs-trace.is-failed {
+  border-left: 2px solid var(--error);
+}
+
+.cs-trace-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--fs-11);
+  line-height: 15px;
+  color: var(--label-tertiary);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.cs-trace-head:hover {
+  background: var(--bg-hover);
+}
+
+.cs-trace-caret {
+  flex: none;
+  color: var(--label-caption);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.cs-trace-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.cs-trace-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-trace.is-open .cs-trace-title {
+  color: var(--label-secondary);
+}
+
+.cs-trace-badge {
+  flex: none;
+  padding: 0 5px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: var(--radius-xs);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.cs-trace-body {
+  padding: 2px 10px 10px;
+  border-top: 0.5px solid var(--border-l1);
+}
+
+.cs-trace-block + .cs-trace-block {
+  margin-top: 10px;
+}
+
+.cs-trace-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 0 5px;
+  font-size: var(--fs-11);
+  font-weight: 500;
+  color: var(--label-secondary);
+}
+
+.cs-trace-label svg {
+  color: var(--label-caption);
+  flex: none;
+}
+
+.cs-trace-loading,
+.cs-trace-empty {
+  padding: 10px 0;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--label-caption);
+}
+
+.cs-trace-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 思维链：等宽小字、独立滚动、保留换行 */
+.cs-reasoning {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: var(--radius-xs);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.68;
+  color: var(--label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* 工具步骤 */
+.cs-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cs-step {
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l1);
+}
+
+.cs-step-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cs-step-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.cs-step-ms {
+  flex: none;
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-step-result {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--label-tertiary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+  user-select: text;
+}
+
+.cs-trace-meta {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 0.5px solid var(--border-l1);
+  font-size: 10px;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「完整回合」——从就地展开升级成抽屉（多带决定与对方反应两段） */
+.cs-trace-more {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-xs);
+  background: var(--bg-layer-2);
+  color: var(--label-secondary);
+  font-size: var(--fs-11);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.cs-trace-more:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-l3);
+  color: var(--label-primary);
+}
+
+/* ── 中栏空态 ── */
+.cs-empty {
+  margin: auto;
+  max-width: 420px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--label-caption);
+}
+
+.cs-empty-title {
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.cs-empty-sub {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-tertiary);
+}
+
+.cs-empty .btn {
+  margin-top: 4px;
+}
+
+/* ══════════════ 底部：输入框 + 二次确认 ══════════════ */
+.cs-composer {
+  flex: none;
+  padding: 10px 20px 14px;
+  border-top: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-2);
+}
+
+/* 二次确认条：QQ 镜像会话发送前挡一下，避免误发到群里 */
+.cs-confirm-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l3);
+  border-left: 2px solid var(--warn);
+}
+
+.cs-confirm-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.cs-confirm-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-tertiary);
+  font-size: var(--fs-11);
+}
+
+.cs-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.cs-composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-base);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.cs-composer-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.cs-composer-box textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 132px;
+  padding: 5px 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--label-primary);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+
+.cs-composer-box textarea::placeholder {
+  color: var(--label-caption);
+}
+
+.cs-composer-box textarea:disabled {
+  cursor: not-allowed;
+}
+
+.cs-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-primary);
+  color: var(--bg-base);
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.cs-send:hover:not(:disabled) {
+  background: var(--brand-primary-hover);
+}
+
+.cs-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ══════════════ 右栏：状态面板 ══════════════ */
+.cs-panel {
+  width: 320px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-layer-2);
+  border-left: 0.5px solid var(--border-l2);
+}
+
+.cs-panel-head {
+  flex: none;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 16px;
+  border-bottom: 0.5px solid var(--border-l2);
+}
+
+.cs-panel-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+.cs-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.cs-panel-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 32px 16px;
+  font-size: var(--fs-12);
+  color: var(--label-caption);
+}
+
+.cs-section {
+  padding: 14px 16px;
+  border-bottom: 0.5px solid var(--border-l1);
+}
+
+.cs-section:last-child {
+  border-bottom: none;
+}
+
+.cs-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.cs-section-title svg {
+  color: var(--label-caption);
+  flex: none;
+}
+
+.cs-section-note {
+  margin-left: auto;
+  font-size: var(--fs-11);
+  font-weight: 400;
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 数值条 */
+.cs-gauge + .cs-gauge {
+  margin-top: 9px;
+}
+
+.cs-gauge-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.cs-gauge-val {
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border-l2);
+  overflow: hidden;
+}
+
+.cs-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--label-tertiary);
+  transition: width var(--dur-base) var(--ease);
+}
+
+/* 情绪三色（语义色，不硬编码） */
+.cs-bar-fill.is-energy {
+  background: var(--success);
+}
+.cs-bar-fill.is-mood {
+  background: var(--accent);
+}
+.cs-bar-fill.is-patience {
+  background: var(--warn);
+}
+.cs-bar-fill.is-drive {
+  background: var(--label-tertiary);
+}
+.cs-bar-fill.is-drive.is-urgent {
+  background: var(--error);
+}
+
+/* 驱动力行 */
+.cs-drive + .cs-drive {
+  margin-top: 10px;
+}
+
+.cs-drive.is-urgent .cs-drive-label {
+  color: var(--error);
+}
+
+.cs-drive-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.cs-drive-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.cs-urgent-tag {
+  padding: 0 4px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: var(--radius-xs);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.cs-drive-val {
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-drive-intensity {
+  margin-top: 3px;
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  color: var(--label-caption);
+}
+
+/* 主导驱动力 */
+.cs-dominant {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--label-primary);
+  margin-bottom: 3px;
+}
+
+/* 通用说明文字 */
+.cs-note {
+  margin-top: 6px;
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  color: var(--label-tertiary);
+  word-break: break-word;
+}
+
+/* 叙事 / 价值观引用块 */
+.cs-quote {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l1);
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-secondary);
+  word-break: break-word;
+  user-select: text;
+  /* 自我叙事可能很长，别把整个面板撑到几屏 —— 超了自己滚 */
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+/* 小 pill（心情基调这类短状态） */
+.cs-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cs-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  height: 19px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-module);
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  white-space: nowrap;
+}
+
+.cs-sub-list {
+  margin-top: 10px;
+}
+
+.cs-sub-title {
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+  margin-bottom: 5px;
+}
+
+.cs-sub-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.cs-sub-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--label-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.cs-sub-time {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+}
+
+/* 关系场 Top5 */
+.cs-rel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: var(--fs-12);
+}
+
+.cs-rel-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-secondary);
+}
+
+.cs-rel-bar {
+  flex: none;
+  width: 52px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-l2);
+  overflow: hidden;
+}
+
+.cs-rel-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width var(--dur-base) var(--ease);
+}
+
+.cs-rel-val {
+  flex: none;
+  min-width: 22px;
+  text-align: right;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 记忆最近几条 */
+.cs-memo {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.cs-memo-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--label-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.cs-memo-time {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+}
+
+/* 模型键值 */
+.cs-kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: var(--fs-12);
+}
+
+.cs-kv span {
+  flex: none;
+  color: var(--label-tertiary);
+}
+
+.cs-kv b {
+  min-width: 0;
+  max-width: 68%;
+  text-align: right;
+  font-weight: 500;
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  word-break: break-all;
+}
+
+.cs-turn {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border-l1);
+  font-size: var(--fs-11);
+  color: var(--label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════ 引导态（糖糖本体未启动） ══════════════ */
+.cs-gate {
+  margin: auto;
+  max-width: 520px;
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.cs-gate-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l2);
+  color: var(--label-tertiary);
+}
+
+.cs-gate-title {
+  margin: 0;
+  font-size: var(--fs-20);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.cs-gate-desc {
+  margin: 0;
+  max-width: 400px;
+  font-size: var(--fs-13);
+  line-height: 1.7;
+  color: var(--label-tertiary);
+}
+
+.cs-gate-reason {
+  max-width: 440px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  border: 0.5px solid var(--border-l2);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.cs-gate-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.cs-gate-hint {
+  margin: 0;
+  max-width: 420px;
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  color: var(--label-caption);
+}
+
+.cs-gate-hint code {
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-module);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ══════════════ toast ══════════════ */
+.cs-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 70vw;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--menu-bg);
+  backdrop-filter: var(--menu-blur);
+  box-shadow: var(--elevation-prominent);
+  color: var(--label-primary);
+  font-size: var(--fs-12);
+  z-index: 40;
+  pointer-events: none;
+}
+
+/* ══════════════ 窄窗口：右栏收窄 ══════════════ */
+@media (max-width: 1180px) {
+  .cs-panel {
+    width: 288px;
+  }
+  .cs-messages {
+    padding: 16px 16px 12px;
+  }
+  .cs-composer {
+    padding: 8px 16px 12px;
+  }
+}

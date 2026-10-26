@@ -1,0 +1,14 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+out = {}
+out['chat_index_private_vs_group'] = q("""SELECT CASE WHEN COALESCE(cl.group_id,'')='' THEN 'private' ELSE 'group' END, COUNT(*)
+FROM chat_index ci LEFT JOIN chat_log cl ON cl.id = ci.chat_id GROUP BY 1""")
+out['chat_index_null_join'] = q("SELECT COUNT(*) FROM chat_index ci LEFT JOIN chat_log cl ON cl.id=ci.chat_id WHERE cl.id IS NULL")[0][0]
+out['chat_index_distinct_qq'] = q("SELECT COUNT(DISTINCT qq_id) FROM chat_index")[0][0]
+out['kv_mood_state'] = q("SELECT key, substr(value,1,60) FROM kv_store WHERE key IN ('mood_state')")
+out['memories_backup_cols'] = [r[1] for r in q("PRAGMA table_info(memories_backup)")]
+out['memories_backup_max'] = q("SELECT COUNT(*) FROM memories_backup")[0][0]
+out['kv_keys_top_prefix'] = q("SELECT substr(key,1,12), COUNT(*) FROM kv_store GROUP BY 1 ORDER BY 2 DESC LIMIT 12")
+print(json.dumps(out, ensure_ascii=False, indent=1))

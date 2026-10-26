@@ -1,0 +1,278 @@
+/* 特殊模式区块（2026-10-26 第五轮）
+ *
+ * 为什么放调参页顶部而不做成独立页：主人是在「高级调参」里找它的
+ * （原话：「高级调参的场景触发范本的特殊模式是前端的哪个」），
+ * 而它本身又只有一屏内容——独立页会让他多点一次。
+ */
+
+.sm-block {
+  margin: 0 0 26px;
+  padding: 18px 20px 20px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-2);
+}
+
+.sm-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.sm-head h2 {
+  margin: 0 0 4px;
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.sm-head p {
+  margin: 0;
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--label-secondary);
+  max-width: 62em;
+}
+
+.sm-head strong {
+  color: var(--label-primary);
+  font-weight: 600;
+}
+
+.sm-count {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 三个条件——用序号而不是顿号罗列，因为它们是「同时满足」的关系 */
+.sm-rules {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-layer-3);
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+}
+
+.sm-rules ol {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: decimal;
+}
+
+.sm-rules strong {
+  color: var(--label-primary);
+  font-weight: 600;
+}
+
+.sm-rules em {
+  font-style: normal;
+  color: var(--label-tertiary);
+  margin-left: 2px;
+}
+
+.sm-notice {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-12);
+}
+
+.sm-notice.ok {
+  color: var(--success);
+  background: var(--success-soft, var(--bg-layer-3));
+}
+
+.sm-notice.warn {
+  color: var(--warning, #b45309);
+  background: var(--warning-soft, var(--bg-layer-3));
+}
+
+.sm-notice.error {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+.sm-empty {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+}
+
+.sm-card {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-l2);
+  background: var(--bg-layer-1);
+}
+
+.sm-card + .sm-card {
+  margin-top: 10px;
+}
+
+.sm-card.is-editing {
+  border-color: var(--accent);
+}
+
+.sm-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.sm-scenario {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.sm-card-head code {
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  font-family: var(--font-mono);
+}
+
+.sm-card-head .sm-btn {
+  margin-left: auto;
+}
+
+/* 事实表：每行「标签 → 值」，值后面可以带一句解释 */
+.sm-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.sm-facts > div {
+  display: flex;
+  gap: 10px;
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
+.sm-facts dt {
+  flex: none;
+  width: 48px;
+  color: var(--label-tertiary);
+}
+
+.sm-facts dd {
+  margin: 0;
+  color: var(--label-primary);
+  word-break: break-all;
+}
+
+.sm-facts em {
+  font-style: normal;
+  margin-left: 8px;
+  color: var(--label-tertiary);
+}
+
+.sm-warn {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--warning, #b45309);
+  background: var(--warning-soft, rgba(245, 158, 11, 0.1));
+}
+
+.sm-warn code {
+  font-family: var(--font-mono);
+}
+
+/* ── 编辑表单 ─────────────────────────────────────────── */
+
+.sm-form {
+  display: grid;
+  gap: 12px;
+}
+
+.sm-form label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-12);
+}
+
+.sm-form label > span {
+  color: var(--label-secondary);
+}
+
+.sm-form label > em {
+  font-style: normal;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+.sm-form input[type='text'],
+.sm-form input[type='number'],
+.sm-form input:not([type]),
+.sm-form select {
+  padding: 5px 8px;
+  font-size: var(--fs-12);
+  color: var(--label-primary);
+  background: var(--bg-base);
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-xs);
+}
+
+.sm-form label.sm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.sm-form label.sm-check > input {
+  margin-top: 2px;
+  flex: none;
+}
+
+.sm-form label.sm-check > span {
+  display: grid;
+  gap: 2px;
+  color: var(--label-primary);
+}
+
+.sm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.sm-btn {
+  padding: 4px 12px;
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+  background: var(--bg-layer-3);
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.sm-btn:hover:not(:disabled) {
+  color: var(--label-primary);
+  background: var(--bg-hover);
+}
+
+.sm-btn.primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.sm-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

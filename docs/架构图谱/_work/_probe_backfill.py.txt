@@ -1,0 +1,24 @@
+# -*- coding: utf-8 -*-
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, a=(): c.execute(s, a).fetchall()
+fwd = dict(q("SELECT qq_id, cursor_chat_id FROM extraction_cursors WHERE pipeline='memory' AND direction='forward'"))
+bf = dict(q("SELECT qq_id, cursor_chat_id FROM extraction_cursors WHERE pipeline='memory' AND direction='backfill'"))
+rows = q("SELECT qq_id, MAX(id) FROM chat_log GROUP BY qq_id")
+owner = '2180254043'
+rem = []
+for qq, mx in rows:
+    f = fwd.get(qq, 0); b = bf.get(qq, mx + 1)
+    lo, hi = min(f, b), max(f, b)
+    n = q("SELECT COUNT(*) FROM chat_log WHERE qq_id=? AND is_bot_reply=0 AND id>? AND id<? AND COALESCE(quarantined_at,'')=''", (qq, lo, hi))[0][0]
+    if n: rem.append((qq, n, 'owner' if qq == owner else ''))
+rem.sort(key=lambda x: -x[1])
+print(json.dumps({
+ 'backfill_eligible_users': sum(1 for x in rem if x[1] >= (10 if x[2]=='owner' else 30)),
+ 'backfill_remaining_msgs_total': sum(x[1] for x in rem),
+ 'backfill_top': rem[:8],
+ 'today_ingested': q("SELECT COUNT(*) FROM memories WHERE ingested_at >= date('now','localtime')")[0][0],
+ 'max_ingested': q("SELECT MAX(ingested_at) FROM memories")[0][0],
+ 'mem_by_day_last8': q("SELECT substr(ingested_at,1,10) d, COUNT(*) FROM memories GROUP BY d ORDER BY d DESC LIMIT 8"),
+ 'chat_log_rows_today': q("SELECT COUNT(*) FROM chat_log WHERE timestamp >= date('now','localtime')")[0][0],
+}, ensure_ascii=False, indent=1))

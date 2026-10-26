@@ -1,0 +1,18 @@
+{
+  "target": "agent/context_builder.py",
+  "tests": "tests/test_self_location_context.py",
+  "mutations": [
+    {
+      "name": "M8-预算尺子系数改回 1.8（真实 token 被高估 2.36 倍 → 44% 说明书重新被误砍）",
+      "old": "    return int(chinese_chars * 0.72 + other_chars * 0.5)",
+      "new": "    return int(chinese_chars * 1.8 + other_chars * 0.5)",
+      "expect_fail": "test_estimate_tokens_matches_measured_usage"
+    },
+    {
+      "name": "M9-只把中文系数改小一点点（0.72→1.2）——半修：真实 prompt 仍超预算，尾部段继续被砍",
+      "old": "    return int(chinese_chars * 0.72 + other_chars * 0.5)",
+      "new": "    return int(chinese_chars * 1.2 + other_chars * 0.5)",
+      "expect_fail": "test_real_prompt_fits_within_budget"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# -*- coding: utf-8 -*-
+"""task-3 取证脚本（只读 SELECT）——记忆/关系/人格状态层链路事实。
+只读：不写 memory.db，不触碰业务代码。"""
+import sqlite3, json
+c = sqlite3.connect(r'D:\qq-小糖糖\memory.db')
+q = lambda s, *a: c.execute(s, a).fetchall()
+out = {}
+
+out['people_trust'] = q("SELECT COALESCE(notes_trust_level,'<null>'), COUNT(*), "
+                        "SUM(CASE WHEN COALESCE(notes,'')<>'' THEN 1 ELSE 0 END) "
+                        "FROM people GROUP BY 1 ORDER BY 2 DESC")
+out['people_dirty'] = q("SELECT COALESCE(notes_dirty,0), COUNT(*) FROM people GROUP BY 1")
+out['people_rel'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(relationship_summary,'')<>''")
+out['rel_stale'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(relationship_summary,'')<>'' "
+                     "AND total_chats - COALESCE(relationship_updated,0) >= 80")
+out['rel_stale_max'] = q("SELECT MAX(total_chats - COALESCE(relationship_updated,0)) FROM people "
+                         "WHERE COALESCE(relationship_summary,'')<>''")
+out['mem_trust'] = q("SELECT COALESCE(trust_level,'<null>'), COUNT(*) FROM memories GROUP BY 1 ORDER BY 2 DESC")
+out['mem_status'] = q("SELECT COALESCE(status,'<null>'), COUNT(*) FROM memories GROUP BY 1 ORDER BY 2 DESC")
+out['mem_origin'] = q("SELECT COALESCE(origin,'<null>'), COUNT(*) FROM memories GROUP BY 1 ORDER BY 2 DESC LIMIT 12")
+out['mem_active_no_emb'] = q("SELECT COUNT(*) FROM memories m WHERE COALESCE(m.status,'active')='active' "
+                             "AND NOT EXISTS (SELECT 1 FROM memory_embeddings e WHERE e.memory_id=m.id)")
+out['chat_vs_index'] = q("SELECT (SELECT COUNT(*) FROM chat_log), (SELECT COUNT(*) FROM chat_index)")
+out['backlog_top'] = q("SELECT c.qq_id, COUNT(*) FROM chat_log c LEFT JOIN extraction_cursors e "
+                       "ON e.pipeline='memory' AND e.direction='forward' AND e.qq_id=c.qq_id "
+                       "WHERE COALESCE(c.is_bot_reply,0)=0 AND COALESCE(c.quarantined_at,'')='' "
+                       "AND c.id>COALESCE(e.cursor_chat_id,0) GROUP BY c.qq_id "
+                       "ORDER BY 2 DESC LIMIT 8")
+out['backlog_users'] = q("SELECT COUNT(DISTINCT c.qq_id) FROM chat_log c LEFT JOIN extraction_cursors e "
+                         "ON e.pipeline='memory' AND e.direction='forward' AND e.qq_id=c.qq_id "
+                         "WHERE COALESCE(c.is_bot_reply,0)=0 AND COALESCE(c.quarantined_at,'')='' "
+                         "AND c.id>COALESCE(e.cursor_chat_id,0)")
+out['cursors'] = q("SELECT pipeline, direction, COUNT(*) FROM extraction_cursors GROUP BY 1,2")
+out['notes_invisible'] = q("SELECT COUNT(*) FROM people WHERE COALESCE(notes,'')<>'' "
+                           "AND COALESCE(notes_trust_level,'legacy_unverified') NOT IN ('verified','manual','corrected')")
+out['fact_cluster_permanence'] = q("SELECT COALESCE(permanence,'<null>'), COUNT(*) FROM fact_clusters GROUP BY 1")
+out['cluster_fact_status'] = q("SELECT COALESCE(status,'<null>'), COUNT(*) FROM cluster_facts GROUP BY 1")
+out['kv_keys_rel'] = q("SELECT key, substr(value,1,30) FROM kv_store WHERE key LIKE 'rel_syn%' LIMIT 5")
+out['kv_count_rel'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'rel_syn_fail_until:%'")
+out['kv_synth_attempt'] = q("SELECT COUNT(*) FROM kv_store WHERE key LIKE 'synth_attempt:%'")
+out['mem_self'] = q("SELECT COUNT(*) FROM memories WHERE origin='self'")
+out['mem_self_targeted'] = q("SELECT COUNT(*) FROM memories WHERE origin='self' AND COALESCE(target_qq,'')<>''")
+out['people_noise'] = q("SELECT COUNT(*) FROM people WHERE total_chats=0")
+print(json.dumps(out, ensure_ascii=False, indent=1))

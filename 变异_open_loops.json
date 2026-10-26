@@ -1,0 +1,36 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_open_loops.py",
+  "mutations": [
+    {
+      "name": "M1-注入查询去掉「只查 open」（已收尾的事继续浮上来）",
+      "old": "                   WHERE qq_id=? AND status='open' AND asked_count < ?",
+      "new": "                   WHERE qq_id=? AND asked_count < ?",
+      "expect_fail": "test_resolved_loop_disappears_from_injection_list"
+    },
+    {
+      "name": "M2-去掉跨人校验（甲的悬事乙能收尾）",
+      "old": "            if str(row[0] or \"\") != qq:\n                return False  # 跨人",
+      "new": "            if False:\n                return False  # 跨人",
+      "expect_fail": "test_cross_person_is_rejected"
+    },
+    {
+      "name": "M3-去掉 asked_count 上限（问过 2 次继续问 = 骚扰机器）",
+      "old": "                   WHERE qq_id=? AND status='open' AND asked_count < ?",
+      "new": "                   WHERE qq_id=? AND status='open' AND ? >= 0",
+      "expect_fail": "test_asked_out_loops_stop_surfacing"
+    },
+    {
+      "name": "M4-去掉终态不可逆校验（收尾的事能被改回 open）",
+      "old": "            if str(row[1] or \"\") in self._OPEN_LOOP_TERMINAL:\n                return False  # 终态不可逆",
+      "new": "            if False:\n                return False  # 终态不可逆",
+      "expect_fail": "test_terminal_state_is_irreversible"
+    },
+    {
+      "name": "M5-去掉去重（同一件事提 5 次建 5 行，挤满注入位）",
+      "old": "            for row in existing:\n                if self._open_loop_norm_topic(row[1]) == norm:",
+      "new": "            for row in []:\n                if self._open_loop_norm_topic(row[1]) == norm:",
+      "expect_fail": "test_same_topic_mentioned_again_updates_not_duplicates"
+    }
+  ]
+}

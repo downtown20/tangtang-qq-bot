@@ -1,0 +1,25 @@
+{
+  "target": "agent/memory.py",
+  "tests": "tests/test_open_loop_extraction.py",
+  "_about": "第 14 轮：第 12 轮写的旧闸门（prompt 边界三条）必须仍能红。它原先用「find('open_loop') + 固定 700 字符窗口」，本轮内容变多后被挤出窗口而误红——已改成按 `- open_loop:` 段定位。改了判据定位方式就必须重新证明它还能红（教训 #37）。",
+  "mutations": [
+    {
+      "name": "删掉「已完成不算」边界",
+      "old": "🚫 不算：已经完成的事——「面试完了」「体检做完了」是普通 event 记忆，不是没结的事",
+      "new": "🚫 不算：已经了结的事",
+      "expect_fail": "test_prompt_has_exclusion_rules_for_open_loop"
+    },
+    {
+      "name": "删掉「糖糖自己的承诺不算」边界",
+      "old": "🚫 不算：糖糖自己的承诺——那是糖糖的事（走另一条 remember_self），不是对方的未结事",
+      "new": "🚫 不算：别的来源",
+      "expect_fail": "test_prompt_has_exclusion_rules_for_open_loop"
+    },
+    {
+      "name": "删掉「空泛愿望不算」边界",
+      "old": "🚫 不算：无时间指向的空泛愿望——「以后想环游世界」「想变得有钱」没有落点，不是没结的事",
+      "new": "🚫 不算：无时间指向的事",
+      "expect_fail": "test_prompt_has_exclusion_rules_for_open_loop"
+    }
+  ]
+}

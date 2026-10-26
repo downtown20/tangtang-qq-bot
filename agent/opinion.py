@@ -311,13 +311,6 @@ class OpinionManager:
                 break
         return picked
 
-    def _nickname(self, qq_id: str) -> str:
-        try:
-            person = self._store.get_or_create_person(qq_id)
-            return (person.get("nickname") or "").strip() or qq_id
-        except Exception:
-            return qq_id
-
     async def _nickname_async(self, qq_id: str) -> str:
         """异步路径的人物昵称读取，保持旧同步兼容入口。"""
         try:

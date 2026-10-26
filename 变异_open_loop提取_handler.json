@@ -1,0 +1,24 @@
+{
+  "target": "agent/handler.py",
+  "tests": "tests/test_open_loop_extraction.py",
+  "mutations": [
+    {
+      "name": "M5-落库时丢掉 expected_at（到期排序永远命中不到）",
+      "old": "                        expected_at=str(item.get(\"expected_at\") or \"\"),",
+      "new": "                        expected_at=\"\",",
+      "expect_fail": "test_open_loop_item_creates_row_and_keeps_memory"
+    },
+    {
+      "name": "M6-落库时丢掉 source_memory_id（证据链断，查不到是哪句话来的）",
+      "old": "                        source_memory_id=memory_id,",
+      "new": "                        source_memory_id=0,",
+      "expect_fail": "test_open_loop_item_creates_row_and_keeps_memory"
+    },
+    {
+      "name": "M7-不拦低置信度（她开始追着问猜测的事）",
+      "old": "            if item.get(\"confidence\", 0.7) < 0.5:\n                continue",
+      "new": "            if False:\n                continue",
+      "expect_fail": "test_low_confidence_open_loop_is_rejected"
+    }
+  ]
+}

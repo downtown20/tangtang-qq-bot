@@ -1,0 +1,24 @@
+{
+  "target": "agent/protocols.py",
+  "tests": "tests/test_tuning_contract.py",
+  "mutations": [
+    {
+      "name": "代码兜底值与台账默认值漂移（界面显示的「默认值」是假的）",
+      "old": "PROFILE_MAX_LEN = tuning_int(\"profile_max_len\", 120)",
+      "new": "PROFILE_MAX_LEN = tuning_int(\"profile_max_len\", 200)",
+      "expect_fail": "test_code_fallback_matches_registry"
+    },
+    {
+      "name": "调参键拼错（界面看不见、日志刷 warning，而这个值永远等于兜底值）",
+      "old": "PROFILE_MAX_LEN = tuning_int(\"profile_max_len\", 120)",
+      "new": "PROFILE_MAX_LEN = tuning_int(\"profile_max_length\", 120)",
+      "expect_fail": "test_code_calls_are_all_registered"
+    },
+    {
+      "name": "常量绕开台账写死（「高级调参」里那一项成了摆设，改了不生效）",
+      "old": "BACKGROUND_BUDGET_TOKENS = tuning_int(\"background_budget_tokens\", 1100)",
+      "new": "BACKGROUND_BUDGET_TOKENS = 1100",
+      "expect_fail": "test_registry_items_are_all_wired"
+    }
+  ]
+}

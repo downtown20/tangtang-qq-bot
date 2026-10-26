@@ -114,7 +114,12 @@ class _FactClusterStore:
         self._pause()
         return self.clusters[0]
 
-    def update_cluster_summary(self, *_args):
+    def update_cluster_summary(self, *_args, **_kwargs):
+        # 真实 Store 的这个方法带 keyword-only 的 actor / reason（记忆变更留痕，
+        # 2026-10-24）。mock 必须跟得上真实签名：调用点外面包着
+        # `except Exception: pass`，签名失配会被**静默吞掉**，唯一的外在表现
+        # 就是「少一次 store 调用」——下面那条精确计数断言是唯一能抓住它的东西，
+        # 所以不要把它放宽成 `>= 6`。
         self._pause()
 
 

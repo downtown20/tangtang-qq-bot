@@ -21,6 +21,7 @@ from typing import Optional
 import httpx
 
 from .async_io import run_bounded_blocking
+from .tuning import tuning_float, tuning_int
 
 logger = logging.getLogger("糖糖.Voice")
 
@@ -54,8 +55,8 @@ EMOTION_SPEED: dict[str, str] = {
 }
 
 # LLM 可直接选择的韵律参数。系统只校验和执行，不从情绪替 LLM 推断。
-VOICE_SPEED_MIN = 0.75
-VOICE_SPEED_MAX = 1.25
+VOICE_SPEED_MIN = tuning_float("voice_speed_min", 0.75)
+VOICE_SPEED_MAX = tuning_float("voice_speed_max", 1.25)
 VOICE_PAUSE_STYLES = ("紧凑", "自然", "舒缓")
 
 # ── 合成超时预算：随设备与文本长度伸缩（2026-10-14 T52）───────────────
@@ -96,7 +97,7 @@ def _apply_pause_style(text: str, pause: str) -> str:
     return text
 
 # 长句分段阈值（超过此长度按句子切分）
-STREAMING_CHAR_THRESHOLD = 60
+STREAMING_CHAR_THRESHOLD = tuning_int("voice_streaming_char_threshold", 60)
 
 _PROMPT_REV = 4           # GPT-SoVITS prompt/参考音频版本——参数语义变化时
                           # 递增，让旧合成缓存自然失效（2026-08-26：米雪儿中文参考库）

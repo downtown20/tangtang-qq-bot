@@ -1,0 +1,15 @@
+# -*- coding: utf-8 -*-
+import io, os, sys, re, collections
+sys.stdout.reconfigure(encoding='utf-8')
+root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+p = os.path.join(root, '日志', 'tangtang.log')
+per = collections.defaultdict(list)
+with io.open(p, 'r', encoding='utf-8', errors='replace') as f:
+    for line in f:
+        m = re.search(r'自治循环心跳 #(\d+)', line)
+        if m:
+            b = line.split('boot=')[1][:8]
+            per[b].append((line[:19], int(m.group(1))))
+for b, rows in per.items():
+    nums = [n for _, n in rows]
+    print(b, 'lines', len(rows), 'first', rows[0], 'last', rows[-1], 'monotonic', nums == sorted(nums))

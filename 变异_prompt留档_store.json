@@ -1,0 +1,18 @@
+{
+  "target": "agent/store.py",
+  "tests": "tests/test_turn_trace_prompt_digest.py",
+  "mutations": [
+    {
+      "name": "M13-INSERT 不写 prompt_digest（列加了但永远是空串）",
+      "old": "                \"tool_steps_json,prompt_chars,duration_ms,recorded_at,prompt_digest) \"\n                \"VALUES (?,?,?,?,?,?,?,?,?,?)\",",
+      "new": "                \"tool_steps_json,prompt_chars,duration_ms,recorded_at) \"\n                \"VALUES (?,?,?,?,?,?,?,?,?)\",",
+      "expect_fail": "test_record_and_read_back_digest"
+    },
+    {
+      "name": "M14-老库迁移段删掉（老库永远没有 prompt_digest 列，写入直接报错）",
+      "old": "            if \"prompt_digest\" not in _tt_cols:\n                conn.execute(\n                    \"ALTER TABLE turn_traces \"\n                    \"ADD COLUMN prompt_digest TEXT NOT NULL DEFAULT ''\"\n                )",
+      "new": "            if False:\n                pass",
+      "expect_fail": "test_old_table_gets_column_on_init"
+    }
+  ]
+}

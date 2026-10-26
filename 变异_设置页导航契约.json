@@ -1,0 +1,18 @@
+{
+  "target": "desktop/src/lib/settingsGroups.ts",
+  "tests": "tests/test_settings_schema_coverage.py",
+  "mutations": [
+    {
+      "name": "设置节没有左侧导航入口（schema 有、用户点不到，教训 #12 复发）",
+      "old": "      { key: 'catch_up', label: '离线补读', icon: History },\n",
+      "new": "",
+      "expect_fail": "test_every_schema_section_has_a_nav_item"
+    },
+    {
+      "name": "导航指向一个不存在的节（点进去是空白页）",
+      "old": "{ key: 'memory_sync', label: '记忆同步', icon: RefreshCw },",
+      "new": "{ key: 'memory_sync_typo', label: '记忆同步', icon: RefreshCw },",
+      "expect_fail": "test_nav_items_have_matching_schema"
+    }
+  ]
+}

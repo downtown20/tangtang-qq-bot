@@ -1,0 +1,12 @@
+{
+  "target": "agent/console_api.py",
+  "tests": "tests/test_console_replay_feedback.py",
+  "mutations": [
+    {
+      "name": "M1 回放又拿触发消息去匹配 feedback（回到修复前）",
+      "old": "            try:\n                reply_text = store.get_bot_reply_text_for_trigger(\n                    int(row.get(\"id\") or 0))\n            except Exception:\n                logger.debug(\"回放：取她的回复正文失败\", exc_info=True)\n                reply_text = \"\"",
+      "new": "            reply_text = \"\"",
+      "expect_fail": "test_replay_matches_feedback_via_her_actual_reply"
+    }
+  ]
+}

@@ -48,9 +48,16 @@ def _register():
 # 时间查询
 # ═══════════════════════════════════════════════════════════════════
 
-def get_current_time() -> str:
-    """返回当前时间的友好描述，包括日期、星期、时段"""
-    now = datetime.now()
+def get_current_time(now: datetime | None = None) -> str:
+    """返回当前时间的友好描述，包括日期、星期、时段。
+
+    `now` 可注入（2026-10-25 自查修正）：`personality._get_time_context()` 与
+    `get_time` 工具从此**共用同一份格式化逻辑**，避免「prompt 说凌晨、工具说
+    深夜」两套口径打架。注入参数也让调用方（含测试）能锁定时钟——
+    原来的 `patch("datetime.datetime")` 对本模块顶层 `from datetime import
+    datetime` **无效**（名字已绑定），测试其实一直在读真实时间。
+    """
+    now = now or datetime.now()
     weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday = weekdays[now.weekday()]
 
