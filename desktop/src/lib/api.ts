@@ -1652,14 +1652,18 @@ export const api = {
       webui_url: string
       note?: string
     }>('/api/snowluma/start', { method: 'POST', body: '{}' }),
+  // 运行中要的是「重启」：只调 start 会走 already 分支回来，界面看着像没反应。
+  restartSnowluma: () =>
+    request<{
+      ok: boolean
+      pid?: number
+      already?: boolean
+      restarted?: boolean
+      dir?: string
+      webui_url: string
+      note?: string
+    }>('/api/snowluma/restart', { method: 'POST', body: '{}' }),
   connectCheck: () => request<{ results: CheckResultItem[] }>('/api/connect-check'),
-  // 质量分析（2026-10-27）：SnowLuma 相关运维只保留这一项 + 重启信号消费。
-  // 真正跑的是 tools/分析对话质量.py（纯 CLI），桥用子进程调它并把报告文本回来。
-  qualityAnalyze: (opts?: { group_id?: string; private_qq?: string; hours?: number }) =>
-    request<{ ok: boolean; report: string; stderr: string }>('/api/quality/analyze', {
-      method: 'POST',
-      body: JSON.stringify(opts ?? {}),
-    }),
   botStart: () =>
     request<{ ok: boolean; pid?: number; already?: boolean }>('/api/bot/start', {
       method: 'POST',

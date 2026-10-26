@@ -555,3 +555,17 @@
   margin: 4px auto 0;
 }
 
+
+/* 左上角「启动糖糖」起停后的提示（2026-10-27）。
+   这是「点了像没反应」的另一半：状态没在期望时间内翻转时，
+   至少要说清楚是「还在起」还是「起不来」，而不是默默恢复按钮。 */
+.sidebar-bot-note {
+  margin: 6px 12px 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}

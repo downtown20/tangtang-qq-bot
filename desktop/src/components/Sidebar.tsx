@@ -36,6 +36,7 @@ import {
   type ConsoleSourceKind,
 } from '../lib/api'
 import { hasUnread, loadRead, saveRead, type ReadMap } from '../lib/consoleRead'
+import { useBotControl } from '../lib/useBotControl'
 import ContextMenu, { type MenuItem, type MenuState } from './ContextMenu'
 import './Sidebar.css'
 
@@ -176,21 +177,18 @@ export default function Sidebar({
     return () => clearInterval(timer)
   }, [])
 
-  const running = status?.bot.running ?? false
+  // 启停交给共用 hook（2026-10-27）：概览页和这里的按钮从此是**同一个实现**，
+  // 且会等状态真的翻转才解除 busy —— 原来这里只做了一次不 await 的 refreshStatus，
+  // `python main.py` 起来要好几秒，UI 立刻回到「启动糖糖」，看着就是没生效。
+  const bot = useBotControl()
+  const running = bot.running
 
   const toggle = async () => {
-    setBusy(true)
     setError(null)
-    try {
-      running ? await api.botStop() : await api.botStart()
-      refreshStatus()
-      // 起停之后会话源一定变了（起来才有数据），顺手刷一下
-      void onRefreshSources(true)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    await bot.toggle()
+    if (bot.error) setError(bot.error)
+    // 起停之后会话源一定变了（起来才有数据），顺手刷一下
+    void onRefreshSources(true)
   }
 
   /* 已读位置跟随当前会话：正看着的会话不该给自己留未读点。
@@ -456,10 +454,11 @@ export default function Sidebar({
 
       <button
         className={'sidebar-primary' + (running ? ' is-running' : '')}
-        onClick={toggle}
-        disabled={busy}
+        onClick={() => void toggle()}
+        disabled={bot.busy}
+        title={bot.error || bot.pending || ''}
       >
-        {busy ? (
+        {bot.busy ? (
           <Loader2 size={15} className="spin" />
         ) : running ? (
           <Square size={13} />
@@ -468,6 +467,11 @@ export default function Sidebar({
         )}
         <span>{running ? '停止糖糖' : '启动糖糖'}</span>
       </button>
+      {(bot.error || bot.pending) && (
+        <div className="sidebar-bot-note" role="status">
+          {bot.error || bot.pending}
+        </div>
+      )}
 
       <nav className="sidebar-nav">
         {NAV.map(({ key, label, icon: Icon }) => (

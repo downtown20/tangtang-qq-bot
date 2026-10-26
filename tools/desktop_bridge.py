@@ -475,6 +475,37 @@ def api_snowluma_start() -> dict:
     }
 
 
+def _stop_snowluma() -> bool:
+    """杀掉正在监听 5099 的进程（SnowLuma 的 node 子进程）。真杀了返回 True。
+
+    `/T` 连子树一起杀：`launcher.bat` 起的是 cmd → node，只杀 cmd 会留个孤儿 node
+    继续占着 5099，后面 `api_snowluma_start` 就会以为「已经在跑」。
+    """
+    pid = _pid_on_port(5099)
+    if not pid:
+        return False
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                   capture_output=True, timeout=25)
+    return True
+
+
+def api_snowluma_restart() -> dict:
+    """重启 SnowLuma：杀 → 等端口真的释放 → 再拉起。
+
+    为什么要等：`taskkill` 返回不代表端口已经放开，立刻 Popen launcher.bat 会出现
+    「新进程绑不上 5099、旧进程还没死」的竞态，表现为「点了重启，但还是原来那个」。
+    """
+    killed = _stop_snowluma()
+    if killed:
+        for _ in range(25):          # 最多等 7.5 秒
+            if not _port_open(5099):
+                break
+            time.sleep(0.3)
+    info = api_snowluma_start()
+    info["restarted"] = killed
+    return info
+
+
 def _pid_on_port(port: int):
     """找正在监听某端口的进程 PID（Windows，用系统 netstat，不引新依赖）。"""
     try:
@@ -508,12 +539,8 @@ def _snowluma_restart_watcher():
         try:
             if signal_file.is_file():
                 signal_file.unlink(missing_ok=True)
-                pid = _pid_on_port(5099)
-                if pid:
-                    # /T 连子树一起杀：launcher.bat 起的是 node.exe 子进程
-                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                                   capture_output=True, timeout=25)
-                    time.sleep(2)
+                _stop_snowluma()
+                time.sleep(2)          # 让端口真的释放，避免绑不上
                 info = api_snowluma_start()
                 print("[bridge] 已消费 .trigger_restart_snowluma：SnowLuma 重启"
                       + ("（原本就在跑，端口仍占着）" if info.get("already") else ""),
@@ -521,33 +548,6 @@ def _snowluma_restart_watcher():
         except Exception as e:  # noqa: BLE001 —— watcher 不许因为一次失败就死掉
             print("[bridge] 消费 .trigger_restart_snowluma 失败：" + repr(e), flush=True)
         time.sleep(3)
-
-
-def api_quality_analyze(body: dict) -> dict:
-    """跑 `tools/分析对话质量.py`，把报告文本回给前端（只读，不改任何东西）。"""
-    script = ROOT / "tools" / "分析对话质量.py"
-    if not script.is_file():
-        raise ValueError("找不到 tools/分析对话质量.py（这一版发布包可能不完整）")
-    args = [sys.executable, str(script)]
-    for key, flag in (("group_id", "--group"), ("private_qq", "--private"), ("hours", "--hours")):
-        v = (body or {}).get(key)
-        if v not in (None, ""):
-            args += [flag, str(v)]
-    # ⚠ 子进程编码两端都要钉死 UTF-8（教训 #37 形态③）：那个脚本的报告里有 emoji，
-    # 而 Windows 子进程默认 stdout 是 GBK —— 不传 PYTHONIOENCODING 的话
-    # `print(report)` 直接 UnicodeEncodeError，退出码非 0 且 stdout 为空，
-    # 前端只会看到一句「执行失败」，看不出真实原因。
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-    try:
-        out = subprocess.run(args, cwd=str(ROOT), capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=300, env=env)
-    except subprocess.TimeoutExpired:
-        raise ValueError("质量分析超过 300 秒仍未结束——先缩小范围（指定群 / 最近 N 小时）")
-    report = (out.stdout or "").strip()
-    if out.returncode != 0 and not report:
-        raise ValueError("质量分析脚本执行失败：" + (out.stderr or "")[-800:])
-    return {"ok": out.returncode == 0, "report": report,
-            "stderr": (out.stderr or "")[-2000:]}
 
 
 def _load_conn_check_module():
@@ -2202,9 +2202,9 @@ ROUTES_POST = {
     "/api/tuning/save": api_tuning_save,
     # 连接密钥 / SnowLuma（2026-10-26）
     "/api/secrets/save": api_secrets_save,
-    # 2026-10-27：质量分析（SnowLuma 相关运维只保留这一项 + 重启信号消费）
-    "/api/quality/analyze": api_quality_analyze,
     "/api/snowluma/start": lambda b: api_snowluma_start(),
+    # 运行中的时候给的是「重启」：只调 start 会走 already 分支，等于什么都没做
+    "/api/snowluma/restart": lambda b: api_snowluma_restart(),
 }
 
 

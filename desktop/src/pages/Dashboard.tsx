@@ -15,7 +15,7 @@ import {
   Loader2,
   Plug,
   ShieldCheck,
-  Activity,
+  RotateCw,
 } from 'lucide-react'
 import {
   api,
@@ -25,6 +25,7 @@ import {
   type SnowlumaStatus,
   type StatCounts,
 } from '../lib/api'
+import { useBotControl } from '../lib/useBotControl'
 import StatusPanel from '../components/StatusPanel'
 import './Page.css'
 
@@ -102,30 +103,48 @@ export default function Dashboard({
     load()
   }, [load])
 
-  const running = status?.bot.running ?? false
+  // 启停交给共用 hook（2026-10-27）：**和左上角那个按钮是同一个实现**，
+  // 而且它会等状态真的翻转才解除 busy —— 原来的做法是发完命令立刻刷新，
+  // 而 `python main.py` 起来要几秒，界面看着就像「按了没反应」。
+  const bot = useBotControl()
+  const running = bot.running
 
   const toggle = async () => {
     setBusy(true)
     try {
-      running ? await api.botStop() : await api.botStart()
+      await bot.toggle()
+      if (bot.error) setError(bot.error)
+      // 起停之后其余面板也变了（进程/会话源/统计），一并刷
       await Promise.all([
         api.stats().then(setStats),
         api.status().then(setStatus),
         api.consoleSnapshot().then(setSnapshot).catch(() => undefined),
       ])
-    } catch (e) {
-      setError((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
-  const startSnow = async () => {
+  /**
+   * 一个按钮，按状态决定做什么（2026-10-27）。
+   *
+   * 之前文案固定写「启动」，运行中点了只会走 `already` 分支回来 —— 界面上
+   * 看起来「按了没反应」。运行中该给的是「重启」，所以这里分两路：
+   *   · 未运行 → /api/snowluma/start
+   *   · 运行中 → /api/snowluma/restart（杀 5099 的进程 → 等端口释放 → 重新拉起）
+   */
+  const snowAction = async () => {
+    const running = Boolean(snowluma?.running)
     setSnowBusy(true)
     setSnowTip('')
     try {
-      const r = await api.startSnowluma()
-      setSnowTip(r.already ? 'SnowLuma 已在运行' : r.note || '已启动 SnowLuma')
+      if (running) {
+        const r = await api.restartSnowluma()
+        setSnowTip(r.restarted ? '已重启 SnowLuma' : '没找到在跑的进程，已重新启动')
+      } else {
+        const r = await api.startSnowluma()
+        setSnowTip(r.already ? 'SnowLuma 已在运行' : r.note || '已启动 SnowLuma')
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -143,25 +162,6 @@ export default function Dashboard({
       setError((e as Error).message)
     } finally {
       setCheckBusy(false)
-    }
-  }
-
-  // 质量分析（2026-10-27）：SnowLuma 相关运维只保留这一项 + 重启信号消费。
-  // 报告可能很长（几万字），默认折叠，点「展开全文」再看。
-  const [quality, setQuality] = useState<string | null>(null)
-  const [qualityBusy, setQualityBusy] = useState(false)
-  const [qualityFull, setQualityFull] = useState(false)
-
-  const runQuality = async () => {
-    setQualityBusy(true)
-    try {
-      const r = await api.qualityAnalyze()
-      setQuality(r.report || '（分析了，但报告是空的——是不是最近没有对话？）')
-      setQualityFull(false)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setQualityBusy(false)
     }
   }
 
@@ -290,12 +290,24 @@ export default function Dashboard({
             </div>
             <button
               className="btn btn-primary"
-              onClick={startSnow}
+              onClick={() => void snowAction()}
               disabled={snowBusy || snowluma?.installed === false}
-              title={snowluma?.installed === false ? '先到官方发布页下载 Windows x64 版解压到 SnowLuma/' : ''}
+              title={
+                snowluma?.installed === false
+                  ? '先到官方发布页下载 Windows x64 版解压到 SnowLuma/'
+                  : snowluma?.running
+                    ? '杀掉当前进程再重新拉起（首次启动的初始密码只在它自己的新窗口里打印一次）'
+                    : ''
+              }
             >
-              {snowBusy ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-              启动
+              {snowBusy ? (
+                <Loader2 size={14} className="spin" />
+              ) : snowluma?.running ? (
+                <RotateCw size={14} />
+              ) : (
+                <Play size={14} />
+              )}
+              {snowluma?.installed === false ? '未安装' : snowluma?.running ? '重启' : '启动'}
             </button>
           </div>
 
@@ -313,24 +325,6 @@ export default function Dashboard({
             <button className="btn btn-ghost" onClick={runCheck} disabled={checkBusy}>
               {checkBusy ? <Loader2 size={14} className="spin" /> : <ShieldCheck size={14} />}
               自检
-            </button>
-          </div>
-
-          {/* 质量分析：把最近的对话回看一遍，找「她哪里答得不像她」 */}
-          <div className="row">
-            <div className="row-icon is-cyan">
-              <Activity size={17} />
-            </div>
-            <div className="row-main">
-              <div className="row-title">质量分析</div>
-              <div className="row-desc explain-only">
-                把最近的对话逐条回看，统计回复长度、重复度、是否答非所问这类信号，
-                给出一份可读的报告。只读，不改任何数据。
-              </div>
-            </div>
-            <button className="btn btn-ghost" onClick={() => void runQuality()} disabled={qualityBusy}>
-              {qualityBusy ? <Loader2 size={14} className="spin" /> : <Activity size={14} />}
-              分析
             </button>
           </div>
         </div>
@@ -356,34 +350,6 @@ export default function Dashboard({
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {quality && (
-        <div className="panel">
-          <div className="panel-head">
-            <span>质量分析报告</span>
-            <button className="btn btn-ghost" onClick={() => setQualityFull((v) => !v)}>
-              {qualityFull ? '收起' : '展开全文'}
-            </button>
-          </div>
-          <div className="panel-body">
-            {/* 报告是纯文本（脚本 print 出来的），用 pre 保它原本的排版 */}
-            <pre
-              className="quality-report"
-              style={{
-                maxHeight: qualityFull ? 'none' : 220,
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontSize: 'var(--fs-12)',
-                lineHeight: 1.6,
-                margin: 0,
-              }}
-            >
-              {quality}
-            </pre>
           </div>
         </div>
       )}
