@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Plus, RefreshCw, Trash2, Pencil, Check, X, Download, Loader2,
 } from 'lucide-react'
-import { api, type ModelProfile, type ModelsResponse } from '../../lib/api'
+import { api, type ModelProfile, type ModelsResponse, type SecretEntry } from '../../lib/api'
 import '../Settings.css'
 
 const PROVIDERS = ['custom', 'deepseek', 'openai', 'anthropic', 'xai']
@@ -222,6 +222,44 @@ function ModelForm({
   const [fetched, setFetched] = useState<string[]>([])
   const [fetchError, setFetchError] = useState<string | null>(null)
 
+  // ── 密钥：档位里的 api_key 是 `${VAR}` 引用，真值在 .env（2026-10-27）──
+  // 原来这里把 `${CUSTOM_LLM_KEY}` 当普通值显示在输入框里，placeholder 还写着
+  // 「或直接填 sk-...」——那是在诱导用户填字面量。填进去的后果不是「多个选择」：
+  // `agent/secret_refs.normalize_secret_fields()` 会把字面量当真值，`.env` 里那个
+  // key 从此被静默无视（2026-09-20 真实踩过，排查两小时）。
+  // 所以：引用形态 → 只显示「已绑定 .env: VAR + 掩码」，写入口单独一个框。
+  const [secretEntries, setSecretEntries] = useState<SecretEntry[]>([])
+  const [newKey, setNewKey] = useState('')
+  const [keyBusy, setKeyBusy] = useState(false)
+  const [keyTip, setKeyTip] = useState('')
+  const [keyError, setKeyError] = useState('')
+
+  useEffect(() => {
+    api
+      .secrets()
+      .then((s) => setSecretEntries(s.entries))
+      .catch(() => setSecretEntries([]))
+  }, [])
+
+  const saveKey = async (envName: string) => {
+    const v = newKey.trim()
+    if (!v) return
+    setKeyBusy(true)
+    setKeyError('')
+    setKeyTip('')
+    try {
+      await api.saveSecret(envName, v)
+      setNewKey('')
+      setKeyTip(`已写进 .env 的 ${envName} —— 重启糖糖后生效`)
+      const s = await api.secrets()
+      setSecretEntries(s.entries)
+    } catch (e) {
+      setKeyError((e as Error).message)
+    } finally {
+      setKeyBusy(false)
+    }
+  }
+
   const set = (k: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...draft, [k]: e.target.value })
 
@@ -275,11 +313,55 @@ function ModelForm({
         </label>
         <label className="field field-wide">
           <span>API Key</span>
-          <input
-            value={draft.api_key}
-            onChange={set('api_key')}
-            placeholder="${CUSTOM_LLM_KEY} 或直接填 sk-..."
-          />
+          {(() => {
+            // `${VAR}` = 引用 .env；真值不在这里显示，也不允许在这里写进 config
+            const m = /^\$\{([A-Z_][A-Z0-9_]*)\}$/.exec(draft.api_key.trim())
+            if (!m) {
+              return (
+                <input
+                  value={draft.api_key}
+                  onChange={set('api_key')}
+                  placeholder="填 ${变量名} 引用 .env 里的密钥；留空则运行时用 .env 默认值"
+                />
+              )
+            }
+            const envName = m[1]
+            const entry = secretEntries.find((e) => e.name === envName)
+            return (
+              <div className="secret-bound">
+                <div className="secret-bound-state">
+                  已绑定 .env：<code>{envName}</code>
+                  {entry?.configured ? (
+                    <>
+                      {' · '}
+                      <code>{entry.masked}</code>
+                    </>
+                  ) : (
+                    <span className="muted"> · 还没填</span>
+                  )}
+                </div>
+                <div className="secret-bound-line">
+                  <input
+                    type="password"
+                    placeholder="粘贴新值（写进 .env，不回显）"
+                    spellCheck={false}
+                    value={newKey}
+                    onChange={(e) => setNewKey(e.target.value)}
+                  />
+                  <button
+                    className="btn btn-ghost"
+                    disabled={keyBusy || !newKey.trim()}
+                    onClick={() => void saveKey(envName)}
+                  >
+                    {keyBusy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
+                    保存到 .env
+                  </button>
+                </div>
+                {keyTip && <div className="form-hint">{keyTip}</div>}
+                {keyError && <div className="form-error">{keyError}</div>}
+              </div>
+            )
+          })()}
         </label>
 
         <div className="field field-wide fetch-row">

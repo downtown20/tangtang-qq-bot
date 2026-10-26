@@ -297,10 +297,13 @@ def _secret_env_names() -> dict[str, str]:
     """
     from agent.secret_refs import PROVIDER_KEY_ENV
 
-    raw = _load_raw_config()
-    provider = str(((raw.get("llm") or {}).get("provider")) or "deepseek")
-    env_name = PROVIDER_KEY_ENV.get(provider, PROVIDER_KEY_ENV["deepseek"])
-    return {env_name: f"LLM API Key（{provider}）", **_EXTRA_ENV_NAMES}
+    # 2026-10-27：放行**所有** provider 的变量名，不只是当前那一个。
+    # 档位化之后一个档位可能用别的服务商（主档 deepseek、备用档 openai），
+    # 只放行当前 provider 会让用户在备用档位里填不了 key。
+    # 仍然是白名单：只有 PROVIDER_KEY_ENV 表里有的键 + 三个固定项。
+    out = {env: f"LLM API Key（{prov}）" for prov, env in PROVIDER_KEY_ENV.items()}
+    out.update(_EXTRA_ENV_NAMES)
+    return out
 
 
 def _mask_env_value(value: str) -> str:
