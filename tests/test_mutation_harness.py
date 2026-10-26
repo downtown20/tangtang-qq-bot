@@ -16,10 +16,36 @@ import hashlib
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+import pytest
 
 BASE = Path(__file__).resolve().parent.parent
 HARNESS = BASE / "tools" / "变异对照.py"
+
+
+@pytest.fixture(autouse=True)
+def _sweep_test_backups():
+    """清掉本文件在**全局临时目录**里留下的变异备份。
+
+    备份是工具为了「硬杀自愈」故意落在 `tempfile.gettempdir()` 的。正常路径会删掉，
+    但**测试失败时**（比如阳性对照故意弄坏工具）测试里的 `_simulate_hard_kill` 已经把
+    备份写出来了，断言失败抛异常就没人清——于是下一次 `--recover-all` 会跑去
+    「恢复」一个 pytest 临时目录里的死文件。只清 meta 指向 pytest 临时目录的那些，
+    绝不碰真实运行留下的残留（那个该由 `--recover-all` 正经处理）。
+    """
+    yield
+    tmpdir = Path(tempfile.gettempdir())
+    for meta in tmpdir.glob("tt_mutation_bak_*.meta"):
+        try:
+            pointed = meta.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if "pytest-of-" not in pointed:
+            continue
+        meta.unlink(missing_ok=True)
+        meta.with_name(meta.name[: -len(".meta")]).unlink(missing_ok=True)
 
 MOD = 'SMALL = "small"\n\n\ndef classify(n):\n    if n > 10:\n        return "big"\n    return SMALL\n'
 TEST = "from mod import classify\n\n\ndef test_big():\n    assert classify(20) == \"big\"\n"
@@ -121,3 +147,87 @@ def test_expect_fail_must_land_on_the_right_assertion(tmp_path):
                             extra_args=["--expect-fail", "M1:test_big"])
     assert rc_ok == 0, f"命中期望断言应当通过：rc={rc_ok} {out_ok[-300:]}"
     assert "M1: RED OK" in out_ok
+
+
+# ═══════════════════════════════════════════════════════════════
+# 硬杀自愈（2026-10-26 真实事故）
+#
+# `try/finally` 挡得住异常和 Ctrl-C，**挡不住进程被强杀**。那次事故里
+# `agent/store.py` 的 M3 变异体（去掉 `or "unknown"` 兜底）留在了工作区，
+# 之后所有 pytest 结果都跑在变异体上——红绿都不可信。
+#
+# 对策是「改之前先落备份、还原成功后删备份；下次跑同一 target 发现备份还在
+# 就说明上次没跑完 → 先自愈」。下面用「手工构造硬杀后的状态」来验证，
+# 不真去 kill 进程（那样既慢又不稳定）。
+# ═══════════════════════════════════════════════════════════════
+def _harness_module():
+    """加载 tools/变异对照.py 拿内部函数（模块级只有常量，`main()` 在守卫里）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_mutation_harness", HARNESS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _simulate_hard_kill(tmp_path: Path) -> Path:
+    """把工作区摆成「上次被硬杀」的样子：target 是变异体，备份是原文。
+
+    返回备份路径，供断言清理情况。
+    """
+    harness = _harness_module()
+    target = (tmp_path / "mod.py").resolve()
+    original = target.read_bytes()
+    # 1) 落备份（工具会在改坏之前做这件事）
+    bak = harness._bak_path(target)
+    bak.write_bytes(original)
+    harness._meta_path(target).write_text(str(target), encoding="utf-8")
+    # 2) 把 target 改成变异体（模拟「改坏之后、还原之前被强杀」）
+    target.write_bytes(original.replace(b'SMALL = "small"', b'SMALL = "MUTATED"'))
+    return bak
+
+
+def test_hard_kill_leftover_is_recovered_before_baseline(tmp_path):
+    """被硬杀留下的变异体，必须在下一次运行**读文本之前**还原。
+
+    若不还原，基线会跑在变异体上——这正是那次事故的危害。
+    """
+    _fixture(tmp_path)
+    bak = _simulate_hard_kill(tmp_path)
+    assert bak.is_file(), "前置条件：备份应当残留"
+
+    rc, out, err = _run(tmp_path, ["M1:    if n > 10:=>    if n > 100:"])
+
+    assert "已自动还原" in (out + err), f"必须报告自愈：{out[-300:]} {err[-300:]}"
+    # 关键：基线用的是**还原后**的干净文件，所以基线必须绿且变异必须红
+    assert rc == 0, f"自愈后应当正常跑完：rc={rc} {out[-400:]}"
+    assert "基线：GREEN OK" in out, out[-400:]
+    assert "M1: RED OK" in out, out[-400:]
+    # 自愈后备份要清掉，否则下次会「重复还原」覆盖掉用户真正的新改动
+    assert not bak.is_file(), "自愈成功后备份必须删除"
+
+
+def test_recover_all_sweeps_leftovers(tmp_path):
+    """`--recover-all`：不想再跑 spec 时，也能把工作区扫干净。"""
+    _fixture(tmp_path)
+    bak = _simulate_hard_kill(tmp_path)
+
+    rc, out, err = _run(tmp_path, [], extra_args=["--recover-all"])
+
+    assert rc == 0, f"rc={rc} {out[-300:]} {err[-300:]}"
+    assert "已自动还原" in (out + err), f"必须报告恢复：{out[-300:]} {err[-300:]}"
+    assert (tmp_path / "mod.py").read_text(encoding="utf-8") == MOD, "内容必须还原成原文"
+    assert not bak.is_file(), "恢复后备份必须删除"
+
+
+def test_successful_run_leaves_no_backup(tmp_path):
+    """正常跑完不许留备份 —— 否则下一次运行会误判成「上次被硬杀」。"""
+    _fixture(tmp_path)
+    harness = _harness_module()
+    target = (tmp_path / "mod.py").resolve()
+
+    rc, out, _ = _run(tmp_path, ["M1:    if n > 10:=>    if n > 100:"])
+
+    assert rc == 0, out[-300:]
+    assert not harness._bak_path(target).is_file(), "正常路径不该留备份"
+    assert not harness._meta_path(target).is_file(), "正常路径不该留 meta"

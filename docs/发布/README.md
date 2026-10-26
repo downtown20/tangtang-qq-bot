@@ -8,7 +8,7 @@
 
 [![Release](https://img.shields.io/github/v/release/downtown20/tangtang-qq-bot?style=flat-square&label=release)](../../releases)
 ![Python](https://img.shields.io/badge/python-3.10-3776ab?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-3400%2B%20passing-3fb950?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-3900%2B%20passing-3fb950?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-8957e5?style=flat-square)
 
 </div>
@@ -80,7 +80,7 @@ flowchart TD
 
 上面那些设计，随便一个 PR 都能悄悄破坏掉——让人设变成关键词触发、让第二处判定点偷偷长出来、让写了的基础设施永远不接线。
 
-所以这个项目近两千个测试里，**有 1700 多个不是在测功能，是在守着架构**——它们的断言对象不是函数的输入输出，而是**源码本身**。想自己数一遍：
+所以这个项目近两千个测试里，**有 2000 多个不是在测功能，是在守着架构**——它们的断言对象不是函数的输入输出，而是**源码本身**。想自己数一遍：
 
 ```bash
 # 读生产源码做断言的测试文件（排除本 README 自己的契约测试）
@@ -117,7 +117,7 @@ python -m pytest tests/ -q
 | **记得** | 从对话里提取事实、合成画像、维护关系；被纠正时能改，也能撤销 |
 | **工具** | 联网搜索 · 天气 · 计算 · 翻译 · 识图 · 画图 · 知识库检索 · 文档解析 · 记忆查询 · 唱歌 · 发语音 · 定时提醒（原生 Tool Calling，她自主决定用不用） |
 | **说话** | 语音引擎只有一个：**GPT-SoVITS**（糖糖 / 丛雨 / 米雪儿三种声线，各带情绪参考音频） |
-| **唱歌** | **播放录音成品——不做实时合成，不需要任何语音模型**：41 首预录成品（糖糖声线 + 原唱两版），点歌即播 |
+| **唱歌** | **播放录音成品——不做实时合成，不需要任何语音模型**：完整曲库 41 首预录成品（糖糖声线 + 原唱两版），点歌即播。**仓库里只随带 4 首示例**，其余按「素材准备」自备 |
 | **角色** | 糖糖 / 米雪儿 / 丛雨，`/角色` 切换（主人/群主专属），人格卡 + 声线 + 表情包联动 |
 
 ## 上手
@@ -129,7 +129,7 @@ python -m pytest tests/ -q
 | **Python 3.10** | 糖糖本体是 Python 程序，包里不带解释器 | [python.org 的 3.10.11 下载页](https://www.python.org/downloads/release/python-31011/) 拉到底，选 **Windows installer (64-bit)**；安装时**务必勾上 `Add Python to PATH`** |
 | **QQ 客户端** | SnowLuma **不是自己登录 QQ 的**——它要注入到**已经在运行的 QQ 进程**里工作 | QQ 官网下 NT 版 9.x。装完**登录机器人那个 QQ 号，并且一直让 QQ 开着** |
 
-没装 Python 的话，双击 `安装糖糖.bat` / `启动控制台.bat` 只会得到一行
+没装 Python 的话，双击 `安装糖糖.bat` / `启动桌面端.bat` 只会得到一行
 `[ERROR] Python 3.10 not found.` 然后窗口自己关掉。
 
 > **登录 QQ 这件事发生在 QQ 客户端里，不在 SnowLuma 里。** SnowLuma 没有二维码登录，
@@ -139,13 +139,13 @@ python -m pytest tests/ -q
 
 1. **下载解压** —— 到 [Releases](../../releases) 下载 **`tangtang-v1.08.00.zip`**，解压到任意一个目录（这就是「项目根目录」，下面说的相对路径都以它为准）。
 
-2. **双击 `安装糖糖.bat`，勾你要的功能** —— 默认已勾好「聊天 + 高质量记忆 / 唱歌 / 图形控制台」，够用了。想要糖糖开口说话就勾上语音（约 6.5G 模型自动下载）；想让她看懂图就勾识图（约 2.5G，也可走云端、零下载）。**等它跑完**——依赖、模型、配置全部自动，断网直接重跑，已下载的不会重来。
+2. **双击 `安装糖糖.bat`，勾你要的功能** —— 默认已勾好「聊天 + 高质量记忆 / 唱歌 / 图形控制台」，够用了。想要糖糖开口说话就勾上语音（约 6.5G 模型自动下载）；想让她看懂图就勾识图（约 2.5G，也可走云端、零下载）。**等它跑完**——它会装依赖、按勾选下载模型（语音约 6.5 GB）、并用 `config.example.yaml` 生成 `config.yaml`，断了网重跑不会重下已完成的。**它不下载歌曲和表情包**——那些按下文「素材准备」自备。
 
 3. **装 SnowLuma** —— 它是连接 QQ 所需的协议端，属于第三方项目，其许可协议不允许随本项目分发，**只能你自己下载一次**：从 [官方发布页](https://github.com/SnowLuma/SnowLuma/releases) 下载 **Windows x64** 版（**认准不带 `-lite` 的那个**——精简包不带 Node.js，下错了点启动只会看到「'node' 不是内部或外部命令」），解压到项目根目录的 `SnowLuma/` 下，解压完应是 `SnowLuma/SnowLuma-vX.Y.Z-win-x64/` 这样的文件夹。安装程序会提醒你；也可以用任意其他 OneBot 11 反向 WebSocket 实现替代。（**别放进 `onebot/`**，那是糖糖自己的代码，见下方「目录结构」。）
 
-4. **双击 `启动控制台.bat`，填基本信息** —— 设置页填机器人 QQ、你自己的 QQ、模型 API Key，点「💾 保存设置」。
+4. **双击 `启动桌面端.bat`，填基本信息** —— 左侧「设置」里填机器人 QQ、你自己的 QQ；模型 API Key 在「连接与任务 → 连接密钥」里填（那一格写进 `.env`，不是 `config.yaml`），填完点该行右侧的「保存」。
 
-5. **确保 QQ 客户端开着、登录着机器人账号，然后点控制台的「启动 SnowLuma」** —— 首次启动，SnowLuma 的窗口里会打印**一行**、**只有这一次**：
+5. **确保 QQ 客户端开着、登录着机器人账号，然后在桌面端「概览」页找到 `SnowLuma` 那一行、点右侧的「启动」** —— 首次启动，SnowLuma 的窗口里会打印**一行**、**只有这一次**：
 
    ```text
    HH:MM:SS INFO               [WebUI] initial credentials: user=admin password=<16 位小写十六进制>
@@ -153,16 +153,16 @@ python -m pytest tests/ -q
 
    这是它的网页面板（<http://127.0.0.1:5099>）的登录密码，用户名固定 `admin`。**只打在屏幕上，不进日志文件，窗口一关就找不回来**。
 
-   > 🔑 **没抄下来 / 忘了密码**：关掉 SnowLuma → 删掉 `SnowLuma/*/config/webui.json` → 再启动一次（控制台按钮或双击 `launcher.bat` 都行）→ 窗口里会打印一个新的初始密码。不需要重新下载，也不会丢已经配好的东西。
+   > 🔑 **没抄下来 / 忘了密码**：关掉 SnowLuma → 删掉 `SnowLuma/*/config/webui.json` → 再启动一次（桌面端「概览」页的启动按钮，或双击 `launcher.bat`，都行）→ 窗口里会打印一个新的初始密码。不需要重新下载，也不会丢已经配好的东西。
 
 6. **浏览器打开 <http://127.0.0.1:5099>，把两条线接上** —— 首次登录要走一遍 `首次使用设置步骤`（`阅读并同意协议` + `设置访问密码`，两步都不能跳过）。然后：
 
    - `进程注入` 页 → 在 `进程列表` 里找到机器人那个 QQ → 点 `加载` → 确认框 `确认加载 SnowLuma？` 里再点 `加载`，等状态变成 `已在线`。
    - `节点配置` 页 → 左栏 `在线连接` 里选中机器人 QQ → 右侧有五个页签。**要改三处**：`WS 服务端` 里删掉出厂自带的 `ws-default`（它占着糖糖要用的 `3001` 端口）；`HTTP API` 里确认端口是 `3000`；`WS 客户端` 里点右上角 `新建`，把 **`目标 URL` 从默认的 `ws://127.0.0.1:8080/ws` 改成 `ws://127.0.0.1:3001`**（弹窗标题是 `新建 WebSocket 反向客户端`）。**每改一处都要点右上角的 `保存`**，不点不生效。
 
-   > 两边的 **`授权 Token`** 必须一模一样（面板里叫 `授权 Token`，糖糖那边叫 `SnowLuma Token`，是同一串）。最省事的做法：控制台「🔑 密钥管理」里点 `生成` → `复制`，到面板 `HTTP API` 和 `WS 客户端` 两处的 `授权 Token` 里**覆盖**成这一串。两边都留空也能跑，但那样本机任何程序都能调它的接口。
+   > 两边的 **`授权 Token`** 必须一模一样（面板里叫 `授权 Token`，糖糖那边叫 `SnowLuma Token`，是同一串）。做法：自己随便造一串（比如 32 位十六进制），填到面板 `HTTP API` 和 `WS 客户端` 两处的 `授权 Token`；再到桌面端「连接与任务 → 连接密钥」里把**同一串**填进 `SNOWLUMA_TOKEN` 并保存。这串没有任何格式要求，只要两边完全相同即可（桌面端只提供填写，不提供生成）。两边都留空也能跑，但那样本机任何程序都能调它的接口。
 
-7. **点控制台的「连接自检」，全绿之后点「🍬 启动小糖糖」** —— 连接自检会逐项检查 QQ ↔ SnowLuma ↔ 糖糖 这条链，直接告诉你还差哪一步、下一步填什么。日志出现 `小糖糖已上线` 就成了。
+7. **点桌面端「概览」页的「连接自检」，全绿之后点同一页的「🍬 启动小糖糖」** —— 连接自检会逐项检查 QQ ↔ SnowLuma ↔ 糖糖 这条链，直接告诉你还差哪一步、下一步填什么。日志出现 `小糖糖已上线` 就成了。
 
 > **卡住了怎么查**：在糖糖日志里搜 `SnowLuma 已连接`——**搜不到**说明协议端那条线没通（面板里的 `WS 客户端` 那条，`目标 URL` 多半还是 8080）；**搜得到但在报 401** 说明是 Token 那条线不一致。
 > 更细的症状对照表在 [docs/用户手册/使用说明.md](docs/用户手册/使用说明.md) 的「连不上？先看这张表」。
@@ -176,20 +176,23 @@ agent/                核心对话、记忆、人格、自治与工具模块（8
 onebot/               糖糖自己的 OneBot 11 适配层代码（反向 WS 服务端 + HTTP 客户端）
 SnowLuma/             QQ 协议端落点——第三方程序，要你自己下载解压到这里（见上方「上手」第 3 步）
 knowledge/            知识库——糖糖可检索的背景知识，递归扫描 .md / .txt
-scenarios/            场景包——心理陪伴、亲密等，控制台可挂载到任何人身上
-stickers/             默认表情包（956 张）+ 情绪索引
-stickers_cg/          特殊 CG 表情
-stickers_michele/     米雪儿角色专属表情（随安装包自带）
-stickers_murasame/    丛雨角色专属表情（随安装包自带）
-share_images/         本地分享图库（控制台发图用的图片放这里）
+scenarios/            场景包——心理陪伴、亲密等，桌面端可挂载到任何人身上
+prompts/              协议文本覆盖层——放同名 .md 覆盖 protocols.py 的某条协议，删掉即回落内置默认
+变异/                 变异测试规格（变异×.json：一次行为改动对应的对照样本）
+stickers/             默认表情包库落点（表情包不在仓库里，按「素材准备」自备）
+stickers_cg/          特殊 CG 表情落点（同上）
+stickers_michele/     米雪儿角色专属表情落点（同上）
+stickers_murasame/    丛雨角色专属表情落点（同上）
+share_images/         本地分享图库（桌面端发图用的图片放这里；不在仓库里）
 voice_cache/          语音缓存（自动生成，可随时清空）
-songs/                预录歌曲（41 首成品 + 歌词，随安装包自带）
+songs/                预录歌曲（仓库只随带 4 首示例；完整曲库按「素材准备」自备）
 gpt-sovits/           语音引擎与声线模型落点（勾选语音后由安装程序自动获取）
 docs/                 架构图谱、决策记录、用户手册、技术报告
 tools/                安装、诊断、维护与通用辅助脚本
+运维/                 运维脚本（Qt 图形控制台等；日常请用 desktop/ 桌面端）
 role_card.md          人格定义第一来源（另有 michele / murasame 两张）
+config.example.yaml   配置模板（首次运行或安装时复制为 config.yaml；密钥写成 ${VAR} 引用）
 main.py               服务启动入口
-糖糖控制台_qt.py       图形控制台
 ```
 
 > ⚠️ **`onebot/` 和 `SnowLuma/` 是两回事，别放混。** 两个名字都带「OneBot」，但一边在包里、一边要你下载：
@@ -202,7 +205,50 @@ main.py               服务启动入口
 > 连接方向是反的：**糖糖这边开服务端，SnowLuma 主动连过来**（默认 `ws://127.0.0.1:3001`）。
 > 所以 SnowLuma 永远不会、也不应该被放进 `onebot/` 里。
 
-> clone 主仓时，`songs/` 与角色贴图目录里只有一份摆放说明——音视频与贴图体积大，随安装包分发；跑一次 `安装糖糖.bat` 即可补齐。
+> clone 主仓时，`songs/` 只有 4 首示例歌曲，表情包与角色贴图目录是空的——音视频与贴图体积大，不在仓库里。完整曲库与贴图按 `docs/素材摆放说明.md` 自备；`安装糖糖.bat` 只装依赖、下载模型、生成配置，**不下载素材**。
+
+## 素材准备（仓库里没有的资源）
+
+**代码能 clone，素材不能**——音频、表情包、语音模型、QQ 协议端体积大或有单独的许可条款，都在仓库外：
+
+| 要准备的 | 放哪 | 从哪来 |
+|---|---|---|
+| 完整曲库（41 首成品；仓库只随带 4 首示例） | `songs/audio/` + `songs/covers/separated/` | 发布附件包 / 自备 |
+| 默认表情包（约 956 张） | `stickers/` | 发布附件包 / 自备 |
+| 角色专属表情（米雪儿 / 丛雨） | `stickers_michele/`、`stickers_murasame/` | 发布附件包 / 自备 |
+| 语音引擎 + 声线模型（约 6.5 GB） | `gpt-sovits/` | `安装糖糖.bat` 勾「语音」后自动下载 |
+| SnowLuma（第三方 QQ 协议端） | `SnowLuma/` | 官方发布页下载（见「上手」第 3 步） |
+
+歌曲和贴图放好之后的生效方式、目录约定、表情包打标签：**`docs/素材摆放说明.md`**。
+缺任何一样都不会让糖糖挂掉——没有歌就不唱、没有贴图就纯文字，装回素材重启即恢复。
+
+## 桌面端（可选）
+
+`desktop/` 是 React + Electron 的图形控制台（替代旧 Qt 控制台，旧版移入 `运维/`，功能保留）。
+**构建产物不进仓库**（`desktop/dist/`、`desktop/dist-electron/`、`desktop/release/` 都在 ignore 里），
+所以从 clone 到窗口出现，要自己构建一遍。
+
+前置：Node.js 20 LTS 或更高 + pnpm 9 或更高（`npm i -g pnpm`；依赖由 `pnpm-lock.yaml` 锁定）。
+
+```bash
+cd desktop
+pnpm install     # 首次装依赖（含 Electron 二进制，约 110 MB；.npmrc 已配国内镜像）
+pnpm dev         # 开发模式：Vite(5178) + Electron 窗口，自动拉起 Python 桥
+```
+
+想生成可双击的绿色版（`desktop/release/小糖糖桌面端/`）：
+
+```bash
+cd desktop
+pnpm build       # tsc 类型检查 + vite 构建 → dist/（渲染进程）+ dist-electron/（主进程）
+cd ..
+python tools/打包桌面端.py    # 组装绿色版、建快捷方式
+```
+
+产物位置：渲染进程 `desktop/dist/index.html`、主进程 `desktop/dist-electron/main.js`
+（`desktop/package.json` 的 `main` 指向它）。也可以构建完直接
+`cd desktop && pnpm exec electron . --no-sandbox` 启动——**Windows 上 `--no-sandbox` 不能省**：
+Chromium 沙箱在部分环境初始化失败会静默秒退（详见 `desktop/README.md`）。
 
 ## 文档
 
@@ -210,6 +256,7 @@ main.py               服务启动入口
 - [docs/架构图谱/糖糖架构图谱.html](docs/架构图谱/糖糖架构图谱.html) —— 78 个模块、160 条依赖关系的交互式图谱，按七层着色（下载后用浏览器打开，首次加载需联网取渲染库）
 - [docs/decisions/](docs/decisions/) —— 6 篇 ADR：动作信封、送达回执、永久事实归账、定时任务重试所有权……
 - [docs/开发规划/](docs/开发规划/) —— 19 篇技术设计与规划报告（不含 `归档/` 与 2 篇内部协作任务包）
+- `docs/素材摆放说明.md` —— 歌曲 / 表情包 / 语音模型 / QQ 协议端放哪、怎么生效
 - [docs/用户手册/使用说明.md](docs/用户手册/使用说明.md) —— 面向使用者的详细说明
 - [CLAUDE.md](CLAUDE.md) —— 给 AI 协作者的项目准则：架构原则、55 条反模式、改动前检查清单
 
@@ -227,7 +274,7 @@ main.py               服务启动入口
 | [FlagEmbedding](https://github.com/FlagOpen/FlagEmbedding)（BGE） | 记忆与知识库的向量检索、重排序 |
 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | 语音识别 |
 | [jieba](https://github.com/fxsjy/jieba) | 中文分词 |
-| [PySide6](https://github.com/qtproject/pyside-pyside-setup) | 图形控制台 |
+| [PySide6](https://github.com/qtproject/pyside-pyside-setup) | 运维控制台（`运维/`，日常用不到；`agent/` 的外观模块也依赖它） |
 
 **架构上调研并借鉴过的**
 

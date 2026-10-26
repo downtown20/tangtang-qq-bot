@@ -1105,7 +1105,13 @@ def bootstrap_config(dry_run: bool) -> bool:
     返回 True 表示本次新建了配置（后续接线无需再征求同意）。
     """
     cfg, example = BASE / "config.yaml", BASE / "config.example.yaml"
-    if cfg.exists() or not example.is_file():
+    if cfg.exists():
+        return False
+    if not example.is_file():
+        # 教训 #30：检查写了却静默返回，等于没写——缺模板必须说出来。
+        # 否则用户只会看到「装完了却起不来」，屏幕上没有任何线索指出缺的是这个文件。
+        print("\n  [!] 找不到 config.example.yaml，无法自动生成 config.yaml——"
+              "请从仓库或发布包中取回该模板")
         return False
     print("\n━━━ 生成配置 ━━━")
     if dry_run:
@@ -1326,8 +1332,8 @@ def cmd_install(dry_run: bool, deps_root: str | None = None,
         report_ready(choices)
     print("\n━━━ 完成 ━━━")
     print("  接下来：")
-    print("    1. 双击 启动控制台.bat → 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key")
-    print("    2. 控制台里启动 SnowLuma → 面板里注入并配好连接 → 启动糖糖")
+    print("    1. 双击 启动桌面端.bat → 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key")
+    print("    2. 桌面端里启动 SnowLuma → 面板里注入并配好连接 → 启动糖糖")
     print("  （换机搬家：本工具菜单 2/3 打包/解包记忆快照）")
     return 0
 
@@ -1351,7 +1357,7 @@ def _collect_include_roots(choices: list[int]) -> list[Path]:
              "role_card.md", "role_card_murasame.md", "role_card_michele.md",
              "scenarios", "knowledge", "SnowLuma", "onebot",
              "stickers", "stickers_cg", "stickers_murasame", "stickers_michele",
-             "tools", "安装糖糖.bat", "启动控制台.bat", "requirements.txt", ".stignore"]
+             "tools", "安装糖糖.bat", "运维", "requirements.txt", ".stignore"]
     opt_roots = {
         0: ["models/BAAI"],            # 聊天+记忆 → BGE 向量模型
         1: ["gpt-sovits"],             # 语音
@@ -1428,7 +1434,7 @@ def cmd_package() -> int:
     print("    1. 运行 安装糖糖.bat → 菜单 1 安装依赖")
     if snap:
         print("    2. 菜单 3 解包记忆（应用记忆快照）")
-    print("    3. 启动控制台 → 启动 SnowLuma → 面板里配好连接 → 启动糖糖")
+    print("    3. 启动桌面端 → 启动 SnowLuma → 面板里配好连接 → 启动糖糖")
     print("  [!] 部署包含 .env（API 密钥），请勿外传")
     return 0
 
@@ -1509,7 +1515,7 @@ def main() -> int:
         while True:
             print("小糖糖 安装/维护工具")
             print("   第一次用 → 选 1「安装依赖」：勾需要的功能，模型会自动下载并放到正确位置")
-            print("   已经装过 → 直接双击 启动控制台.bat")
+            print("   已经装过 → 直接双击 启动桌面端.bat")
             print()
             print("  1. 安装依赖 — 功能选择安装（含环境/目录检测、配置调整）")
             print("  2. 打包记忆 — 手动导出快照（自动打包失败/想立即切机时用；平时自动进行）")

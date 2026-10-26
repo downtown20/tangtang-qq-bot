@@ -141,7 +141,7 @@ def test_task_action_rollback_gates_are_in_config_and_qt_console():
         assert key in task_gates
         assert isinstance(task_gates[key], bool)
 
-    console = (root / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+    console = (root / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
     tree = ast.parse(console)
     task_section = next(
         node for node in ast.walk(tree)

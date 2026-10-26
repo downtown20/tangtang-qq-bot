@@ -1,5 +1,5 @@
 def test_theme_tokens_are_module_level_and_referenced():
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     assert "RADIUS_CONTROL = 6" in source
     assert "RADIUS_CARD = 10" in source
     assert "HIGHLIGHT_BORDER" in source
@@ -9,7 +9,7 @@ def test_theme_tokens_are_module_level_and_referenced():
 def test_four_state_contract_pressed_focus_disabled():
     """四态规范闸门（2026-09-06 令牌表 §4.2）：主要按钮类必须都有 pressed，
     focus 键盘环不得依赖权重不足的通用规则，disabled 不得被 id 规则顶掉。"""
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     for sel in ("QPushButton#pinkBtn:pressed", "QPushButton#greenBtn:pressed",
                 "QPushButton#dangerBtn:pressed", "QPushButton#actionBtn:pressed",
                 "QPushButton#subtleBtn:pressed", "QPushButton#catBtn:pressed",
@@ -35,7 +35,7 @@ def test_darken_helper():
 
 def test_20260906_ui_batch_contract():
     """五项 UI 改动闸门（2026-09-06 主人需求）：横线/分页/滚动/navBtn 灰/侧栏伸缩。"""
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     # 1. 统计横线（自绘 HDivider + 主题刷新钩子）
     assert "class HDivider(QFrame)" in source
     assert "self._stat_divider = HDivider" in source
@@ -65,7 +65,7 @@ def test_20260906_qfluent_extract_contract():
     1) 日志胶囊必须自绘（QSS 圆角病不剪裁背景，禁止回归 QSS 填充底）
     2) 主滚动面必须挂 OverlayScrollBar（12 处），禁止只留原生条
     3) ThemeToggle 四态微态在位"""
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     # 1. 自绘胶囊：类 + 接入 + QSS 移交底/边框（只留文字色）
     assert "class PillButton(QPushButton)" in source
     assert 'btn = PillButton(cat)' in source
@@ -90,7 +90,7 @@ def test_20260906_qfluent_extract_contract():
 
 def test_20260906_direct_reuse_contract():
     """直接复用工程闸门（2026-09-06 主人拍板）：丝滑滚轮 / 自绘 tooltip / 自绘勾选框。"""
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     # 1. 丝滑滚轮：引擎在位 + GPL 版权头不可丢 + OverlayScrollBar 集成
     assert "class SmoothWheelEngine(QObject)" in source
     assert "zhiyiYo / PyQt-Fluent-Widgets" in source  # 直接复用的 GPL 版权声明
@@ -117,7 +117,7 @@ def test_20260906_direct_reuse_contract():
 def test_20260906_aether_contract():
     """Aether 设计系统移植闸门（2026-09-06，UI参考 bad-dodo-83 system.css 令牌映射）：
     浅色 = 珍珠底/炭黑墨/胶囊几何/玻璃 bevel，深色几何零改动；主色按钮浅色描边化（QSS 不剪裁填充）。"""
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     # 1. 色板：浅色 Aether 令牌（pearl/ink/hairline），深色不动
     pal = open("agent/theme_palettes.py", encoding="utf-8").read()
     light_seg = pal.split('"light": {')[1].split("},")[0]
@@ -146,7 +146,7 @@ def test_20260906_aether_contract():
 
 def test_20260906_aether_round2_contract():
     """Aether 二批闸门（2026-09-06 主人拍板按文档风格执行）：aurora 洗底 / 全局胶囊代理 / 指挥坞。"""
-    source = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    source = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     # 1. AuroraWidget：自绘洗底 + setAlpha 修复（Qt 8 位 hex 是 AARRGGBB 非 CSS 语义——防黄绿回归）
     assert "class AuroraWidget(QWidget)" in source
     assert "setCentralWidget(self._aurora)" in source
@@ -181,7 +181,7 @@ def test_20260917_light_theme_fix_contract():
     """
     import re
     from 糖糖控制台_qt import _build_stylesheet  # noqa: E402
-    src = open("糖糖控制台_qt.py", encoding="utf-8").read()
+    src = open("运维/糖糖控制台_qt.py", encoding="utf-8").read()
     # ① 危险色语义
     assert "_danger_accent = str(pal.get(\"red\"" in src
     assert "_dgr_fg = DANGER_TEXT if _dk else _danger_accent" in src

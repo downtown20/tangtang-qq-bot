@@ -38,7 +38,7 @@ DEFAULT_FILES = [
     "agent/handler_commands.py",
     "agent/handler_autonomy.py",
     "main.py",
-    "糖糖控制台_qt.py",
+    "运维/糖糖控制台_qt.py",
     "config.yaml",
 ]
 

@@ -485,7 +485,7 @@ def check_gitnexus_index():
     if not idx.exists():
         print("  [!] 无 .gitnexus 索引——impact/context 代码分析不可用（可运行 npx gitnexus analyze 建立）")
         return
-    src = [BASE / "main.py", BASE / "糖糖控制台_qt.py"]
+    src = [BASE / "main.py", BASE / "运维" / "糖糖控制台_qt.py"]
     for d in ("agent", "napcat", "tools", "tests"):
         src += [p for p in (BASE / d).rglob("*.py") if "__pycache__" not in p.parts]
     newest = max((p.stat().st_mtime for p in src if p.exists()), default=0)

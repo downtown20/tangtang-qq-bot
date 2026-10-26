@@ -94,7 +94,7 @@ def _expected_file_count() -> int:
         p = BASE / d
         if p.is_dir():
             n += len(list(p.glob("*.py")))
-    for name in ("main.py", "糖糖控制台_qt.py"):
+    for name in ("main.py", "运维/糖糖控制台_qt.py"):
         if (BASE / name).exists():
             n += 1
     return n

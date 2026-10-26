@@ -12,13 +12,13 @@ def test_ui_anim_exports_and_cleanup_contract():
 
 
 def test_ui_theme_tokens_exist():
-    source = Path("糖糖控制台_qt.py").read_text(encoding="utf-8")
+    source = Path("运维/糖糖控制台_qt.py").read_text(encoding="utf-8")
     for token in ("RADIUS_CONTROL", "RADIUS_CARD", "HEIGHT_CONTROL", "SPACING_UNIT"):
         assert token in source
 
 
 def _console_source() -> str:
-    return Path("糖糖控制台_qt.py").read_text(encoding="utf-8")
+    return Path("运维/糖糖控制台_qt.py").read_text(encoding="utf-8")
 
 
 def test_navigate_uses_slide_to_not_bare_switch():

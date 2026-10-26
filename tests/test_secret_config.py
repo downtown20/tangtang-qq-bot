@@ -123,7 +123,7 @@ def test_console_restores_snowluma_token_placeholder():
     而是**接线本身**——控制台保存路径必须过这个函数。
     """
     root = Path(__file__).resolve().parents[1]
-    console = (root / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+    console = (root / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
 
     assert "normalize_secret_fields(data)" in console, (
         "save_config_file 没走密钥归一——保存会把 ${VAR} 物化成明文，"

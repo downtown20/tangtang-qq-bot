@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 BASE = Path(__file__).resolve().parent.parent
-CONSOLE = BASE / "糖糖控制台_qt.py"
+CONSOLE = BASE / "运维" / "糖糖控制台_qt.py"
 
 
 @pytest.fixture(scope="module")

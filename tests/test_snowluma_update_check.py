@@ -177,7 +177,7 @@ def test_console_runs_the_check_off_the_gui_thread():
     的地址实测要 20.2 秒才返回 → 启动 8 秒后界面冻 20 秒、
     Windows 给窗口标题挂上「(无响应)」，而那 20 秒换来的还是静默。
     """
-    console = (BASE / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+    console = (BASE / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
     assert "_SnowLumaUpdateWorker" in console, "更新检查没走线程"
     import ast
     tree = ast.parse(console)

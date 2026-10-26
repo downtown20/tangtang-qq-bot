@@ -15,9 +15,9 @@
     python tools/变异对照.py --target agent/foo.py --tests tests/test_foo.py \
         --mut "M1:旧串=>新串" --mut "M2:旧串=>新串"
 
-或写一份 spec（推荐；串里有换行时只能这样）：
+或写一份 spec（推荐；串里有换行时只能这样；spec 都放在仓库根的 `变异/` 目录下）：
 
-    python tools/变异对照.py --spec 变异.json
+    python tools/变异对照.py --spec 变异/变异.json
 
     {"target": "agent/foo.py",
      "tests": "tests/test_foo.py",
@@ -43,6 +43,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
@@ -52,6 +53,83 @@ def _read(path: Path):
     """返回 (文本, sha256[:16], 是否 CRLF)。文本保留原始换行。"""
     raw = path.read_bytes()
     return raw.decode("utf-8"), hashlib.sha256(raw).hexdigest()[:16], ("\r\n" in raw.decode("utf-8"))
+
+
+# ═══════════════════════════════════════════════════════════════
+# 崩溃自愈：try/finally 只挡得住异常和 Ctrl-C，**挡不住进程被强杀**
+#
+# 2026-10-26 实际发生过一次：一次硬杀（超时 kill）把 `agent/store.py` 的
+# M3 变异体（`_revision_text(actor).strip() or "unknown"` 去掉兜底）留在了
+# 工作区。之后所有 pytest 结果都不可信——基线自己在变异体上跑，红绿都无意义。
+# 这正是教训 #45「测量工具会污染被测系统」的硬杀版本。
+#
+# 对策：改文件**之前**先把原文落到系统临时目录，还原成功后删掉。
+# 下次跑同一个 target 时若发现备份还在，就说明上次没跑完 → 先自愈再继续。
+# 备份放系统临时目录（不进仓库、不受 .gitignore 影响，也不会被 git status 看见）。
+# ═══════════════════════════════════════════════════════════════
+def _bak_path(path: Path) -> Path:
+    """备份文件路径：按 target 绝对路径取 hash，同一文件永远同一个备份。"""
+    key = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / ("tt_mutation_bak_" + key)
+
+
+def _meta_path(path: Path) -> Path:
+    """备份的元数据：记住这份备份对应哪个 target（供 --recover-all 扫全盘用）。"""
+    return _bak_path(path).with_name(_bak_path(path).name + ".meta")
+
+
+def _recover_if_dirty(path: Path) -> bool:
+    """上次被硬杀过？把备份写回去。返回 True 表示这次做了恢复。"""
+    bak = _bak_path(path)
+    if not bak.is_file():
+        return False
+    try:
+        path.write_bytes(bak.read_bytes())
+    except OSError as e:
+        print("[!] 检测到上次运行被中断，但自动还原失败：" + str(e), file=sys.stderr)
+        return False
+    bak.unlink(missing_ok=True)
+    _meta_path(path).unlink(missing_ok=True)
+    print("[!] 检测到上次运行被中断（备份残留），已自动还原：" + str(path), file=sys.stderr)
+    print("    还原后请重跑一遍基线——上次的测试结果不可信。", file=sys.stderr)
+    # 自愈是「用备份无条件覆盖」，代价要讲明白：中断之后如果你手动改过这个文件，
+    # 那些改动现在没了（2026-10-27 审查 Minor）。用 git 能看回来。
+    print("    ⚠ 若在中断之后手动改过这个文件，这次还原会覆盖那些改动——"
+          "请 `git diff` 核对一下再继续。", file=sys.stderr)
+    return True
+
+
+def _recover_all() -> int:
+    """扫临时目录里所有残留备份，逐个还原。硬杀后不想再跑 spec 时用这个。
+
+    退出码要能区分「没有残留」「都恢复了」「有恢复失败的」——
+    旧版写的是 `0 if found >= 0 else 1`，`found` 是 int 永远 >= 0，
+    等于这条命令**永远报成功**（2026-10-27 审查 Minor）。
+    """
+    found = 0
+    failed = 0
+    for meta in sorted(Path(tempfile.gettempdir()).glob("tt_mutation_bak_*.meta")):
+        try:
+            target = Path(meta.read_text(encoding="utf-8").strip())
+        except OSError:
+            continue
+        # 只有 meta、没有 bak：说明备份已被别的一次运行清掉了，这条 meta 是脏的。
+        bak = Path(str(meta)[: -len(".meta")])
+        if not bak.is_file():
+            print("[·] 跳过（备份已不存在）：" + str(target), file=sys.stderr)
+            meta.unlink(missing_ok=True)
+            continue
+        if not target.is_file():
+            print("[·] 跳过（target 已不存在）：" + str(target), file=sys.stderr)
+            meta.unlink(missing_ok=True)
+            continue
+        if _recover_if_dirty(target):
+            found += 1
+        else:
+            failed += 1
+    print("恢复完成：%d 个文件成功%s"
+          % (found, "" if not failed else "，%d 个失败（见上方报错）" % failed))
+    return 0 if failed == 0 else 1
 
 
 def _norm(anchor: str, crlf: bool) -> str:
@@ -105,8 +183,13 @@ def main(argv=None) -> int:
     ap.add_argument("--expect-fail", action="append", default=[],
                     help="NAME:子串 —— 该变异变红时必须命中这个子串（证明红在对的断言上）")
     ap.add_argument("--json", help="把结果写成 JSON")
+    ap.add_argument("--recover-all", action="store_true",
+                    help="扫描并还原所有「上次被硬杀留下的变异体」——不跑测试，只修工作区")
     ap.add_argument("--root", default=str(BASE), help="根目录（默认仓库根；自测时可指向临时目录）")
     args = ap.parse_args(argv)
+
+    if args.recover_all:
+        return _recover_all()
 
     if args.spec:
         spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
@@ -133,6 +216,9 @@ def main(argv=None) -> int:
     if root not in path.parents or not path.is_file():
         print("目标不合法（必须在仓库内且是文件）：" + str(path), file=sys.stderr)
         return 1
+    # 先自愈：上次若被硬杀，工作区里可能正躺着一个变异体。必须在读文本之前还原，
+    # 否则基线会跑在变异体上——红绿都失去意义（教训 #45）。
+    _recover_if_dirty(path)
     text, sha0, crlf = _read(path)
     print("目标 %s  sha256=%s  %s  %d 字符" % (target, sha0, "CRLF" if crlf else "LF", len(text)))
 
@@ -148,11 +234,18 @@ def main(argv=None) -> int:
         if mutated is None:
             print(name + ": 锚点不唯一或找不到（count != 1）——锚点写错了，不猜。", file=sys.stderr)
             return 1
+        # 落备份 → 改坏 → 跑 → 一定还原 → 删备份。
+        # 硬杀可能让 finally 不执行，那时备份会留下，下次跑同一 target 时自愈。
+        bak, meta = _bak_path(path), _meta_path(path)
         try:
+            bak.write_bytes(text.encode("utf-8"))
+            meta.write_text(str(path), encoding="utf-8")
             path.write_text(mutated, encoding="utf-8", newline="")
             got = _run_tests(tests, root)
         finally:
             path.write_text(text, encoding="utf-8", newline="")
+            bak.unlink(missing_ok=True)
+            meta.unlink(missing_ok=True)
         _, sha1, _ = _read(path)
         if sha1 != sha0:
             print(name + ": 还原失败！" + sha0 + " -> " + sha1, file=sys.stderr)

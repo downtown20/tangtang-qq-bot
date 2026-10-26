@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock
 # Add project root to path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
+# 2026-10-26：Qt 运维控制台从根目录移入 运维/——模块 import 路径随之改变。
+# （只影响测试里的 importlib/import；生产入口走 start.py 的 TARGETS。）
+sys.path.insert(0, str(Path(__file__).parent.parent / "运维"))
 
 
 @pytest.fixture(autouse=True)

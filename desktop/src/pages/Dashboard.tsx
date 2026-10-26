@@ -13,8 +13,17 @@ import {
   Play,
   Square,
   Loader2,
+  Plug,
+  ShieldCheck,
 } from 'lucide-react'
-import { api, type BotStatus, type ConsoleSnapshot, type StatCounts } from '../lib/api'
+import {
+  api,
+  type BotStatus,
+  type CheckResultItem,
+  type ConsoleSnapshot,
+  type SnowlumaStatus,
+  type StatCounts,
+} from '../lib/api'
 import StatusPanel from '../components/StatusPanel'
 import './Page.css'
 
@@ -61,6 +70,12 @@ export default function Dashboard({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  // SnowLuma 与连接自检（2026-10-26 从旧 Qt 控制台搬入）
+  const [snowluma, setSnowluma] = useState<SnowlumaStatus | null>(null)
+  const [snowBusy, setSnowBusy] = useState(false)
+  const [snowTip, setSnowTip] = useState('')
+  const [check, setCheck] = useState<CheckResultItem[] | null>(null)
+  const [checkBusy, setCheckBusy] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -69,11 +84,13 @@ export default function Dashboard({
       api.status(),
       // 单点失败不拖垮整页：状态面板自己有「还没有状态数据」的空态
       api.consoleSnapshot().catch(() => null),
+      api.snowlumaStatus().catch(() => null),
     ])
-      .then(([s, st, snap]) => {
+      .then(([s, st, snap, snow]) => {
         setStats(s)
         setStatus(st)
         setSnapshot(snap)
+        setSnowluma(snow)
         setError(null)
       })
       .catch((e: Error) => setError(e.message))
@@ -99,6 +116,32 @@ export default function Dashboard({
       setError((e as Error).message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const startSnow = async () => {
+    setSnowBusy(true)
+    setSnowTip('')
+    try {
+      const r = await api.startSnowluma()
+      setSnowTip(r.already ? 'SnowLuma 已在运行' : r.note || '已启动 SnowLuma')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSnowBusy(false)
+      api.snowlumaStatus().then(setSnowluma).catch(() => undefined)
+    }
+  }
+
+  const runCheck = async () => {
+    setCheckBusy(true)
+    try {
+      const r = await api.connectCheck()
+      setCheck(r.results)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setCheckBusy(false)
     }
   }
 
@@ -205,8 +248,79 @@ export default function Dashboard({
               切换
             </button>
           </div>
+
+          {/* SnowLuma：QQ 通道。首次启动的网页面板密码只在它自己的新窗口里打印一次 */}
+          <div className="row">
+            <div className="row-icon is-cyan">
+              <Plug size={17} />
+            </div>
+            <div className="row-main">
+              <div className="row-title">
+                SnowLuma
+                {snowluma ? (
+                  <span className={'badge ' + (snowluma.running ? 'badge-ok' : 'badge-muted')} style={{ marginLeft: 8 }}>
+                    {snowluma.running ? '运行中' : snowluma.installed ? '未启动' : '未安装'}
+                  </span>
+                ) : null}
+              </div>
+              <div className="row-desc explain-only">
+                QQ 通道（第三方协议端，不随项目分发）。必须先开 QQ 客户端并登录机器人账号。
+              </div>
+              {snowTip && <div className="row-desc">{snowTip}</div>}
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={startSnow}
+              disabled={snowBusy || snowluma?.installed === false}
+              title={snowluma?.installed === false ? '先到官方发布页下载 Windows x64 版解压到 SnowLuma/' : ''}
+            >
+              {snowBusy ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+              启动
+            </button>
+          </div>
+
+          {/* 连接自检：把「连不上」翻译成「第几步还没做、下一步填什么」 */}
+          <div className="row">
+            <div className="row-icon is-green">
+              <ShieldCheck size={17} />
+            </div>
+            <div className="row-main">
+              <div className="row-title">连接自检</div>
+              <div className="row-desc explain-only">
+                逐项核对 SnowLuma 安装、网页面板、OneBot 网络配置与糖糖这一侧的 Token/端口。
+              </div>
+            </div>
+            <button className="btn btn-ghost" onClick={runCheck} disabled={checkBusy}>
+              {checkBusy ? <Loader2 size={14} className="spin" /> : <ShieldCheck size={14} />}
+              自检
+            </button>
+          </div>
         </div>
       </div>
+
+      {check && (
+        <div className="panel">
+          <div className="panel-head">
+            <span>连接自检结果</span>
+            <span className="muted">{check.length} 项</span>
+          </div>
+          <div className="panel-body">
+            {check.map((r) => (
+              <div className="row" key={r.key}>
+                <div className={'check-mark check-' + r.status}>
+                  {({ ok: '[√]', warn: '[!]', fail: '[×]', skip: '[ ]' } as Record<string, string>)[r.status] ??
+                    '[?]'}
+                </div>
+                <div className="row-main">
+                  <div className="row-title">{r.title}</div>
+                  {r.detail && <div className="row-desc">{r.detail}</div>}
+                  {r.next_step && <div className="row-desc check-next">→ {r.next_step}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ④ 快捷入口 */}
       <div className="section-head">

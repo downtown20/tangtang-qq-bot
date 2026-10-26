@@ -291,3 +291,94 @@
     transform: rotate(360deg);
   }
 }
+
+/* ── 连接自检四态 / 连接密钥（2026-10-26）──────────────────── */
+.badge-warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+.badge-fail {
+  background: rgba(236, 19, 19, 0.12);
+  color: var(--error);
+}
+:root[data-theme="dark"] .badge-warn {
+  color: #fbbf24;
+}
+:root[data-theme="dark"] .badge-fail {
+  color: #f87171;
+}
+
+.notice-ok {
+  background: rgba(34, 197, 94, 0.12);
+  border: 0.5px solid rgba(34, 197, 94, 0.28);
+  color: #15803d;
+}
+:root[data-theme="dark"] .notice-ok {
+  color: #4ade80;
+}
+
+/* 连接自检结果：四态标记 + 永不隐藏的 next_step */
+.check-mark {
+  width: 34px;
+  flex: none;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+}
+.check-ok {
+  color: #16a34a;
+}
+.check-warn {
+  color: #b45309;
+}
+.check-fail {
+  color: var(--error);
+}
+.check-skip {
+  color: var(--label-tertiary);
+}
+:root[data-theme="dark"] .check-ok {
+  color: #4ade80;
+}
+:root[data-theme="dark"] .check-warn {
+  color: #fbbf24;
+}
+:root[data-theme="dark"] .check-fail {
+  color: #f87171;
+}
+.check-next {
+  color: var(--label-secondary);
+}
+
+/* 连接密钥 */
+.secrets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 4px 0 18px;
+}
+.secrets-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 0.5px solid var(--border-l3);
+  border-radius: var(--radius-md);
+}
+.secrets-row-title {
+  font-size: var(--fs-14);
+  font-weight: 500;
+}
+.secrets-row-sub {
+  margin-top: 2px;
+  font-size: var(--fs-12);
+  color: var(--label-tertiary);
+}
+.secrets-row-edit {
+  display: flex;
+  gap: 8px;
+}
+.secrets-row-edit input {
+  flex: 1;
+  min-width: 0;
+}

@@ -27,7 +27,7 @@ from enum import Enum
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
-CONSOLE = BASE / "糖糖控制台_qt.py"
+CONSOLE = BASE / "运维" / "糖糖控制台_qt.py"
 CONN_CHECK = BASE / "tools" / "检查连接.py"
 
 

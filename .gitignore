@@ -13,6 +13,10 @@ config.yaml
 config.yaml.*
 *.key
 *.pem
+# 配置模板必须能进库（2026-10-26 根目录规范化：让 clone 下来的人知道该填哪些键）。
+# `.env.*` 会把 `.env.example` 一起挡掉——否定规则必须写在排除规则**后面**才生效。
+!config.example.yaml
+!.env.example
 
 # ── 运行时状态（每台机器各自生成，重启语义靠它们落盘）──────
 # 2026-10-15 T55-F 根目录规范化：16 条逐文件规则收口成目录级规则。
@@ -63,14 +67,23 @@ songs/audio/*
 !songs/audio/Lemon.wav
 !songs/audio/晴天.wav
 !songs/audio/secret base ~君がくれたもの~ (10 years after Ver.).wav
-!songs/光年之外.txt
-!songs/晴天.txt
+# 摆放说明/目录说明（*.md）要能进库（2026-10-26）：音频与图片一个都不进，但
+# 「往这里放什么、怎么命名」的说明必须随仓库发出，否则 clone 的人只能靠猜。
+!songs/**/*.md
 音频/
 voice_cache/
-stickers/
-stickers_cg/
-stickers_michele/
-stickers_murasame/
+# 贴图目录同理，但**不能**写成 `stickers/`：git 的规则是「父目录被排除时 `!` 无法再
+# 包含其中的文件」，写成目录就是一条惰性否定（2026-09-19 三个落点说明从未进库的同一个
+# 坑，见 tests/test_release_sanitizer.py::test_scaffold_notes_survive_gitignore）。
+# 排除「目录内容」→ 顶层 *.md 说明能进库，图片仍然一个都不进。
+stickers/*
+!stickers/*.md
+stickers_cg/*
+!stickers_cg/*.md
+stickers_michele/*
+!stickers_michele/*.md
+stickers_murasame/*
+!stickers_murasame/*.md
 share_images/
 Imag/
 
@@ -143,8 +156,12 @@ knowledge/色色参考/
 .dsh-memory/
 # 记忆冲突存档（真实聊天记录派生）
 tools/_归档/记忆冲突存档*.json
-# 协议覆盖层：里面含亲密模式的标记说明与个性化文案；删掉也照样跑（回落代码默认）
-prompts/
+# 协议覆盖层 `prompts/` **已入库**（2026-10-26 根目录规范化，主人反馈「内容不全」）：
+# 23 个文件逐个复核过私密词（色色/亲密模式/QQ 号/真名）——唯一命中的 `亲密聊天` 是
+# 心情枚举，`agent/mood.py:32` 与 `agent/protocols.py:1304` 里本来就有；正文与
+# protocols.py 默认值一致由 tests/test_prompt_overrides.py 钉住。
+# 它是行为核心：不进库，clone 下来拿到的是内置默认而不是这套调好的协议（静默变差）。
+# 不要再把这一行加回来。
 
 # ── 打标环境与缓存（2026-10-26 第 63 轮）────────────────────
 # `venv_tagger/` 是打标脚本的独立虚拟环境（126 MB，含 torch/PIL），

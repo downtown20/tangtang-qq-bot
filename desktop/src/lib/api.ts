@@ -29,6 +29,23 @@ export type ModelProfile = {
   thinking_effort?: string | null
 }
 
+export type SecretEntry = { name: string; label: string; configured: boolean; masked: string }
+export type SecretsResponse = { provider_env: string; entries: SecretEntry[]; env_path: string }
+export type SnowlumaStatus = {
+  installed: boolean
+  dir: string
+  running: boolean
+  webui_url: string
+  release_url: string
+}
+export type CheckResultItem = {
+  key: string
+  title: string
+  status: 'ok' | 'warn' | 'fail' | 'skip' | string
+  detail: string
+  next_step: string
+}
+
 export type ModelsResponse = {
   profiles: ModelProfile[]
   active: string
@@ -1599,7 +1616,15 @@ export const api = {
       body: JSON.stringify({ values }),
     }),
   config: () =>
-    request<{ raw: Record<string, unknown>; resolved: Record<string, unknown> }>('/api/config'),
+    request<{
+      raw: Record<string, unknown>
+      resolved: Record<string, unknown>
+      /** false = 没有 config.yaml 且模板也不在（前端要给「去跑安装器」的提示） */
+      configured: boolean
+      /** 这次桥启动时有没有从 config.example.yaml 自举 */
+      bootstrapped: boolean
+      example_available: boolean
+    }>('/api/config'),
   saveConfig: (config: Record<string, unknown>) =>
     request<{ ok: boolean; normalized: string[]; backup: string }>('/api/config', {
       method: 'POST',
@@ -1610,6 +1635,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ base_url, api_key }),
     }),
+  // ── 连接密钥 / SnowLuma / 连接自检（2026-10-26 桌面端主入口化）──────
+  secrets: () => request<SecretsResponse>('/api/secrets'),
+  saveSecret: (name: string, value: string) =>
+    request<{ ok: boolean; name: string; configured: boolean; masked: string; backup: string }>(
+      '/api/secrets/save',
+      { method: 'POST', body: JSON.stringify({ name, value }) },
+    ),
+  snowlumaStatus: () => request<SnowlumaStatus>('/api/snowluma/status'),
+  startSnowluma: () =>
+    request<{
+      ok: boolean
+      pid?: number
+      already?: boolean
+      dir?: string
+      webui_url: string
+      note?: string
+    }>('/api/snowluma/start', { method: 'POST', body: '{}' }),
+  connectCheck: () => request<{ results: CheckResultItem[] }>('/api/connect-check'),
   botStart: () =>
     request<{ ok: boolean; pid?: number; already?: boolean }>('/api/bot/start', {
       method: 'POST',

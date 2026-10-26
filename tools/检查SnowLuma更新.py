@@ -7,7 +7,7 @@ SnowLuma 1.14.8 之后的新版本很可能适配 9.9.33。GitHub API 本机可�
 
 用法：python tools/检查SnowLuma更新.py
 输出：有新版本时打印提醒 + 返回码 1；无新版本静默（返回码 0）。
-可挂到控制台开机检查（糖糖控制台_qt.py _auto_unpack_memory 附近调用）。
+可挂到控制台开机检查（运维/糖糖控制台_qt.py _auto_unpack_memory 附近调用）。
 """
 import json
 import subprocess

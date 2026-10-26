@@ -168,7 +168,7 @@ def _local_packages() -> set[str]:
     忘了清单。这里让清单跟着代码走，代码改到哪它跟到哪。
     """
     import re
-    files = [BASE / "main.py", BASE / "start.py", BASE / "糖糖控制台_qt.py"]
+    files = [BASE / "main.py", BASE / "start.py", BASE / "运维" / "糖糖控制台_qt.py"]
     files += sorted((BASE / "agent").glob("*.py"))
     found = set()
     for f in files:

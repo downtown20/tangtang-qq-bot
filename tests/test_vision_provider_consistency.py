@@ -34,7 +34,7 @@ class TestPredicateConsistency:
             "handler 的 provider 默认值漂移了（应为 main）")
 
     def test_console_defaults_to_main_and_gates_on_api(self):
-        s = _src('糖糖控制台_qt.py')
+        s = _src('运维/糖糖控制台_qt.py')
         assert 'vision.get("provider", "main")) == "api"' in s, (
             "控制台的识图判据漂移了（应为默认 main 且 == api）")
 
@@ -47,7 +47,7 @@ class TestPredicateConsistency:
     def test_no_stale_local_predicate_anywhere(self):
         """全局闸门：不许再有「拿 local 做比较」的识图判据。"""
         offenders = []
-        for rel in ('agent/handler.py', '糖糖控制台_qt.py', 'main.py'):
+        for rel in ('agent/handler.py', '运维/糖糖控制台_qt.py', 'main.py'):
             for i, line in enumerate(_src(rel).splitlines(), 1):
                 if 'vision' not in line.lower():
                     continue
@@ -70,7 +70,7 @@ class TestConfigMatchesDesign:
 
     def test_console_offers_main_choice(self):
         """前端必须把 main 作为可选（且是第一个 = 默认推荐）。"""
-        s = _src('糖糖控制台_qt.py')
+        s = _src('运维/糖糖控制台_qt.py')
         m = re.search(r'"llm\.vision\.provider".*?\[(.*?)\]', s)
         assert m, '控制台没有 llm.vision.provider 的 choice 定义'
         options = [x.strip().strip('"\'') for x in m.group(1).split(',')]

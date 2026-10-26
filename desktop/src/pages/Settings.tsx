@@ -5,6 +5,7 @@ import schemaJson from '../lib/settingsSchema.json'
 import { SETTINGS_GROUPS as GROUPS } from '../lib/settingsGroups'
 import SettingsFields, { type FieldDef } from '../components/SettingsFields'
 import ModelSettings from './settings/ModelSettings'
+import SecretsSettings from './settings/SecretsSettings'
 import './Settings.css'
 import '../components/SettingsFields.css'
 
@@ -30,6 +31,8 @@ export default function Settings({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedTip, setSavedTip] = useState('')
+  // 首次没有 config.yaml 时后端会返回 configured=false（桥已尽力从模板自举）
+  const [configured, setConfigured] = useState(true)
 
   useEffect(() => {
     api
@@ -38,6 +41,7 @@ export default function Settings({
         setConfig(c.raw)
         setBaseline(c.raw)
         setSavedSnapshot(JSON.stringify(c.raw))
+        setConfigured(c.configured !== false)
       })
       .catch((e: Error) => setError(e.message))
   }, [])
@@ -114,7 +118,21 @@ export default function Settings({
 
             {error && <div className="settings-body"><div className="notice notice-error">{error}</div></div>}
 
-            {section === 'llm' ? (
+            {!configured && (
+              <div className="settings-body">
+                <div className="notice notice-error">
+                  还没找到 config.yaml，也没能从 config.example.yaml 自动生成。
+                  <div className="notice-hint">
+                    请双击 安装糖糖.bat → 菜单 1（会生成配置），或手动把
+                    config.example.yaml 复制成 config.yaml 再重启桌面端。
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {section === 'secrets' ? (
+              <SecretsSettings />
+            ) : section === 'llm' ? (
               <ModelSettings />
             ) : current ? (
               <div className="settings-body">

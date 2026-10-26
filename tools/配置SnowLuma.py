@@ -86,7 +86,7 @@ token = resolve_env(cfg.get("napcat", {}).get("access_token", ""))
 if not token or _ENV_RE.match(token):
     print("[×] 还没设置 SnowLuma Token —— 不能帮你写一个假的进去")
     print(f"   config.yaml 里是：{cfg.get('napcat', {}).get('access_token', '（没有这一项）')}")
-    print("   请先：双击 启动控制台.bat →「密钥管理」→ 填 / 生成「SnowLuma Token」→ 保存")
+    print("   请先：双击 运维/启动运维控制台.bat →「密钥管理」→ 填 / 生成「SnowLuma Token」→ 保存")
     print("   然后回来重跑本脚本。")
     print("   （这一串要和 SnowLuma 网页面板里那一栏「授权 Token」完全一样。）")
     input("按回车退出...")

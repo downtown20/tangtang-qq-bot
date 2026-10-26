@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-_CONSOLE = Path(__file__).resolve().parent.parent / "糖糖控制台_qt.py"
+_CONSOLE = Path(__file__).resolve().parent.parent / "运维" / "糖糖控制台_qt.py"
 
 
 def _tree():

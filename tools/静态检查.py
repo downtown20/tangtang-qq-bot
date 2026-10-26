@@ -40,8 +40,8 @@ BASE = Path(__file__).resolve().parent.parent
 
 #: 要扫的目录（展开其中的 *.py）
 TARGET_DIRS = ("agent", "onebot")
-#: 要扫的根目录单文件
-TARGET_FILES = ("main.py", "糖糖控制台_qt.py")
+#: 要扫的根目录/子目录单文件（2026-10-26：Qt 控制台移入 运维/，不再在根）
+TARGET_FILES = ("main.py", "运维/糖糖控制台_qt.py")
 
 
 def collect() -> list[Path]:

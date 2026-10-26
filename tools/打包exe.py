@@ -7,7 +7,7 @@ import os, subprocess, sys, shutil
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent  # 项目根目录
-TARGET = "糖糖控制台_qt.py"
+TARGET = "运维/糖糖控制台_qt.py"  # 2026-10-26 移入 运维/
 
 print(f"📦 正在打包 {TARGET} ...")
 print("   首次打包需 3-10 分钟，请耐心等待")

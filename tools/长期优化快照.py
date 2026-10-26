@@ -44,7 +44,7 @@ KEY_FILES = [
     "agent/vision_router.py",
     "agent/vision_local.py",
     "main.py",
-    "糖糖控制台_qt.py",
+    "运维/糖糖控制台_qt.py",
     "config.yaml",
 ]
 
@@ -145,7 +145,7 @@ def collect_radon() -> dict:
 
 
 def collect_pyflakes() -> dict:
-    targets = ["agent"] + [d for d in ["onebot"] if (ROOT / d).exists()] + ["main.py", "糖糖控制台_qt.py"]
+    targets = ["agent"] + [d for d in ["onebot"] if (ROOT / d).exists()] + ["main.py", "运维/糖糖控制台_qt.py"]
     files: list[str] = []
     for t in targets:
         p = ROOT / t

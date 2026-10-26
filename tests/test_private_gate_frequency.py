@@ -146,3 +146,22 @@ class TestRecentDialogue:
         assert "source_group_id=group_id" in group_src, "群聊注入召回必须锁本群"
         # 反向红线：群聊路径里不许出现跨域召回
         assert "source_group_id=None" not in group_src
+
+        # 上面三条只证明「存在一个 None / 一个 group_id」——**存在**不等于**全部**。
+        # 2026-10-26 实证：`handle_private_message` 里有两处 recall（对话路径 + 模糊档），
+        # 把其中一处改回锁作用域，上面三条照样绿（`变异/变异_scope.json` 的 S1 就是
+        # 这么假绿的，锚点修好后才暴露出来）。而 `agent/store.py` 的 `query_memories`
+        # 用的是 `if source_group_id is not None`（严格判断），所以 `None`（跨域）与
+        # `""`（只搜私聊域）**语义完全不同**，差一个字符就退化。必须逐处核对。
+        import re
+
+        recall_scope = (r"self\.memory\.recall(?:_uncertain)?\s*,"
+                        r"[^)]*?source_group_id\s*=\s*([^,\n)]+)")
+        private_scopes = [v.strip() for v in re.findall(recall_scope, private_src, re.S)]
+        group_scopes = [v.strip() for v in re.findall(recall_scope, group_src, re.S)]
+        assert private_scopes, "私聊路径里必须能定位到注入召回的 scope 实参"
+        assert group_scopes, "群聊路径里必须能定位到注入召回的 scope 实参"
+        assert all(v == "None" for v in private_scopes), (
+            "私聊注入召回必须**每一处**都跨作用域(None)，实际=" + repr(private_scopes))
+        assert all(v == "group_id" for v in group_scopes), (
+            "群聊注入召回必须**每一处**都锁本群(group_id)，实际=" + repr(group_scopes))

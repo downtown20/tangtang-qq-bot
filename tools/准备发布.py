@@ -34,7 +34,9 @@ IGNORE_ALWAYS = shutil.ignore_patterns(
 # 主仓白名单（发布清单 v1 冻结）
 # ═══════════════════════════════════════
 
-COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg", "knowledge"]
+COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg", "knowledge",
+             # 2026-10-26：Qt 运维控制台从根目录移入 运维/（不再冒充启动入口）——整目录随发布。
+             "运维"]
 # knowledge/ 整目录拷时额外剔除（2026-09-05 主人裁决 v2）：
 #
 # ⚠ 2026-10-23 主人定案**取代**上面那条「只发软色情 2 篇」：
@@ -143,8 +145,10 @@ COPY_FILES = [
     # 入口与核心脚本
     # 2026-10-15 T55：三个诊断脚本已从项目根移入 tools/ —— 这里去掉根副本，
     # 改由 TOOLS_KEEP_NAMES 放行（否则随包会缺这三个文件）。
-    "main.py", "糖糖控制台_qt.py",
-    "启动控制台.bat", "安装糖糖.bat", "start.py",  # start.py: ASCII 启动桥（bat 纯 ASCII 不能写中文文件名）
+    "main.py",
+    "安装糖糖.bat", "start.py",
+    # 2026-10-26：桌面端是主入口，手册/README 都指路它——必须随源码发布包走。
+    "启动桌面端.bat",  # start.py: ASCII 启动桥（bat 纯 ASCII 不能写中文文件名）
     "requirements.txt",
     # 人格角色卡（主人拍板公开）
     "role_card.md", "role_card_michele.md", "role_card_murasame.md",
@@ -173,7 +177,7 @@ TOOLS_KEEP_NAMES = {
     # 保留是因为它们本身仍能对随包成品单独跑（python tools/denoise.py --song 歌名）。
     "denoise.py", "trim_silence.py",
     # 三个诊断脚本（2026-10-15 T55 从项目根移入 tools/，见 COPY_FILES 的注释）。
-    # 控制台「诊断」按钮按 tools/诊断糖糖.py 调它（糖糖控制台_qt.py::_DiagWorker），
+    # 控制台「诊断」按钮按 tools/诊断糖糖.py 调它（运维/糖糖控制台_qt.py::_DiagWorker），
     # 漏了这行按钮就只会报「没找到」—— 同 检查连接.py 那条的理由。
     "诊断糖糖.py", "全面诊断.py", "诊断对话质量.py",
 }
@@ -810,7 +814,7 @@ def main() -> None:
 
     # 6. .env.example（全占位，绝无真实 token）
     # ⚠ 2026-09-20：键名必须与控制台「密钥管理」写的那份**逐字一致**——
-    #   `糖糖控制台_qt.py` 的 _provider_key_info 按 provider 决定写哪个变量。
+    #   `运维/糖糖控制台_qt.py` 的 _provider_key_info 按 provider 决定写哪个变量。
     #   模板里少一个键，用户就少一条「我该填哪个变量」的线索；多一个名字
     #   （比如早先那个 NAPCAT_TOKEN），用户抄了就是白填。
     #   闸门：tests/test_config_example_contract.py 断言两边键名集合相等。

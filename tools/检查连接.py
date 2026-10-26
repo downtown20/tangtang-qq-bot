@@ -4,7 +4,7 @@
 ## 为什么会有这个工具
 
 控制台把卡片从「启动中」翻成「运行中」，唯一条件是子进程打出 ``SnowLuma 已连接``
-这一行（糖糖控制台_qt.py ``_read_sugar_output``）。可这一行的前提——SnowLuma 网页面板
+这一行（运维/糖糖控制台_qt.py ``_read_sugar_output``）。可这一行的前提——SnowLuma 网页面板
 里的 OneBot 网络配置（反向 WS 客户端 / HTTP API / 授权 Token）——以前一个字文档都没有、
 也没有任何检查。于是新手的症状是「点了启动糖糖，卡片永远停在启动中」，看不到任何解释。
 
@@ -71,7 +71,7 @@ for _s in (sys.stdout, sys.stderr):
 
 BASE = Path(__file__).resolve().parent.parent
 
-# SnowLuma 官方发布页（与 糖糖控制台_qt.py 的 SNOWLUMA_RELEASE_URL 同一个地址；
+# SnowLuma 官方发布页（与 运维/糖糖控制台_qt.py 的 SNOWLUMA_RELEASE_URL 同一个地址；
 # 这里不 import 那个模块——它顶层要加载 PySide6，太重）
 RELEASE_URL = "https://github.com/SnowLuma/SnowLuma/releases"
 

@@ -632,7 +632,7 @@ def test_declared_callers_actually_call_it():
     from pathlib import Path as _P
     base = _P(__file__).resolve().parent.parent
 
-    console = (base / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+    console = (base / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
     assert "检查连接.py" in console, "控制台的「连接自检」按钮不再加载这个模块了"
 
     health = (base / "tools" / "体检.py").read_text(encoding="utf-8")

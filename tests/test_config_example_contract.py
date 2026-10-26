@@ -170,7 +170,12 @@ def test_provider_key_env_names_match_console_and_runtime():
      2026-09-20 已修）。
     """
     from agent.secret_refs import FIXED_SECRET_PATHS, PROVIDER_KEY_ENV
-    console = (BASE / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+    console_path = BASE / "糖糖控制台_qt.py"
+    if not console_path.is_file():
+        # 2026-10-26：Qt 控制台从根目录移进 `运维/`（功能保留，根目录不再有它）
+        console_path = BASE / "运维" / "糖糖控制台_qt.py"
+    assert console_path.is_file(), f"找不到 Qt 控制台：{console_path}"
+    console = console_path.read_text(encoding="utf-8")
     handler = (BASE / "agent" / "handler.py").read_text(encoding="utf-8")
     assert "PROVIDER_KEY_ENV.get(_provider" in handler, (
         "handler.py 又写死了 provider→变量名的对应——换 provider 就会 401")
@@ -209,3 +214,25 @@ def test_gate_goes_red_on_a_materialized_key():
     bad = _template_violations(_materializing)
     assert any("llm.api_key" in b for b in bad), (
         "阳性对照失败：物化后的明文没被认出来")
+
+
+# ═══════════════════════════════════════════════════════════
+# 干净 clone 也必须能验证的一条（2026-10-26）
+# ═══════════════════════════════════════════════════════════
+
+def test_config_example_exists_in_repo_even_without_real_config():
+    """模板文件本身必须在仓库里——这条**不依赖**开发机的 config.yaml。
+
+    本文件其余测试都从 `_real_config()` 出发（没有 config.yaml 就 skip），
+    所以「config.example.yaml 根本不在仓库里」这个缺口在干净 clone / CI 上
+    永远是绿的——正是教训 #30/#37 的假绿。这条只认仓库里的文件。
+    """
+    example = BASE / "config.example.yaml"
+    assert example.is_file(), (
+        "仓库里没有 config.example.yaml——干净 clone 的用户永远没有配置，"
+        "tools/安装糖糖.py 的 bootstrap_config() 也只能静默跳过")
+    data = yaml.safe_load(example.read_text(encoding="utf-8"))
+    assert isinstance(data, dict) and data, "config.example.yaml 解析出来不是非空 dict"
+    api_key = str(data.get("llm", {}).get("api_key", ""))
+    assert re.fullmatch(r"\$\{[A-Z_][A-Z0-9_]*\}", api_key), (
+        f"模板的 llm.api_key 不是 ${{VAR}} 引用（被物化成字面量了）：{api_key!r}")

@@ -186,7 +186,7 @@ def test_manual_retry_gate_is_default_off_in_config_and_qt_console():
 
     root = Path(__file__).resolve().parents[1]
     config = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
-    console = (root / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+    console = (root / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
     console_tree = ast.parse(console)
     task_section = next(
         node for node in ast.walk(console_tree)

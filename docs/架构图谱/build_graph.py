@@ -24,7 +24,7 @@ BASE = Path(__file__).resolve().parent.parent.parent
 SRC = BASE / "artifacts" / "图谱" / "full_graph.json"
 OUT = BASE / "artifacts" / "图谱" / "糖糖架构图谱.html"
 
-ROOT_FILES = ["main.py", "onebot/ws_client.py", "糖糖控制台_qt.py"]
+ROOT_FILES = ["main.py", "onebot/ws_client.py", "运维/糖糖控制台_qt.py"]
 SCOPE_FILES = sorted(
     [str(p.relative_to(BASE)).replace("\\", "/") for p in (BASE / "agent").glob("*.py")]
     + ROOT_FILES)

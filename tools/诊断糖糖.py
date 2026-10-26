@@ -4,7 +4,7 @@
 用法：python tools/诊断糖糖.py
 
 2026-10-15 T55：从项目根移入 tools/ —— BASE 随之改成上两级。
-控制台按 tools/诊断糖糖.py 调它（糖糖控制台_qt.py 的 _DiagWorker）。
+控制台按 tools/诊断糖糖.py 调它（运维/糖糖控制台_qt.py 的 _DiagWorker）。
 """
 
 import re, sqlite3, json, os, sys

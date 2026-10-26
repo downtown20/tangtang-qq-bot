@@ -195,5 +195,5 @@ def test_console_parses_the_offline_string_still_exists():
     assert "QQ 账号已掉线" in src, "控制台的日志解析会失配"
 
     console = (Path(__file__).resolve().parents[1]
-               / "糖糖控制台_qt.py").read_text(encoding="utf-8")
+               / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
     assert "QQ 账号已掉线" in console

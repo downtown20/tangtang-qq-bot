@@ -69,7 +69,38 @@ _log_cond = threading.Condition()
 # ═══════════════════════════════════════════════════════════════
 # 配置读写（复用 agent/secret_refs，绝不在这里重写密钥语义）
 # ═══════════════════════════════════════════════════════════════
+#: 本次进程是否从 config.example.yaml 自举出了 config.yaml（前端据此提示「还没配置」）
+_example_bootstrapped = False
+
+
+def _bootstrap_config() -> bool:
+    """没有 config.yaml 时，从 config.example.yaml 复制一份（与安装器同口径）。
+
+    为什么桥自己要做（2026-10-26）：用户「下载解压 → 双击 启动桌面端.bat」并不
+    经过安装器；桥一启动就 ``open(config.yaml)``，缺文件直接崩、前端白屏，而
+    屏幕上没有任何线索说缺的是这个文件（教训 #30：检查写了却静默失败）。
+    这段逻辑原先由 Qt 控制台的 ``load_config()`` 兜底，它已移入 ``运维/`` 且不再
+    是主入口，所以兜底搬到这里。
+    """
+    global _example_bootstrapped
+    if CONFIG_PATH.exists():
+        return False
+    example = ROOT / "config.example.yaml"
+    if not example.is_file():
+        return False
+    try:
+        shutil.copy2(example, CONFIG_PATH)
+    except OSError:
+        return False
+    _example_bootstrapped = True
+    return True
+
+
 def _load_raw_config() -> dict:
+    """读配置；缺文件时先尝试从模板自举（返回 {} 而不是抛异常——桥必须能起来）。"""
+    _bootstrap_config()
+    if not CONFIG_PATH.exists():
+        return {}
     import yaml
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
@@ -228,7 +259,234 @@ def api_config() -> dict:
     return {
         "raw": _mask_config(raw),
         "resolved": _mask_config(resolved),
+        # configured=false 时前端必须给出「去跑安装器/填模板」的提示，而不是
+        # 显示一个空表单让用户以为设置页坏了（2026-10-26 桌面端主入口化）。
+        "configured": bool(raw),
+        "bootstrapped": _example_bootstrapped,
+        "example_available": (ROOT / "config.example.yaml").is_file(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 连接密钥（.env 白名单）+ SnowLuma + 连接自检
+#
+# 2026-10-26：桌面端成为主入口，原先只有 Qt 控制台提供的「密钥管理 /
+# 启动 SnowLuma / 连接自检」三件事必须能在桌面端完成，否则新用户装完
+# 连不上 QQ，整个项目对他就是不能用的。
+# ═══════════════════════════════════════════════════════════════
+SNOWLUMA_WEBUI_URL = "http://127.0.0.1:5099"
+SNOWLUMA_RELEASE_URL = "https://github.com/SnowLuma/SnowLuma/releases"
+#: 允许写入 .env 的键由 agent/secret_refs.PROVIDER_KEY_ENV 决定（单一事实源）
+_EXTRA_ENV_NAMES = {"SNOWLUMA_TOKEN": "SnowLuma 授权 Token"}
+
+
+def _secret_env_names() -> dict[str, str]:
+    """{环境变量名: 人话标签}——只含「新用户最先要填的两个值」。
+
+    LLM Key 的变量名跟着当前 provider 走（PROVIDER_KEY_ENV），绝不在这里
+    另写一份映射：那份表同时被控制台写 .env、运行期回填、体检核对共用。
+    """
+    from agent.secret_refs import PROVIDER_KEY_ENV
+
+    raw = _load_raw_config()
+    provider = str(((raw.get("llm") or {}).get("provider")) or "deepseek")
+    env_name = PROVIDER_KEY_ENV.get(provider, PROVIDER_KEY_ENV["deepseek"])
+    return {env_name: f"LLM API Key（{provider}）", **_EXTRA_ENV_NAMES}
+
+
+def _mask_env_value(value: str) -> str:
+    """给前端看的掩码：绝不回显明文。"""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) <= 8:
+        return "••••••"
+    return f"••••{v[-4:]}"
+
+
+def api_secrets() -> dict:
+    env = _load_dotenv()
+    names = _secret_env_names()
+    return {
+        "provider_env": next(iter(names)),
+        "entries": [
+            {"name": name, "label": label,
+             "configured": bool(env.get(name)),
+             "masked": _mask_env_value(env.get(name, ""))}
+            for name, label in names.items()
+        ],
+        "env_path": str(ENV_PATH),
+    }
+
+
+def api_secrets_save(body: dict) -> dict:
+    """把**白名单内**的一个键写进 .env（最小编辑：保留注释与其它行）。
+
+    安全边界（不是可选项）：
+      · 只允许 _secret_env_names() 里的键，其它一律拒绝；
+      · 值里禁换行（否则可以注入一个新键）；
+      · 不整份重写，只替换/追加目标行；写前备份、写后回读校验。
+    """
+    name = str(body.get("name") or "").strip()
+    value = body.get("value")
+    if not isinstance(value, str):
+        raise ValueError("value 必须是字符串")
+    # 只挡 \n/\r 是不够的：读侧 `_load_dotenv` 用 `splitlines()`，而
+    # \v \f \x1c \x1d \x1e \x85 \u2028 \u2029 同样是行边界——
+    # 这些字符一样能把「一个新的 KEY=... 行」注入进 .env（2026-10-27 审查发现）。
+    # 判据直接问 `splitlines()` 自己，不手抄字符表（手抄必漏，这正是教训 #37 的形态）。
+    if len(value.splitlines()) > 1:
+        raise ValueError("value 不能包含换行或行分隔符（\\n \\r \\v \\f \\u2028 等）")
+    if value != value.strip("\r\n"):
+        raise ValueError("value 首尾不能带换行")
+    allowed = _secret_env_names()
+    if name not in allowed:
+        raise ValueError(
+            f"不允许写的键: {name!r}（只允许 {', '.join(sorted(allowed))}）")
+    value = value.strip()
+    if value.startswith("${"):
+        raise ValueError("这里要填真实值，不要填 ${VAR} 引用")
+
+    # ⚠ 必须走 read_bytes + 自己 decode：`read_text()` 默认 newline=None 是
+    # universal newlines，会把 \r\n 读成 \n —— 于是下面那句 nl 判定**永远**是
+    # "\n"，写回时 newline="" 直写就把整个文件的行尾从 CRLF 换成 LF。
+    # 一次「最小编辑」变成「整文件重写」（2026-10-27 实测：3 个 CRLF → 3 个 LF）。
+    text = (ENV_PATH.read_bytes().decode("utf-8")
+            if ENV_PATH.exists() else "")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl) if text else []
+    while lines and lines[-1] == "":
+        lines.pop()
+
+    replaced = False
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            out.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key == name:
+            if value:
+                out.append(f"{name}={value}")
+            # value 为空 = 删掉这一行，表示「未配置」
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced and value:
+        out.append(f"{name}={value}")
+
+    # 注入自检的基线：写入前 .env 里已经有哪些键。
+    before_keys = set(_load_dotenv())
+    backup = None
+    if ENV_PATH.exists():
+        backup = ENV_PATH.with_name(
+            ".env.bak_" + time.strftime("%Y%m%d_%H%M%S"))
+        shutil.copy2(ENV_PATH, backup)
+    ENV_PATH.write_text(nl.join(out) + (nl if out else ""),
+                        encoding="utf-8", newline="")
+
+    env = _load_dotenv()
+    # 注入自检：写入后不许冒出预期外的键。
+    # 比「字符黑名单」强——黑名单只能挡已知的行边界，键集合差能挡未知的。
+    injected = sorted(set(env) - before_keys - {name})
+    if injected:
+        if backup is not None:
+            shutil.copy2(backup, ENV_PATH)      # 写坏了就回滚，不留坏文件
+        raise RuntimeError(
+            "写入 .env 后出现了预期外的键，已回滚：" + ", ".join(injected))
+    if value and env.get(name) != value:
+        if backup is not None:
+            shutil.copy2(backup, ENV_PATH)
+        raise RuntimeError("写入 .env 后回读不一致——已回滚，请检查文件编码/权限")
+    return {
+        "ok": True,
+        "name": name,
+        "configured": bool(env.get(name)),
+        "masked": _mask_env_value(env.get(name, "")),
+        "backup": backup.name if backup else "",
+    }
+
+
+def _find_snowluma_dir() -> Path | None:
+    """SnowLuma 安装目录（取最新版本；兼容直接解压到 SnowLuma/ 根）。"""
+    base = ROOT / "SnowLuma"
+    if not base.is_dir():
+        return None
+    cands = sorted(p for p in base.iterdir()
+                   if p.is_dir() and (p / "launcher.bat").is_file())
+    if cands:
+        return cands[-1]
+    return base if (base / "launcher.bat").is_file() else None
+
+
+def _port_open(port: int, timeout: float = 0.4) -> bool:
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def api_snowluma_status() -> dict:
+    d = _find_snowluma_dir()
+    return {
+        "installed": d is not None,
+        "dir": str(d) if d else "",
+        "running": _port_open(5099),
+        "webui_url": SNOWLUMA_WEBUI_URL,
+        "release_url": SNOWLUMA_RELEASE_URL,
+    }
+
+
+def api_snowluma_start() -> dict:
+    """启动 SnowLuma（与 Qt 的 _start_snowluma 同口径）。
+
+    ⚠ 不要给 stdout/stderr 加 DEVNULL：SnowLuma 首次启动把网页面板初始密码
+    **只打印在它自己的新窗口里一次**（process.stdout.write，绕过了日志），
+    2026-09-20 主人实机踩过——窗口开了、密码丢了，只能删 webui.json 重来。
+    """
+    d = _find_snowluma_dir()
+    if d is None:
+        raise ValueError(
+            f"没找到 SnowLuma（期望 {ROOT / 'SnowLuma'}/SnowLuma-vX.Y.Z-win-x64/"
+            f"launcher.bat）——请到官方发布页下载 Windows x64 版解压进去")
+    if _port_open(5099):
+        return {"ok": True, "already": True, "webui_url": SNOWLUMA_WEBUI_URL}
+    launcher = d / "launcher.bat"
+    flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+    proc = subprocess.Popen([str(launcher)], cwd=str(d), creationflags=flags)
+    return {
+        "ok": True,
+        "pid": proc.pid,
+        "dir": str(d),
+        "webui_url": SNOWLUMA_WEBUI_URL,
+        "note": "首次启动会在新窗口打印网页面板初始密码（只显示一次，记下来再关窗口）。",
+    }
+
+
+def _load_conn_check_module():
+    import importlib.util as ilu
+    path = ROOT / "tools" / "检查连接.py"
+    if not path.is_file():
+        raise ValueError("找不到 tools/检查连接.py（这一版发布包可能不完整）")
+    spec = ilu.spec_from_file_location("_conn_check_bridge", path)
+    mod = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def api_connect_check() -> dict:
+    """跑连接自检，返回逐项结论（只读，不改任何配置）。"""
+    mod = _load_conn_check_module()
+    results = mod.check_all(ROOT)
+    return {"results": [
+        {"key": r.key, "title": r.title,
+         "status": getattr(r.status, "value", str(r.status)),
+         "detail": r.detail, "next_step": r.next_step}
+        for r in results
+    ]}
 
 
 def api_scenario_packs() -> dict:
@@ -331,6 +589,11 @@ def api_scenario_packs_save(body: dict) -> dict:
             "budget": int(item.get("budget") or 0),
             "require_marker": bool(item.get("require_marker", True)),
             "ttl_seconds": max(0, int(item.get("ttl_seconds") or 0)),
+            # 白名单必须跟得上字段：落在白名单外的键会在每次保存时**静默消失**。
+            # 2026-10-26 实证：`allow_groups`（群聊是否允许注入这个包）就是被这里
+            # 丢掉的，配置从 `true` 变「没有这个键」，而 handler 的守卫把缺失当 False，
+            # 于是「群聊注入」被静默关掉。新增 pack 字段时**必须同步加到这里**。
+            "allow_groups": bool(item.get("allow_groups", False)),
         })
     if not cleaned:
         raise ValueError("至少要有一个包（每个包要有 scenario）")
@@ -1814,6 +2077,10 @@ ROUTES_GET = {
     "/api/scenario/packs": api_scenario_packs,
     "/api/gallery/tag/status": api_gallery_tag_status,
     "/api/prompts/groups": api_prompt_groups,
+    # 连接密钥 / SnowLuma / 连接自检（2026-10-26 桌面端主入口化）
+    "/api/secrets": api_secrets,
+    "/api/snowluma/status": api_snowluma_status,
+    "/api/connect-check": api_connect_check,
 }
 ROUTES_POST = {
     "/api/config": lambda b: api_config_save(b),
@@ -1849,6 +2116,9 @@ ROUTES_POST = {
     "/api/gallery/tag/probe": api_gallery_tag_probe,
     # 高级调参（第 49 轮 B4）
     "/api/tuning/save": api_tuning_save,
+    # 连接密钥 / SnowLuma（2026-10-26）
+    "/api/secrets/save": api_secrets_save,
+    "/api/snowluma/start": lambda b: api_snowluma_start(),
 }
 
 
