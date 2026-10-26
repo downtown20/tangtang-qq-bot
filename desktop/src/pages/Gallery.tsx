@@ -19,6 +19,7 @@ import {
   FolderOpen,
   Tags,
   Square,
+  Settings,
 } from 'lucide-react'
 import {
   api,
@@ -80,7 +81,12 @@ function pageNumbers(current: number, total: number): (number | '…')[] {
   return out
 }
 
-export default function Gallery() {
+export default function Gallery({
+  onOpenSettings,
+}: {
+  /** 「去设置」用：跳到指定的设置分组（打标参数在 `image_tagging`） */
+  onOpenSettings?: (section?: string) => void
+} = {}) {
   const [bridge, setBridge] = useState<BridgeInfo | null>(null)
   const [source, setSource] = useState<TopSource>('sticker')
   /** 贴图组内的二级选择：'' = 三套合并，或具体库 key（sticker/murasame/michele） */
@@ -113,28 +119,52 @@ export default function Gallery() {
     getBridge().then(setBridge).catch((e: Error) => setError(e.message))
   }, [])
 
-  /* ── 图库打标（2026-10-26 第 63 轮）──
+  /** 图库页当前选中的库 key —— **唯一一套「当前目录」语义**：
+   *  列表加载和打标范围都用它，不另造第二个「当前目录」（两套必然打架）。 */
+  const gallerySource = source === 'sticker' ? lib || 'sticker_all' : 'cg'
+
+  /* ── 图库打标（2026-10-26 第 63 轮；2026-10-27 按图库页语义重排）──
    *
-   * 原来这件事靠双击 `打标色图.bat`：模型名、`--resume`、venv 路径全写死在 bat 里，
-   * 换个模型要改文件。现在配置在「设置 → 图库打标」，这里只留一个按钮。
+   * 主人反馈：「设置中的『图库打标』仅仅是调整背后参数、信息、模型的而非决定打标方式，
+   * 打标方式、选哪些图打标需要在图库中具体设置并打标。」
    *
-   * 打标是长任务（本地模型约 1.5 秒一张，222 张就是 5 分钟），所以：
-   * 点了立刻返回 + 轮询进度，**不能**同步等——否则界面假死几十秒没人知道还在跑。 */
+   * 所以这里管「打哪些图 / 怎么打」，设置页只管「用哪个模型、什么端点、key」。
+   * 范围直接继承图库页当前的库（source + 二级 lib），**不另造一个当前目录**——
+   * 两套「当前目录」概念必然打架。
+   *
+   * 打标是长任务（本地模型约 1.5 秒一张），所以：点了立刻返回 + 轮询进度，
+   * 不能同步等——否则界面假死几十秒没人知道还在跑。 */
   const [tagStatus, setTagStatus] = useState<GalleryTagStatus | null>(null)
   const [tagBusy, setTagBusy] = useState(false)
+  const [tagPanelOpen, setTagPanelOpen] = useState(false)
+  const [tagScope, setTagScope] = useState<'pending' | 'all' | 'selected'>('pending')
+  const [tagRename, setTagRename] = useState(true)
+  const [tagOverwrite, setTagOverwrite] = useState(false)
+  /** 打标相关的错误紧贴按钮显示——塞进页面顶部那个 error 用户根本看不见（原 bug） */
+  const [tagError, setTagError] = useState('')
+  const tagRenameTouched = useRef(false)
 
   const refreshTag = useCallback(async () => {
     try {
-      setTagStatus(await api.galleryTagStatus())
+      setTagStatus(await api.galleryTagStatus(gallerySource))
     } catch {
       /* 打标是可选功能：拉不到就不显示按钮，不能把图库页搞挂 */
       setTagStatus(null)
     }
-  }, [])
+  }, [gallerySource])
 
   useEffect(() => {
     void refreshTag()
   }, [refreshTag])
+
+  // 切库时收面板并回到最安全的默认：面板里的数字是上一个库的，
+  // 范围若留着「全部重打」，换个库一点就是几千张（比误点更糟的是误打）
+  useEffect(() => {
+    setTagPanelOpen(false)
+    setTagError('')
+    setTagScope('pending')
+    setTagOverwrite(false)
+  }, [gallerySource])
 
   // 只在跑的时候轮询；停下就停，别让一个隐藏的定时器永远转
   const tagRunning = Boolean(tagStatus?.progress.running)
@@ -144,38 +174,75 @@ export default function Gallery() {
     return () => clearInterval(t)
   }, [tagRunning, refreshTag])
 
+  // 改名默认值跟配置走（老配置 rename=false 的人不该被这里默默打开），用户随时可改
+  useEffect(() => {
+    if (!tagStatus || tagRenameTouched.current) return
+    setTagRename(tagStatus.config.rename !== false)
+  }, [tagStatus])
+
+  /** 当前库里被选中的文件名（合集时为空——写操作只允许单库） */
+  const selectedNamesForTag = useMemo(() => {
+    const out: string[] = []
+    for (const k of selected) {
+      const idx = k.indexOf(':')
+      if (idx < 0) continue
+      if (k.slice(0, idx) === gallerySource) out.push(k.slice(idx + 1))
+    }
+    return out
+  }, [selected, gallerySource])
+
+  const tagProvider = tagStatus?.config.provider ?? ''
+  const tagOff = Boolean(tagStatus) && tagProvider === 'off'
+  /** 为什么不能打：配置类（provider_ready）优先，其次目录类（dir_ready） */
+  const tagBlocker = tagStatus ? tagStatus.provider_ready || tagStatus.dir_ready : ''
+  const tagPending = tagStatus?.scan.pending ?? 0
+  const tagFiles = tagStatus?.scan.files ?? 0
+  /** 面板里显示的库名（用列表接口给的 label，避免在这里再抄一份中英对照） */
+  const tagSourceLabel =
+    (data?.sources ?? []).find((s) => s.key === gallerySource)?.label ??
+    (gallerySource === 'sticker_all' ? '贴图（三个库合集）' : gallerySource)
+  const tagModel =
+    tagProvider === 'api' ? tagStatus?.config.api_model : tagStatus?.config.ollama_model
+
   const startTag = useCallback(async () => {
     if (!tagStatus) return
-    if (tagStatus.provider_ready) {
-      setError(tagStatus.provider_ready)
+    if (tagStatus.provider_ready || tagStatus.dir_ready) {
+      setTagError(tagStatus.provider_ready || tagStatus.dir_ready)
       return
     }
-    const pending = tagStatus.scan.pending
-    // 全都打过标签时，点一下要明确问一句：增量跑不出东西，很容易被当成「坏了」
-    if (pending === 0) {
-      if (!window.confirm(`这个图库 ${tagStatus.scan.files} 张全都已有标签。\n\n要全部重新打一遍吗？（会覆盖现有标签）`))
-        return
+    const scope = tagScope
+    const names = scope === 'selected' ? selectedNamesForTag : []
+    if (scope === 'selected' && names.length === 0) {
+      setTagError('没有选中这个图库里的图')
+      return
     }
     setTagBusy(true)
-    setError(null)
+    setTagError('')
     try {
-      const r = await api.galleryTagRun(pending === 0)
-      if (!r.ok) setError(r.error || '启动失败')
-      else if (!r.started) setError(r.message || '没有需要打标的图')
+      const r = await api.galleryTagRun({
+        source: gallerySource,
+        scope,
+        names,
+        rename: tagRename,
+        overwrite: scope === 'pending' ? false : tagOverwrite,
+      })
+      if (!r.ok) setTagError(r.error || '启动失败')
+      else if (!r.started) setTagError(r.message || '没有需要打标的图')
+      else setTagPanelOpen(false)
       await refreshTag()
     } catch (e) {
-      setError((e as Error).message)
+      setTagError((e as Error).message)
     } finally {
       setTagBusy(false)
     }
-  }, [tagStatus, refreshTag])
+  }, [tagStatus, tagScope, selectedNamesForTag, gallerySource, tagRename, tagOverwrite, refreshTag])
 
   const stopTag = useCallback(async () => {
     try {
       await api.galleryTagCancel()
       await refreshTag()
     } catch (e) {
-      setError((e as Error).message)
+      setTagError((e as Error).message)
     }
   }, [refreshTag])
 
@@ -192,7 +259,7 @@ export default function Gallery() {
     setLoading(true)
     try {
       const res = await api.gallery({
-        source: source === 'sticker' ? lib || 'sticker_all' : 'cg',
+        source: gallerySource,
         q,
         tag,
         tag_field: source === 'cg' ? 'scene_tags' : 'emotions',
@@ -208,7 +275,7 @@ export default function Gallery() {
     } finally {
       setLoading(false)
     }
-  }, [bridge, source, lib, q, tag, state, sort, page])
+  }, [bridge, gallerySource, source, q, tag, state, sort, page])
 
   useEffect(() => {
     load()
@@ -446,9 +513,10 @@ export default function Gallery() {
           </p>
         </div>
         <div className="page-actions">
-          {/* 打标开关（2026-10-26）：替代双击 打标色图.bat。
-              只放一个按钮——方式/模型/端点/改名全在「设置 → 图库打标」，
-              这里再摆一遍配置就是两个真相。 */}
+          {/* 打标（2026-10-26 第 63 轮；2026-10-27 状态化）：
+              按钮**先看状态再决定可不可点**，不是一个能点的按钮、点了才在页面顶部报错
+              （那就是主人说「按钮不能用」的直接原因：错在看不见的地方）。
+              这里管「打哪些图 / 怎么打」，模型与参数仍在设置 → 图库打标。 */}
           {tagStatus ? (
             tagRunning ? (
               <button
@@ -460,21 +528,217 @@ export default function Gallery() {
                 打标中 {tagStatus.progress.done}/{tagStatus.progress.total}
                 <span className="tag-abort">停止</span>
               </button>
+            ) : tagOff ? (
+              <>
+                <button
+                  className="btn btn-ghost"
+                  disabled
+                  title="设置 → 图库打标 → 打标方式，选 ollama（本机）或 api（云端）"
+                >
+                  <Tags size={14} />
+                  打标未启用
+                </button>
+                {onOpenSettings && (
+                  <button
+                    className="btn-link"
+                    onClick={() => onOpenSettings('image_tagging')}
+                    title="去设置里选打标方式（模型 / 端点 / key）"
+                  >
+                    <Settings size={13} />
+                    去设置
+                  </button>
+                )}
+              </>
+            ) : tagBlocker ? (
+              <>
+                <button className="btn btn-ghost" disabled title={tagBlocker}>
+                  <Tags size={14} />
+                  打标不可用
+                </button>
+                {/* 原因必须显示在按钮**旁边**——塞进页面顶部的 error 等于没说 */}
+                <span className="tag-why" title={tagBlocker}>
+                  {tagBlocker}
+                </span>
+                {tagStatus.provider_ready && onOpenSettings && (
+                  <button
+                    className="btn-link"
+                    onClick={() => onOpenSettings('image_tagging')}
+                    title="去设置里补齐打标参数"
+                  >
+                    <Settings size={13} />
+                    去设置
+                  </button>
+                )}
+              </>
             ) : (
-              <button
-                className="btn btn-ghost"
-                onClick={() => void startTag()}
-                disabled={tagBusy || Boolean(tagStatus.provider_ready)}
-                title={
-                  tagStatus.provider_ready ||
-                  `给还没有标签的 ${tagStatus.scan.pending} 张打标` +
-                    `（${tagStatus.config.provider === 'api' ? '云端 API' : '本机 Ollama'} · ` +
-                    `${tagStatus.config.provider === 'api' ? tagStatus.config.api_model : tagStatus.config.ollama_model}）`
-                }
-              >
-                <Tags size={14} />
-                打标{tagStatus.scan.pending > 0 ? ` ${tagStatus.scan.pending}` : ''}
-              </button>
+              <div className="tag-pop-wrap">
+                <button
+                  className={'btn btn-ghost' + (tagPanelOpen ? ' is-active' : '')}
+                  onClick={() => setTagPanelOpen((v) => !v)}
+                  title={
+                    tagPending === 0
+                      ? `这个图库 ${tagFiles} 张全都已打标——要重打就在面板里选「全部重打」`
+                      : `给 ${tagPending} 张还没打标的图打标（${tagSourceLabel}）`
+                  }
+                >
+                  <Tags size={14} />
+                  {tagPending === 0
+                    ? `全部已打标（${tagFiles} 张）`
+                    : `打标（${tagPending} 张待打）`}
+                </button>
+
+                {tagPanelOpen && (
+                  <>
+                    <div className="pop-mask" onClick={() => setTagPanelOpen(false)} />
+                    <div className="tag-pop" role="dialog" aria-label="图库打标">
+                      <div className="tag-pop-head">
+                        <span className="tag-pop-title">打标 · {tagSourceLabel}</span>
+                        <button
+                          className="icon-btn"
+                          onClick={() => setTagPanelOpen(false)}
+                          title="关闭"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                      <div className="tag-pop-dir" title={tagStatus.dir ?? undefined}>
+                        {tagStatus.dir ?? '多个库（合集不能直接打标）'}
+                      </div>
+                      <div className="tag-pop-model">
+                        用 {tagProvider === 'api' ? '云端 API' : '本机 Ollama'} · {tagModel}
+                        {onOpenSettings && (
+                          <button
+                            className="btn-link"
+                            onClick={() => onOpenSettings('image_tagging')}
+                          >
+                            改模型
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="tag-pop-label">打哪些图</div>
+                      <div className="tag-scopes">
+                        <label className="tag-scope">
+                          <input
+                            type="radio"
+                            checked={tagScope === 'pending'}
+                            onChange={() => setTagScope('pending')}
+                          />
+                          只打未打标的（{tagPending} 张）
+                        </label>
+                        <label className="tag-scope">
+                          <input
+                            type="radio"
+                            checked={tagScope === 'all'}
+                            onChange={() => setTagScope('all')}
+                          />
+                          全部重打（{tagFiles} 张）
+                        </label>
+                        <label
+                          className={
+                            'tag-scope' + (selectedNamesForTag.length === 0 ? ' is-disabled' : '')
+                          }
+                          title={
+                            selectedNamesForTag.length === 0
+                              ? '先在网格里勾选这个图库的图（合集不能打标）'
+                              : '只打当前勾选的图'
+                          }
+                        >
+                          <input
+                            type="radio"
+                            disabled={selectedNamesForTag.length === 0}
+                            checked={tagScope === 'selected'}
+                            onChange={() => setTagScope('selected')}
+                          />
+                          只打选中的（{selectedNamesForTag.length} 张）
+                        </label>
+                      </div>
+
+                      <div className="tag-pop-opts">
+                        <label
+                          className={
+                            'tag-check' + (tagScope === 'pending' ? ' is-disabled' : '')
+                          }
+                          title={
+                            tagScope === 'pending'
+                              ? '「只打未打标的」本来就不会碰已有标签'
+                              : '勾上＝已有标签的也重打一遍'
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            disabled={tagScope === 'pending'}
+                            checked={tagScope === 'pending' ? false : tagOverwrite}
+                            onChange={(e) => setTagOverwrite(e.target.checked)}
+                          />
+                          覆盖已有标签
+                        </label>
+                        <label className="tag-check" title="按标签生成规范文件名（会改文件名）">
+                          <input
+                            type="checkbox"
+                            checked={tagRename}
+                            onChange={(e) => {
+                              tagRenameTouched.current = true
+                              setTagRename(e.target.checked)
+                            }}
+                          />
+                          打完按标签改名
+                        </label>
+                      </div>
+
+                      <div className="tag-pop-hint">
+                        {tagScope === 'pending'
+                          ? tagPending === 0
+                            ? '这个图库没有待打的图；要重打请选「全部重打」'
+                            : '只打 metadata 里还没有 persons 的图，已打标的不会被改动'
+                          : tagOverwrite
+                            ? '已有标签的会重打一遍（覆盖 persons / act / emotions 等）'
+                            : '已有标签的会跳过'}
+                        {tagRename
+                          ? ' · 改名会改文件名，贴图库按文件名检索，请确认'
+                          : ' · 不改文件名'}
+                      </div>
+
+                      {tagError && (
+                        <div className="tag-pop-error">
+                          <AlertCircle size={12} />
+                          {tagError}
+                        </div>
+                      )}
+
+                      <div className="tag-pop-actions">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setTagPanelOpen(false)}
+                        >
+                          取消
+                        </button>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void startTag()}
+                          disabled={
+                            tagBusy ||
+                            (tagScope === 'pending' && tagPending === 0) ||
+                            (tagScope === 'selected' && selectedNamesForTag.length === 0)
+                          }
+                          title={
+                            tagScope === 'pending' && tagPending === 0
+                              ? '没有待打的图；换「全部重打」或勾选覆盖'
+                              : '开始一轮打标（后台跑，可随时停止）'
+                          }
+                        >
+                          {tagBusy ? (
+                            <Loader2 size={13} className="spin" />
+                          ) : (
+                            <Tags size={13} />
+                          )}
+                          开始打标
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             )
           ) : null}
           {selected.size > 0 && (
@@ -494,6 +758,14 @@ export default function Gallery() {
         <div className="notice notice-error">
           <AlertCircle size={14} />
           {error}
+        </div>
+      )}
+
+      {/* 打标自己的错误（启动失败 / 停止失败）：面板关着时也要能看见 */}
+      {tagError && !tagPanelOpen && (
+        <div className="notice notice-error">
+          <AlertCircle size={14} />
+          打标：{tagError}
         </div>
       )}
 

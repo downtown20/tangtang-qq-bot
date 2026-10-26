@@ -19,6 +19,10 @@ behavior:
   interjection_cooldown: 87
   private_interjection: true
   interjection_thirst: 0.08
+  # 2026-10-27 私聊自己的饥渴度（群聊不受它影响）。
+  # 0.5 = 基准（和没有这一项时完全一样）；0 = 最克制（冷却×1.5）；
+  # 1 = 最主动（冷却×0.5）。它缩放的是「按对方沉默天数分档」的冷却。
+  private_interjection_thirst: 0.5
   reply_only_to: []
   robot_ids:
   - '10001'

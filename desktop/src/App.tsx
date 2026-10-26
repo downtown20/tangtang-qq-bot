@@ -194,7 +194,9 @@ export default function App() {
               onFocusDone={() => setFocusId(null)}
             />
           )}
-          {page === 'gallery' && <Gallery />}
+          {page === 'gallery' && (
+            <Gallery onOpenSettings={(section) => openSettings(section)} />
+          )}
           {page === 'groups' && <GroupManage />}
           {page === 'graph' && <MemoryGraph />}
           {page === 'assets' && <Assets />}

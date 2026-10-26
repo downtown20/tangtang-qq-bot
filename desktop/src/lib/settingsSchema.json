@@ -150,9 +150,15 @@
       },
       {
         "path": "behavior.interjection_thirst",
-        "label": "插话饥渴度",
+        "label": "群聊插话饥渴度",
         "type": "float",
-        "hint": "0=沉默 1=话痨。值越高越容易插话。建议 0.3-0.8"
+        "hint": "只影响**群聊**插话。0=沉默 1=话痨。可以填小数（0.081 这种），但判定阈值是整数分累加，有效精度约 0.01 —— 0.0851 和 0.0859 不会有区别。"
+      },
+      {
+        "path": "behavior.private_interjection_thirst",
+        "label": "私聊插话饥渴度",
+        "type": "float",
+        "hint": "只影响**私聊**主动消息（群聊不受它影响）。留空 = 保持旧行为；数值越高越愿意主动找人说话。它缩放的是「按对方沉默天数分档」的冷却：0 = 最克制（冷却×2），1 = 最主动（冷却×0.4）。"
       },
       {
         "path": "behavior.interjection_cooldown",
@@ -616,19 +622,13 @@
   },
   {
     "key": "image_tagging",
-    "title": "图库打标 — 给图片批量生成标签（本地 Ollama / 云端 API）",
+    "title": "图库打标 —— 这里只调参数和模型（打标方式、模型名、端点、key、缩图边长、超时）。打哪些图、打完是否改名、是否覆盖已有标签，去图库页设置并打标。",
     "fields": [
       {
         "path": "image_tagging.provider",
         "label": "打标方式",
         "type": "choice",
-        "hint": "off=不启用；ollama=本机 Ollama（免费、离线，要先装好模型）；api=云端视觉 API（不装模型也能用，但要 key）。这决定图库里那个按钮走哪条路。"
-      },
-      {
-        "path": "image_tagging.dir",
-        "label": "图库目录",
-        "type": "str",
-        "hint": "相对项目根；默认 stickers_cg。换目录就是换一套图，标签写在这个目录的 metadata.json 里。"
+        "hint": "off=不启用；ollama=本机 Ollama（免费、离线，要先装好模型）；api=云端视觉 API（不装模型也能用，但要 key）。这决定图库页打标按钮走哪条路。"
       },
       {
         "path": "image_tagging.ollama_host",
@@ -671,12 +671,6 @@
         "label": "单张超时（秒）",
         "type": "int",
         "hint": "本地大模型第一张要加载权重，会慢；300 秒够用。云端 API 可以调到 60。"
-      },
-      {
-        "path": "image_tagging.rename",
-        "label": "打标后按规范改名",
-        "type": "bool",
-        "hint": "改成「体位_暴露_hash.jpg」。文件名会参与她的语义检索（没有 metadata 时的兜底文本），所以默认开；不想动文件名就关掉，标签照样写进 metadata.json。"
       }
     ]
   },

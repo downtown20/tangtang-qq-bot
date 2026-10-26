@@ -1156,6 +1156,30 @@ class AutonomyMixin:
                 continue
         return 999
 
+    def _private_thirst_factor(self) -> float:
+        """私聊饥渴度 → 冷却倍率（2026-10-27）。
+
+        `behavior.private_interjection_thirst` 为 None 时返回 1.0 —— **完全保持旧行为**。
+
+        语义和群聊插话的饥渴度一致：越高越愿意主动说话，所以冷却越短。
+        **0.5 是基准（倍率 1.0 = 和没有这个参数时完全一样）**：
+          thirst=0.0 → ×1.5（最克制：活跃的人 24h 变 36h）
+          thirst=0.5 → ×1.0（基准）
+          thirst=1.0 → ×0.5（最主动：24h 变 12h）
+
+        为什么不直接给冷却秒数：这里的冷却本来按 ta 的沉默天数分三档
+        （活跃 24h / 中间 48h / 冷场 72h），直接覆盖会丢掉「越冷场越克制」
+        这个设计。倍率只调快慢，三档的相对关系保留。
+        """
+        t = getattr(self, "private_interjection_thirst", None)
+        if t is None:
+            return 1.0
+        try:
+            t = max(0.0, min(1.0, float(t)))
+        except (TypeError, ValueError):
+            return 1.0
+        return 1.5 - 1.0 * t      # 0.5 → 1.0（基准，与没有这个参数时等价）
+
     def _private_gate_ok(self, qq_id: str, now: float, care_priority: bool = False) -> bool:
         """私聊冷启的打扰约束：机器人/黑名单/白名单/冷却/2小时内刚聊过。
 
@@ -1200,6 +1224,10 @@ class AutonomyMixin:
                 cooldown = 48 * 3600
             else:
                 cooldown = 72 * 3600
+            # 2026-10-27：私聊自己的饥渴度只缩放**普通路径**的冷却。
+            # `care_priority`（心情告警 / 心理陪伴沉默关心）是事件驱动，本就不该
+            # 被「频率」压下去 —— 冷场正是最该关心的时候，6h 保持不动。
+            cooldown = int(cooldown * self._private_thirst_factor())
         # 2026-08-16 事故：冷却从内存态 _last_private_init 搬进关系场
         # last_seek_ts——重启清零导致每次重启都重新骚扰同一个从不回复的人
         rel_ts = rel.last_seek_ts if rel else 0.0

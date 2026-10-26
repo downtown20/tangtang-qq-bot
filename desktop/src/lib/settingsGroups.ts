@@ -66,8 +66,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { key: 'daily_report', label: '每日播报', icon: Newspaper },
       { key: 'daily_like', label: '每日点赞', icon: ThumbsUp },
       { key: 'image_gen', label: 'AI 画图', icon: Wand2 },
-      // 图库打标（2026-10-26 第 63 轮）：原来靠双击 打标色图.bat，参数和模型名都在 bat 里。
-      // 现在 provider / 模型 / 端点 / 改名开关全在这一节，图库页只留一个按钮。
+      // 图库打标（2026-10-26 第 63 轮；2026-10-27 拆分）：原来靠双击 打标色图.bat，
+      // 参数和模型名都在 bat 里。现在**这一节只放参数与模型**（provider / 模型 / 端点 /
+      // 缩图边长 / 超时）；「打哪些图、是否改名、是否覆盖已有标签」在图库页设置并打标。
       { key: 'image_tagging', label: '图库打标', icon: Tags },
       { key: 'memory_sync', label: '记忆同步', icon: RefreshCw },
     ],

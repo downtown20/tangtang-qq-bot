@@ -94,7 +94,10 @@ export type GalleryTagProgress = {
 
 /** 图库打标的扫描结果：「已打标」= metadata 里有 `persons`，与脚本 `--resume` 同口径。 */
 export type GalleryTagScan = {
-  dir: string
+  /** 实际扫描的目录；合集（多个库合计）时是 null */
+  dir: string | null
+  /** 合集时逐个库的目录（`dir` 为 null 时看这里） */
+  dirs?: string[]
   dir_exists: boolean
   files: number
   tagged: number
@@ -104,7 +107,11 @@ export type GalleryTagScan = {
 
 export type GalleryTagStatus = {
   ok: boolean
-  /** 打标配置（**不含 key**，只有 `api_key_configured` 这个布尔） */
+  /** 这次 status 对应的图库来源（就是图库页当前选中的库 key） */
+  source: string
+  /** 实际会打标的目录；合集时为 null（合集不可写） */
+  dir: string | null
+  /** 打标配置（**不含 key**，只有 `api_key_configured` 这个布尔）——只放「参数/模型」 */
   config: {
     provider: string
     dir: string
@@ -119,8 +126,25 @@ export type GalleryTagStatus = {
   }
   /** 空串 = 可以开跑；非空 = **为什么不能**（直接显示，不让人猜） */
   provider_ready: string
+  /** 空串 = 这个库能打标；非空 = 为什么不能（目录不存在 / 合集不可写…） */
+  dir_ready: string
   scan: GalleryTagScan
   progress: GalleryTagProgress
+}
+
+/** 「打哪些图 / 怎么处理」——由图库页的控件决定，不再只读设置里的配置。 */
+export type GalleryTagRunRequest = {
+  /** 图库页当前选中的库（sticker / murasame / michele / cg）；不传=旧行为 */
+  source?: string
+  /** pending=只打未打标的 / all=整个图库 / selected=只打 names 里的 */
+  scope?: 'pending' | 'all' | 'selected'
+  /** scope='selected' 时用；纯文件名，桥会用 _safe_name 校验 */
+  names?: string[]
+  /** 打完是否改名（不传=配置里的 rename） */
+  rename?: boolean
+  /** 已有标签要不要重打（不传=scope 为 all 时 true） */
+  overwrite?: boolean
+  limit?: number
 }
 
 export type GalleryResponse = {
@@ -1699,17 +1723,32 @@ export const api = {
     })
     return request<GalleryResponse>(`/api/gallery?${qs.toString()}`)
   },
-  // ── 图库打标（2026-10-26 第 63 轮）──────────────────────
+  // ── 图库打标（2026-10-26 第 63 轮；2026-10-27 改为「按图库页当前库打标」）──
   //
   // 打标是**长任务**（本地模型约 1.5 秒一张），所以 start 立刻返回，
   // 进度靠 status 轮询。别把 run 写成同步等待——那会让整个界面卡住几十秒。
-  galleryTagStatus: () => request<GalleryTagStatus>('/api/gallery/tag/status'),
+  //
+  // `source` 用的是图库页那套库 key（sticker / murasame / michele / cg）：
+  // 「打哪些图」由图库页当前选中的库决定，不是另造一个「当前目录」。
+  galleryTagStatus: (source = '') => {
+    const qs = new URLSearchParams()
+    if (source) qs.set('source', source)
+    const q = qs.toString()
+    return request<GalleryTagStatus>(`/api/gallery/tag/status${q ? `?${q}` : ''}`)
+  },
 
-  galleryTagRun: (full = false, limit = 0) =>
-    request<{ ok: boolean; started?: boolean; total?: number; message?: string; error?: string; provider?: string; dir?: string }>(
-      '/api/gallery/tag/run',
-      { method: 'POST', body: JSON.stringify({ full, limit }) },
-    ),
+  galleryTagRun: (payload: GalleryTagRunRequest = {}) =>
+    request<{
+      ok: boolean
+      started?: boolean
+      total?: number
+      message?: string
+      error?: string
+      provider?: string
+      dir?: string
+      scope?: string
+      overwrite?: boolean
+    }>('/api/gallery/tag/run', { method: 'POST', body: JSON.stringify(payload) }),
 
   galleryTagCancel: () =>
     request<{ ok: boolean; running: boolean; message?: string }>('/api/gallery/tag/cancel', {

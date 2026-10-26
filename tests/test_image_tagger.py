@@ -171,12 +171,20 @@ def test_status_hides_api_key(gallery):
 
 # ── 解析层必须复用脚本（不许自己写简化版）───────────────────
 
-def test_tagger_missing_script_raises_instead_of_faking(gallery):
-    """脚本不在 → **报错**，不能退回一个「简化解析器」假装能打标。"""
+def test_tagger_missing_script_raises_instead_of_faking(gallery, monkeypatch, tmp_path):
+    """两处都没有脚本 → **报错**，不能退回一个「简化解析器」假装能打标。"""
     T.reset_state_for_tests()
+    monkeypatch.setattr(T, "FALLBACK_SCRIPT_ROOT", tmp_path / "没有回落的库")
     with pytest.raises(RuntimeError) as ei:
         T._tagger()
     assert "找不到打标脚本" in str(ei.value)
+
+
+def test_script_falls_back_to_the_shared_parser(tmp_path):
+    """贴图库没有 `_tag/` → 回落到 stickers_cg 的**同一份**脚本（解析层只有一份）。"""
+    script = T._script_for(tmp_path)
+    assert script is not None, "没有回落路径，贴图库就永远不能打标"
+    assert T.FALLBACK_SCRIPT_ROOT in script.parents, "回落到了别的脚本（可能是简化版）"
 
 
 def test_tagger_loads_the_real_script():
@@ -266,7 +274,7 @@ def test_worker_does_not_overwrite_on_rename_collision(gallery, monkeypatch):
         def make_rec_v2(name, desc, old):
             return {"persons": "单人"}, "撞名_0001.jpg"
 
-    monkeypatch.setattr(T, "_tagger", lambda: _Fake)
+    monkeypatch.setattr(T, "_tagger", lambda dir_path=None: _Fake)
     monkeypatch.setattr(T, "_ask", lambda cfg, b64, prompt: "描述")
     T._worker(cfg, [d / "b_0001.jpg"])
     meta = json.loads((d / "metadata.json").read_text(encoding="utf-8"))
@@ -276,3 +284,141 @@ def test_worker_does_not_overwrite_on_rename_collision(gallery, monkeypatch):
     assert meta.get("撞名_0001.jpg") is None
     # 3) 这一张记为失败（不是「成功改名」）
     assert T.status()["progress"]["fail"] == 1
+
+
+# ═══════════════════════════════════════════════════════════════
+# 「打哪些图 / 怎么打」由**图库页调用时传入**（2026-10-27）
+#
+# 主人原话：「设置中的『图库打标』仅仅是调整背后参数、信息、模型的而非决定打标方式，
+# 打标方式，选哪些图打标需要在图库中具体设置并打标。」
+#
+# 所以守：dir / rename / overwrite / scope 四个参数**传了就得生效**，
+# 且不传时回落 config（老配置不许失效）。
+# ═══════════════════════════════════════════════════════════════
+
+def _two_galleries(tmp_path, monkeypatch):
+    """两个库：A 有 3 张（a1 已打标），B 有 1 张。验 dir 真的按调用方走。"""
+    a = tmp_path / "gallery_a"
+    b = tmp_path / "gallery_b"
+    for d in (a, b):
+        (d / "_tag").mkdir(parents=True)
+    for name in ("a1.jpg", "a2.jpg", "a3.jpg"):
+        (a / name).write_bytes(b"\xff\xd8\xff\xd9")
+    (b / "b1.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    (a / "metadata.json").write_text(
+        json.dumps({"a1.jpg": {"persons": "单人"}}), encoding="utf-8")
+    cfg = dict(T.DEFAULTS)
+    cfg.update({"provider": "ollama"})
+    monkeypatch.setattr(T, "load_config", lambda: dict(cfg))
+    T.reset_state_for_tests()
+    return a, b, cfg
+
+
+class _SyncThread:
+    """把 run() 的后台线程变成同步执行——测试要能确定性地看到 _worker 收到什么。"""
+
+    def __init__(self, target=None, args=(), daemon=None, name=None):
+        self._target = target
+        self._args = args
+
+    def start(self):
+        self._target(*self._args)
+
+
+class _FakeTagger:
+    PROMPT = "p"
+
+    @staticmethod
+    def _encode_image(path, max_side=768):
+        return "AAAA"
+
+    @staticmethod
+    def make_rec_v2(name, desc, old):
+        return {"persons": "单人"}, "改名_" + name
+
+
+def _patch_model(monkeypatch):
+    monkeypatch.setattr(T, "_tagger", lambda dir_path=None: _FakeTagger)
+    monkeypatch.setattr(T, "_ask", lambda cfg, b64, prompt: "描述")
+
+
+def test_dir_passed_by_caller_wins_over_config(tmp_path, monkeypatch):
+    """图库页传 A 库 → 只打 A 库；config 里的 dir 不再是唯一真相。"""
+    a, b, cfg = _two_galleries(tmp_path, monkeypatch)
+    assert [p.name for p in T._select_todo(cfg, str(a), "pending", None, False, 0)] \
+        == ["a2.jpg", "a3.jpg"], "pending 应跳过已打标的 a1"
+    assert [p.name for p in T._select_todo(cfg, str(b), "pending", None, False, 0)] \
+        == ["b1.jpg"]
+    # scan 也要跟着走，否则按钮显示的「还剩几张」是另一个库的数字
+    assert T.scan(dir_path=str(a))["files"] == 3
+    assert T.scan(dir_path=str(b))["files"] == 1
+
+
+def test_scope_all_can_overwrite_and_pending_cannot(tmp_path, monkeypatch):
+    """`all` + overwrite=True → 连已打标的也打；`pending` 永远跳过已打标的。"""
+    a, _, cfg = _two_galleries(tmp_path, monkeypatch)
+    assert len(T._select_todo(cfg, str(a), "all", None, True, 0)) == 3
+    # all + overwrite=False 等价于 pending（同一判据、同一实现）
+    assert [p.name for p in T._select_todo(cfg, str(a), "all", None, False, 0)] \
+        == ["a2.jpg", "a3.jpg"]
+    # run() 里 pending 强制忽略 overwrite（防止「只打未打标的」还去重打）
+    _patch_model(monkeypatch)
+    monkeypatch.setattr(T.threading, "Thread", _SyncThread)
+    out = T.run(dir_path=str(a), scope="pending", overwrite=True)
+    assert out["ok"] is True and out["total"] == 2, out
+    assert out["overwrite"] is False
+
+
+def test_scope_selected_only_takes_named_files(tmp_path, monkeypatch):
+    """「只打选中的图」只认传进来的文件名——多一个都不打。"""
+    a, _, cfg = _two_galleries(tmp_path, monkeypatch)
+    todo = T._select_todo(cfg, str(a), "selected", ["a1.jpg", "a3.jpg", "不存在.jpg"],
+                          False, 0)
+    assert [p.name for p in todo] == ["a3.jpg"], "a1 已打标应跳过；不存在的名字应忽略"
+    todo = T._select_todo(cfg, str(a), "selected", ["a1.jpg", "a3.jpg"], True, 0)
+    assert [p.name for p in todo] == ["a1.jpg", "a3.jpg"]
+
+
+def test_run_rejects_unknown_scope(tmp_path, monkeypatch):
+    a, _, _ = _two_galleries(tmp_path, monkeypatch)
+    out = T.run(dir_path=str(a), scope="随便什么")
+    assert out["ok"] is False and "未知的打标范围" in out["error"]
+
+
+def test_status_reports_where_it_would_run(tmp_path, monkeypatch):
+    """status 必须带回「在哪个目录 / 能不能跑」，否则界面没法把话说清楚。"""
+    a, _, _ = _two_galleries(tmp_path, monkeypatch)
+    st = T.status(dir_path=str(a), source="cg")
+    assert st["source"] == "cg"
+    assert st["dir"] == str(a)
+    assert st["scan"]["dir"] == str(a)
+    assert st["dir_ready"] == "", st["dir_ready"]
+    missing = T.status(dir_path=str(a / "不存在"))
+    assert "不存在" in missing["dir_ready"]
+
+
+def test_scan_many_sums_libraries(tmp_path, monkeypatch):
+    """合集（图库页「贴图」）的合计只在这里算一次，bridge 不许再写一遍加法。"""
+    a, b, cfg = _two_galleries(tmp_path, monkeypatch)
+    out = T.scan_many(cfg, [a, b])
+    assert out["files"] == 4 and out["tagged"] == 1 and out["pending"] == 3
+    assert out["dir"] is None and len(out["dirs"]) == 2
+    st = T.status(scan_dirs=[a, b], source="sticker_all")
+    assert st["scan"]["files"] == 4 and st["dir"] is None
+
+
+def test_worker_honours_rename_flag_and_writes_only_the_target_dir(tmp_path, monkeypatch):
+    """rename=False 就不改名；写盘只写 dir_path 那个库（不碰另一个库）。"""
+    a, b, cfg = _two_galleries(tmp_path, monkeypatch)
+    _patch_model(monkeypatch)
+    T._worker(cfg, [a / "a2.jpg"], str(a), False)
+    meta_a = json.loads((a / "metadata.json").read_text(encoding="utf-8"))
+    assert "a2.jpg" in meta_a, "rename=False 时不该改名"
+    assert "改名_a2.jpg" not in meta_a
+    assert (a / "a2.jpg").exists()
+    assert not (b / "metadata.json").exists(), "写了另一个库的 metadata（dir 没生效）"
+
+    T.reset_state_for_tests()
+    T._worker(cfg, [a / "a3.jpg"], str(a), True)
+    meta_a = json.loads((a / "metadata.json").read_text(encoding="utf-8"))
+    assert "改名_a3.jpg" in meta_a and not (a / "a3.jpg").exists()

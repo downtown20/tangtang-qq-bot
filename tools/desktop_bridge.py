@@ -1510,22 +1510,73 @@ def _image_tagger():
     return image_tagger
 
 
+def _tag_target(source: str) -> dict:
+    """图库页的 source → 打标目标。**目录只在这里解一次**，别在调用点各解一遍。
+
+    `source` 用的是图库页那套语义（sticker / murasame / michele / cg / sticker_all），
+    不另造「当前目录」概念。写操作只允许单库——与大图/标签/回收站同一条规矩，
+    所以合集（sticker_all）在这里就被挡掉，并给出人话原因。
+    """
+    source = str(source or "").strip()
+    if not source:
+        return {"source": "", "dir": None, "reason": ""}
+    if source in GALLERY_GROUPS:
+        keys = [k for k in GALLERY_GROUPS[source] if k in GALLERY_SOURCES]
+        labels = " / ".join(GALLERY_LABELS.get(k, k) for k in keys)
+        return {
+            "source": source, "dir": None,
+            "reason": f"「{labels}」是 {len(keys)} 个库的合集——先选一个具体图库再打标",
+        }
+    return {"source": source, "dir": _gallery_dir(source), "reason": ""}
+
+
 def api_gallery_tag_status(params: dict) -> dict:
-    """打标现状：配置（**隐去 key**）+ 图库扫描 + 这一轮进度。
+    """打标现状：配置（**隐去 key**）+ 图库扫描 + 这一轮进度 + 能不能开跑。
 
     「进度」和「还剩多少张」分两个字段给：合成一个的话，跑完那一刻两个数字会互相打架。
+    `source` = 图库页当前选中的库；合集时只做**只读汇总**（dispatch 到 scan_many）。
     """
-    return _image_tagger().status()
+    target = _tag_target(str((params or {}).get("source") or ""))
+    tagger = _image_tagger()
+    if target["source"] in GALLERY_GROUPS:
+        return tagger.status(
+            source=target["source"], dir_reason=target["reason"],
+            scan_dirs=[_gallery_dir(k) for k in GALLERY_GROUPS[target["source"]]
+                       if k in GALLERY_SOURCES])
+    return tagger.status(dir_path=target["dir"], source=target["source"],
+                         dir_reason=target["reason"])
 
 
 def api_gallery_tag_run(body: dict) -> dict:
-    """启动一轮打标（后台线程，立刻返回；进度靠 status 轮询）。"""
+    """启动一轮打标（后台线程，立刻返回；进度靠 status 轮询）。
+
+    「打哪些图 / 怎么处理」由这个 body 决定（图库页的控件），**不是只读 config**：
+    `source`（哪个库）/ `scope`（pending|all|selected）/ `names`（选中的图）/
+    `rename`（打完改名）/ `overwrite`（要不要重打已有标签）。
+    """
     b = body or {}
     try:
         limit = int(b.get("limit") or 0)
     except (TypeError, ValueError):
         limit = 0
-    return _image_tagger().run(full=bool(b.get("full")), limit=limit)
+    target = _tag_target(str(b.get("source") or ""))
+    if target["reason"]:
+        return {"ok": False, "error": target["reason"]}
+    names = b.get("names") or []
+    if not isinstance(names, list):
+        names = []
+    # 渲染进程传来的文件名是不可信输入：走与写操作同一条护栏（挡 ../、分隔符、非图片）
+    names = [_safe_name(str(n)) for n in names if str(n).strip()]
+    rename = b.get("rename")
+    overwrite = b.get("overwrite")
+    return _image_tagger().run(
+        dir_path=target["dir"],
+        scope=str(b.get("scope") or "pending"),
+        names=names,
+        rename=None if rename is None else bool(rename),
+        overwrite=None if overwrite is None else bool(overwrite),
+        limit=limit,
+    )
 
 
 def api_gallery_tag_cancel(body: dict) -> dict:
@@ -1535,7 +1586,10 @@ def api_gallery_tag_cancel(body: dict) -> dict:
 def api_gallery_tag_probe(body: dict) -> dict:
     """试打一张：**不写 metadata**，只回答「这条路通不通、模型吐什么」。"""
     b = body or {}
-    return _image_tagger().describe_one(str(b.get("name") or ""))
+    target = _tag_target(str(b.get("source") or ""))
+    if target["reason"]:
+        return {"ok": False, "error": target["reason"]}
+    return _image_tagger().describe_one(str(b.get("name") or ""), dir_path=target["dir"])
 
 
 def api_gallery_trash(body: dict) -> dict:

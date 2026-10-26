@@ -1194,6 +1194,9 @@ class MessageHandler(AutonomyMixin):
         self.active_interjection = beh_cfg["active_interjection"]
         self.autonomous_speech = beh_cfg.get("autonomous_speech", True)  # 新增：自治主动说话
         self.private_interjection = beh_cfg.get("private_interjection", False)  # 私聊插话：主动给私聊用户发消息
+        # 2026-10-27：私聊**自己**的饥渴度（原来这里没有，只在群聊插话引擎上有）。
+        # None = 没配过 → 冷却倍率 1.0，完全保持旧行为；填了才生效。
+        self.private_interjection_thirst = beh_cfg.get("private_interjection_thirst")
         self.reply_only_to = beh_cfg.get("reply_only_to", [])  # 白名单，空=所有人
 
         # 遥控指令

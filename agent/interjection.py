@@ -30,7 +30,7 @@ class InterjectionEngine:
                  is_owner: bool = False,
                  is_in_conversation: bool = False,
                  vibe_bonus: int = 0,
-                 threshold_override: Optional[int] = None,
+                 threshold_override: Optional[float] = None,
                  mood: Optional[int] = None,
                  energy: Optional[int] = None) -> Tuple[bool, int, str]:
         """
@@ -128,7 +128,14 @@ class InterjectionEngine:
             return False, score, "今天话有点多，先收敛一下"
 
         # 11. 决策阈值
-        threshold = threshold_override if threshold_override is not None else int((1.0 - self.thirst) * 100)
+        # 2026-10-27：**不要 int()**。取整之后只有 101 档（0.081 和 0.089 都变成 91），
+        # 主人要精确调参时输入的小数全被吃掉。保留 float 后：
+        #   thirst=0.081 → 91.9（score=91 时不插话）
+        #   thirst=0.091 → 90.9（score=91 时插话）
+        # 但 score 本身仍是整数累加，所以**有效精度上限是 1 分（≈0.01 thirst）**；
+        # 0.0851 和 0.0859 不会有区别，别在这上面反复调。
+        threshold = (threshold_override if threshold_override is not None
+                     else (1.0 - self.thirst) * 100.0)
 
         reason_txt = " | ".join(reasons)
         if score >= threshold:

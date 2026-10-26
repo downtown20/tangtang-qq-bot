@@ -12,7 +12,17 @@
 1. **界面上一键跑**：不用再双击 bat，也不用记 `--resume` / `--limit` 参数；
 2. **两种 provider**：本机 Ollama（免费、离线）/ 云端 OpenAI 兼容视觉 API
    （不装模型也能用，但要 key）；
-3. **配置集中**：设置页配好就完事，图库页只留一个「打标」按钮 + 进度。
+3. **参数与方式分家**（2026-10-27 主人反馈：「设置中的图库打标仅仅是调整背后参数、
+   信息、模型，而非决定打标方式」）：
+
+   | 在哪 | 管什么 |
+   |---|---|
+   | 设置 → 图库打标 | 用哪个模型、端点、key、缩图边长、超时（`provider` 也在那里） |
+   | 图库页 | **打哪些图**（哪个库、全部/未打标/选中的）+ 改名 + 覆盖已有标签 |
+
+   所以 `run()` 的三个关键参数（`dir_path` / `rename` / `overwrite`）一律
+   **调用时传入**，不再只从 config 读；config 里那份只作为兜底默认值
+   （老配置不写这三个键也能跑，向后兼容）。
 
 ## 为什么不重写「模型输出 → 标签」的解析
 
@@ -59,10 +69,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 #: `config.yaml` 里这一节的默认值。**每一个都能在设置页改**，改完不用重启（每次读）。
+#:
+#: ⚠ 2026-10-27 起 `dir` / `rename` 的归属是**图库页**（「打哪些图」「打完怎么处理」），
+#: 这里保留它们只是因为老配置里可能写着：调用时传参优先，不传才回落到这两条
+#: （向后兼容，不是第二套真相——`run()` 的注释写清了优先级）。
 DEFAULTS: dict = {
     # off = 不启用（图库页的按钮变灰）；ollama = 本机；api = 云端
     "provider": "off",
-    # 图库目录，相对项目根。**换个目录就是换一套图**，所以做成配置而不是常量
+    # 图库目录，相对项目根。**兜底值**：图库页会按它当前选中的库传入 dir_path，
+    # 只有在没传（老前端 / 直接调 API）时才用这里
     "dir": "stickers_cg",
     # —— 本地（Ollama）——
     "ollama_host": "http://127.0.0.1:11434",
@@ -75,10 +90,19 @@ DEFAULTS: dict = {
     # —— 通用 ——
     "max_side": 768,
     "timeout_s": 300,
-    # 打标后按规范改名（`体位_暴露_hash.jpg`）。文件名参与她的语义索引，所以默认开；
-    # 不想动文件名就在设置里关掉（标签照样写进 metadata.json）
+    # 兜底的改名默认值（图库页有独立的勾选框）。
+    # 文件名参与她的语义索引，所以默认开；不想动文件名就在图库页关掉（标签照样落库）
     "rename": True,
 }
+
+#: 解析层脚本的**回落位置**（2026-10-27）。
+#:
+#: 只有 `stickers_cg` 自带 `_tag/tag_cg_ollama.py`，贴图库没有。但那段解析规则
+#: （`persons_of` / `ACT_RULES` / `make_rec_v2`…）是**打标质量的本体**，跟「打哪个库」
+#: 无关——所以目标目录里没有脚本时回落到这里，**仍然只有一份解析层**，
+#: 不是「偷偷用简化版」（教训 #34：同一个东西就该只有一份）。
+FALLBACK_SCRIPT_ROOT = PROJECT_ROOT / "stickers_cg"
+
 
 #: 建索引时认的图片后缀（与脚本 `EXTS` 一致）
 EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"})
@@ -97,7 +121,8 @@ _STATE: dict = {
     "cancel": False,
 }
 _THREAD: threading.Thread | None = None
-_TAGGER = None
+#: 脚本路径 → 已加载的模块。按路径缓存：切库（CG / 贴图）不会互踩
+_TAGGERS: dict[str, object] = {}
 
 
 # ── 配置与路径 ────────────────────────────────────────────────
@@ -130,19 +155,30 @@ def load_config() -> dict:
     return cfg
 
 
-def gallery_dir(cfg: dict | None = None) -> Path:
-    cfg = cfg or load_config()
-    rel = str(cfg.get("dir") or DEFAULTS["dir"]).strip() or DEFAULTS["dir"]
+def _resolve_dir(cfg: dict, dir_path=None) -> Path:
+    """目录的**唯一解析点**：调用时传入 > config 的 `dir` > DEFAULTS。
+
+    优先级写在这里一处，`gallery_dir` / `metadata_path` / `scan` / `run` 全走它，
+    避免「界面说打这个库、实际写那个库」的两套口径（教训 #38/#51）。
+    """
+    raw = dir_path if dir_path not in (None, "") else cfg.get("dir")
+    rel = str(raw or DEFAULTS["dir"]).strip() or DEFAULTS["dir"]
     p = Path(rel)
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
-def metadata_path(cfg: dict | None = None) -> Path:
-    return gallery_dir(cfg) / "metadata.json"
+def gallery_dir(cfg: dict | None = None, dir_path=None) -> Path:
+    """这个图库的绝对路径。`dir_path` 由调用方（图库页当前选中的库）传入。"""
+    cfg = cfg or load_config()
+    return _resolve_dir(cfg, dir_path)
 
 
-def _load_meta(cfg: dict) -> dict:
-    p = metadata_path(cfg)
+def metadata_path(cfg: dict | None = None, dir_path=None) -> Path:
+    return gallery_dir(cfg, dir_path) / "metadata.json"
+
+
+def _load_meta(cfg: dict, dir_path=None) -> dict:
+    p = metadata_path(cfg, dir_path)
     try:
         if not p.is_file():
             return {}
@@ -152,35 +188,57 @@ def _load_meta(cfg: dict) -> dict:
         return {}
 
 
-def _save_meta(cfg: dict, meta: dict) -> None:
+def _save_meta(cfg: dict, meta: dict, dir_path=None) -> None:
     """整份重写 `metadata.json`。
 
     不原子替换：现有脚本（`tag_cg_ollama.py`）也是直接 write，而它每张都写，
     中断时最坏情况是这一张丢失。加原子替换需要临时文件 + `os.replace`，
     会给「她自己也在读这个文件」的进程多一个中间态——收益不值这个复杂度。
     """
-    metadata_path(cfg).write_text(
+    metadata_path(cfg, dir_path).write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _has_tags(meta: dict, name: str) -> bool:
+    """「已打标」的**唯一判据** = metadata 里有非空 `persons`（与脚本 `--resume` 同口径）。
+
+    扫描、增量过滤、覆盖开关全调这一个函数——两处各写一遍必然漂移（教训 #38）。
+    """
+    return bool(str((meta.get(name) or {}).get("persons") or "").strip())
+
 
 
 # ── 复用打标脚本的解析层 ──────────────────────────────────────
 
-def _tagger():
-    """懒加载 `stickers_cg/_tag/tag_cg_ollama.py`（**只取函数，不跑它的 main**）。
+def _script_for(d: Path) -> Path | None:
+    """这个图库用哪份解析脚本：先看目录自带，再回落到 `FALLBACK_SCRIPT_ROOT`。
+
+    返回 `None` = 两处都没有 → 调用方报错（**不许**退回一个自写的简化解析器）。
+    """
+    cand = []
+    for root in (d, FALLBACK_SCRIPT_ROOT):
+        cand += [root / "_tag" / "tag_cg_ollama.py", root / "_tag" / "tag_cg.py"]
+    return next((p for p in cand if p.is_file()), None)
+
+
+def _tagger(dir_path=None):
+    """懒加载目标图库的解析脚本（**只取函数，不跑它的 main**）。
 
     它有一堆正则和优先级规则（单人不许双人体位、否定词先剥、体位只认动作词），
     那是打标质量的本体。重写＝两套真相迟早漂移（教训 #34）。
+    贴图库没有 `_tag/`，回落到 `stickers_cg` 的同一份脚本——解析层只有一份。
     """
-    global _TAGGER
-    if _TAGGER is not None:
-        return _TAGGER
-    root = gallery_dir()
-    cand = [root / "_tag" / "tag_cg_ollama.py", root / "_tag" / "tag_cg.py"]
-    script = next((p for p in cand if p.is_file()), None)
+    d = gallery_dir(dir_path=dir_path)
+    script = _script_for(d)
     if script is None:
         raise RuntimeError(
-            f"找不到打标脚本：{root}/_tag/tag_cg_ollama.py。"
-            f"这个功能复用现有脚本的解析规则，缺了它只能报错，不会偷偷用简化版")
+            f"找不到打标脚本：{d}/_tag/tag_cg_ollama.py（也没有回落到"
+            f"{FALLBACK_SCRIPT_ROOT}/_tag/）。这个功能复用现有脚本的解析规则，"
+            f"缺了它只能报错，不会偷偷用简化版")
+    key = str(script)
+    mod = _TAGGERS.get(key)
+    if mod is not None:
+        return mod
     spec = importlib.util.spec_from_file_location("_tangtang_tagger", str(script))
     if spec is None or spec.loader is None:
         raise RuntimeError(f"打标脚本加载失败：{script}")
@@ -189,28 +247,28 @@ def _tagger():
     for need in ("_encode_image", "PROMPT", "make_rec_v2"):
         if not hasattr(mod, need):
             raise RuntimeError(f"{script.name} 里没有 {need}——打标脚本结构变了，先对齐再跑")
-    _TAGGER = mod
+    _TAGGERS[key] = mod
     return mod
 
 
 # ── 扫描 / 状态 ──────────────────────────────────────────────
 
-def scan(cfg: dict | None = None) -> dict:
+def scan(cfg: dict | None = None, dir_path=None) -> dict:
     """图库现状：多少张图、多少张已打标、待打标几张。
 
-    「已打标」判据 = metadata 里有非空 `persons` 字段——**和脚本 `--resume` 同一口径**，
+    「已打标」判据走 `_has_tags`——**和脚本 `--resume` 同一口径**，
     否则界面说「还剩 3 张」、跑起来却重打 30 张（两种口径必然对不上，教训 #38）。
     """
     cfg = cfg or load_config()
-    d = gallery_dir(cfg)
-    meta = _load_meta(cfg)
+    d = gallery_dir(cfg, dir_path)
+    meta = _load_meta(cfg, dir_path)
     files: list[Path] = []
     if d.is_dir():
         try:
             files = sorted(p for p in d.iterdir() if p.suffix.lower() in EXTS)
         except OSError:
             files = []
-    tagged = [p for p in files if str((meta.get(p.name) or {}).get("persons") or "").strip()]
+    tagged = [p for p in files if _has_tags(meta, p.name)]
     return {
         "dir": str(d),
         "dir_exists": d.is_dir(),
@@ -221,11 +279,45 @@ def scan(cfg: dict | None = None) -> dict:
     }
 
 
-def status() -> dict:
-    """给界面的**唯一口径**：配置（隐去 key）+ 扫描 + 进度。
+def scan_many(cfg: dict, dir_paths) -> dict:
+    """多个库合计（图库页「贴图」是三个库的合集，只读汇总用）。
+
+    只在 image_tagger 里累加——**不要再在 bridge 里写一遍加法**（教训 #51）。
+    """
+    parts = [scan(cfg, d) for d in (dir_paths or [])]
+    return {
+        "dir": None,
+        "dir_exists": any(p["dir_exists"] for p in parts),
+        "files": sum(p["files"] for p in parts),
+        "tagged": sum(p["tagged"] for p in parts),
+        "pending": sum(p["pending"] for p in parts),
+        "metadata_entries": sum(p["metadata_entries"] for p in parts),
+        "dirs": [p["dir"] for p in parts],
+    }
+
+
+def _dir_ready(cfg: dict, dir_path=None) -> str:
+    """空串 = 这个目录能打标；非空 = **为什么不能**（直接显示，不让人猜）。"""
+    d = gallery_dir(cfg, dir_path)
+    if not d.is_dir():
+        return f"图库目录不存在：{d}"
+    if _script_for(d) is None:
+        return f"这个图库没有打标脚本（{d}/_tag/tag_cg_ollama.py）"
+    return ""
+
+
+def status(dir_path=None, source: str = "", dir_reason: str = "",
+           scan_dirs=None) -> dict:
+    """给界面的**唯一口径**：配置（隐去 key）+ 扫描 + 进度 + 能不能跑。
 
     进度和扫描分两个字段：`progress` 是「这一轮跑到哪」，`scan` 是「还剩多少张」。
     合成一个字段的话，跑完那一刻两个数字会互相打架（教训 #51）。
+
+    `dir_path`    —— 图库页当前选中的库（不传 = config 兜底）
+    `source`      —— 桥那边的库 key，原样带回给前端（界面显示「在打哪个库」）
+    `dir_reason`  —— 桥判定「这个范围不能直接打标」的原因（如合集不可写），
+                     空 = 由本模块按目录自己判
+    `scan_dirs`   —— 多库合计扫描（合集时用；`scan` 走 `scan_many`）
     """
     cfg = load_config()
     safe = {k: v for k, v in cfg.items() if k != "api_key"}
@@ -234,11 +326,16 @@ def status() -> dict:
     with _LOCK:
         progress = dict(_STATE)
         progress.pop("cancel", None)
+    d = gallery_dir(cfg, dir_path)
     return {
         "ok": True,
+        "source": source,
+        # 合集（scan_dirs）没有「单一目录」；其余情况给实际扫描的目录，界面要显示它
+        "dir": None if scan_dirs else str(d),
         "config": safe,
         "provider_ready": _provider_ready(cfg),
-        "scan": scan(cfg),
+        "dir_ready": dir_reason or _dir_ready(cfg, dir_path),
+        "scan": scan_many(cfg, scan_dirs) if scan_dirs else scan(cfg, dir_path),
         "progress": progress,
     }
 
@@ -345,47 +442,82 @@ def _ask(cfg: dict, b64: str, prompt: str) -> str:
 
 # ── 跑一轮 ──────────────────────────────────────────────────
 
-def _todo(cfg: dict, full: bool, limit: int) -> list[Path]:
-    d = gallery_dir(cfg)
+#: `run()` 接受的范围（图库页「选范围」的三选一）
+SCOPES = ("pending", "all", "selected")
+
+
+def _select_todo(cfg: dict, dir_path, scope: str, names, overwrite: bool,
+                 limit: int) -> list[Path]:
+    """这一轮要打哪些图——**筛选的唯一实现**。
+
+    两个维度（与图库页的控件一一对应）：
+      `scope`     —— 候选集：pending=未打标的 / all=整个图库 / selected=传入的 names
+      `overwrite` —— 候选集里已经打过标的要不要重打（False = 跳过）
+    `pending` 已经排除了已打标的，所以 `overwrite` 在它上面不生效（由图库页说明）。
+    """
+    d = gallery_dir(cfg, dir_path)
     if not d.is_dir():
         return []
-    meta = _load_meta(cfg)
+    meta = _load_meta(cfg, dir_path)
     files = sorted(p for p in d.iterdir() if p.suffix.lower() in EXTS)
-    if not full:
-        files = [p for p in files
-                 if not str((meta.get(p.name) or {}).get("persons") or "").strip()]
+    if scope == "selected":
+        wanted = {str(n).strip() for n in (names or []) if str(n).strip()}
+        files = [p for p in files if p.name in wanted]
+    if not overwrite:
+        files = [p for p in files if not _has_tags(meta, p.name)]
     return files[:limit] if limit and limit > 0 else files
 
 
-def run(full: bool = False, limit: int = 0) -> dict:
+def run(dir_path=None, scope: str = "pending", names=None,
+        rename=None, overwrite=None, limit: int = 0) -> dict:
     """启动一轮打标（后台线程，立刻返回）。
 
-    `full=False`（默认）= 只打**没有 persons 字段**的（增量），与脚本 `--resume` 同义。
-    `full=True` = 全部重打（会覆盖已有标签）。
+    **「打哪些图 / 怎么处理」全部由调用方传入**（图库页的控件），不再只从 config 读：
+
+    - `dir_path` —— 打哪个库的目录（图库页当前选中的库；不传才回落 config 的 dir）
+    - `scope`    —— `pending`（默认，只打没 persons 的）/ `all`（整个图库）/
+                    `selected`（只打 `names` 里的）
+    - `names`    —— `scope="selected"` 时的文件名白名单（只认纯文件名，由桥护栏）
+    - `rename`   —— 打完是否按规范改名（不传 = config 的 rename，老配置照样生效）
+    - `overwrite`—— 已有标签的要不要重打（不传 = `scope=="all"` 时为 True，
+                    与老 `full=True` 语义一致；`scope=="pending"` 时强制 False）
     """
     global _THREAD
     cfg = load_config()
     why = _provider_ready(cfg)
     if why:
         return {"ok": False, "error": why}
+    why = _dir_ready(cfg, dir_path)
+    if why:
+        return {"ok": False, "error": why}
+    scope = str(scope or "pending").strip()
+    if scope not in SCOPES:
+        return {"ok": False,
+                "error": f"未知的打标范围：{scope}（可选 {' / '.join(SCOPES)}）"}
+    if overwrite is None:
+        overwrite = scope == "all"
+    overwrite = bool(overwrite) and scope != "pending"
+    d = gallery_dir(cfg, dir_path)
     with _LOCK:
         if _STATE["running"]:
             return {"ok": False, "error": "已经在跑了"}
-    todo = _todo(cfg, full, int(limit or 0))
+    todo = _select_todo(cfg, dir_path, scope, names, overwrite, int(limit or 0))
     if not todo:
         return {"ok": True, "started": False,
-                "message": "没有需要打标的图（全部已有标签）" if not full else "图库里没有图片"}
+                "message": "图库里没有图片" if (scope == "all" and overwrite)
+                else "没有需要打标的图（全部已有标签）"}
     with _LOCK:
         _STATE.update({
             "running": True, "total": len(todo), "done": 0, "ok": 0, "fail": 0,
             "current": "", "error": "", "started_at": time.time(),
             "finished_at": 0.0, "cancel": False,
         })
-    _THREAD = threading.Thread(target=_worker, args=(cfg, todo), daemon=True,
-                               name="image-tagger")
+    _THREAD = threading.Thread(target=_worker, args=(cfg, todo, dir_path, rename),
+                               daemon=True, name="image-tagger")
     _THREAD.start()
     return {"ok": True, "started": True, "total": len(todo),
-            "provider": cfg["provider"], "dir": str(gallery_dir(cfg))}
+            "provider": cfg["provider"], "dir": str(d),
+            "scope": scope, "overwrite": overwrite}
 
 
 def cancel() -> dict:
@@ -397,11 +529,17 @@ def cancel() -> dict:
     return {"ok": True, "running": True, "message": "已请求停止，当前这张跑完就停"}
 
 
-def _worker(cfg: dict, todo: list[Path]) -> None:
-    meta = _load_meta(cfg)
+def _worker(cfg: dict, todo: list[Path], dir_path=None, rename=None) -> None:
+    """后台线程：逐张跑模型 → 解析 → 落盘 metadata（`rename` / 目录都由调用时传入）。
+
+    `rename=None` 时回落 cfg 的 rename——这样老配置（`image_tagging.rename`）仍然生效，
+    图库页不传也不会把「改名」默默变成关闭。
+    """
+    meta = _load_meta(cfg, dir_path)
+    do_rename = bool(cfg.get("rename") if rename is None else rename)
     ok = fail = 0
     try:
-        tagger = _tagger()
+        tagger = _tagger(dir_path)
         for index, path in enumerate(todo, start=1):
             with _LOCK:
                 if _STATE["cancel"]:
@@ -415,7 +553,7 @@ def _worker(cfg: dict, todo: list[Path]) -> None:
                     raise RuntimeError("模型返回了空描述")
                 rec, new_name = tagger.make_rec_v2(path.name, desc, meta.get(path.name) or {})
                 rec["tag_provider"] = str(cfg.get("provider") or "")
-                if cfg.get("rename") and new_name and new_name != path.name:
+                if do_rename and new_name and new_name != path.name:
                     target = path.parent / new_name
                     if target.exists():
                         # 撞名不动：宁可这次不改名，也不覆盖另一张图
@@ -425,7 +563,7 @@ def _worker(cfg: dict, todo: list[Path]) -> None:
                     meta[new_name] = rec
                 else:
                     meta[path.name] = rec
-                _save_meta(cfg, meta)   # 每张落盘：中断最多丢当前这张
+                _save_meta(cfg, meta, dir_path)   # 每张落盘：中断最多丢当前这张
                 ok += 1
             except Exception as exc:  # 单张失败不终止整轮
                 fail += 1
@@ -448,7 +586,7 @@ def _worker(cfg: dict, todo: list[Path]) -> None:
 
 def reset_state_for_tests() -> None:
     """测试用：把进度和缓存清干净（生产代码不要调）。"""
-    global _THREAD, _TAGGER
+    global _THREAD
     with _LOCK:
         _STATE.update({
             "running": False, "total": 0, "done": 0, "ok": 0, "fail": 0,
@@ -456,10 +594,10 @@ def reset_state_for_tests() -> None:
             "cancel": False,
         })
     _THREAD = None
-    _TAGGER = None
+    _TAGGERS.clear()
 
 
-def describe_one(name: str) -> dict:
+def describe_one(name: str, dir_path=None) -> dict:
     """只跑模型、**不落盘**：设置页「试一张」用。
 
     存在的意义：配好 Ollama / API 之后要先知道「这条路通不通、模型吐什么」，
@@ -469,7 +607,7 @@ def describe_one(name: str) -> dict:
     why = _provider_ready(cfg)
     if why:
         return {"ok": False, "error": why}
-    d = gallery_dir(cfg).resolve()
+    d = gallery_dir(cfg, dir_path).resolve()
     # ⚠ 必须 `resolve()` 之后再比：`Path.relative_to` 是纯字符串操作，
     # `gallery/../secret.txt`.relative_to(`gallery`) 会**成功**返回 `../secret.txt`
     # ——不做这一步就是一条真实的路径穿越（2026-10-26 单测当场抓到）。
@@ -481,7 +619,7 @@ def describe_one(name: str) -> dict:
     if not path.is_file():
         return {"ok": False, "error": f"没有这张图：{name}"}
     try:
-        tagger = _tagger()
+        tagger = _tagger(dir_path)
         b64 = tagger._encode_image(path, int(cfg.get("max_side") or DEFAULTS["max_side"]))
         desc = _ask(cfg, b64, tagger.PROMPT)
         rec, new_name = tagger.make_rec_v2(path.name, desc, {})
