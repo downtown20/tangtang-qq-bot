@@ -277,7 +277,16 @@ def api_config() -> dict:
 SNOWLUMA_WEBUI_URL = "http://127.0.0.1:5099"
 SNOWLUMA_RELEASE_URL = "https://github.com/SnowLuma/SnowLuma/releases"
 #: 允许写入 .env 的键由 agent/secret_refs.PROVIDER_KEY_ENV 决定（单一事实源）
-_EXTRA_ENV_NAMES = {"SNOWLUMA_TOKEN": "SnowLuma 授权 Token"}
+_EXTRA_ENV_NAMES = {
+    "SNOWLUMA_TOKEN": "SnowLuma 授权 Token",
+    # 2026-10-27：独立的「连接密钥」页取消了，密钥改成跟着各自主人走。
+    # 这两个变量名都是**代码真实读取**的，不是这里发明的：
+    #   QWEN_KEY          ← agent/secret_refs.py:58（llm.vision.api_key 的映射）
+    #   IMAGE_TAG_API_KEY ← agent/image_tagger.py:233 / :260 / :308
+    # 白名单本身是安全边界，只放行「界面上真的有地方填」的键，不要放宽成任意键。
+    "QWEN_KEY": "识图 API 密钥",
+    "IMAGE_TAG_API_KEY": "图库打标 API 密钥",
+}
 
 
 def _secret_env_names() -> dict[str, str]:
@@ -464,6 +473,81 @@ def api_snowluma_start() -> dict:
         "webui_url": SNOWLUMA_WEBUI_URL,
         "note": "首次启动会在新窗口打印网页面板初始密码（只显示一次，记下来再关窗口）。",
     }
+
+
+def _pid_on_port(port: int):
+    """找正在监听某端口的进程 PID（Windows，用系统 netstat，不引新依赖）。"""
+    try:
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in (out.stdout or "").splitlines():
+        if "LISTENING" not in line.upper():
+            continue
+        if (":" + str(port)) not in line:
+            continue
+        parts = line.split()
+        if parts and parts[-1].isdigit():
+            return int(parts[-1])
+    return None
+
+
+def _snowluma_restart_watcher():
+    """消费 `.trigger_restart_snowluma`（2026-10-27）。
+
+    `onebot/ws_client.py:1306` 在「SnowLuma 那侧不正常、需要它重启」时写这个文件。
+    原来**只有**旧 Qt 控制台读它；Qt 移进 `运维/` 后这个信号就没人消费了，
+    文件会一直躺在项目根目录。
+
+    谁启动 SnowLuma，谁就该消费它 —— 桌面端现在就是那个启动者。
+    桌面端没开时信号会留在磁盘上，下次开桥的第一轮循环会先补做一次。
+    """
+    signal_file = ROOT / ".trigger_restart_snowluma"
+    while True:
+        try:
+            if signal_file.is_file():
+                signal_file.unlink(missing_ok=True)
+                pid = _pid_on_port(5099)
+                if pid:
+                    # /T 连子树一起杀：launcher.bat 起的是 node.exe 子进程
+                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                   capture_output=True, timeout=25)
+                    time.sleep(2)
+                info = api_snowluma_start()
+                print("[bridge] 已消费 .trigger_restart_snowluma：SnowLuma 重启"
+                      + ("（原本就在跑，端口仍占着）" if info.get("already") else ""),
+                      flush=True)
+        except Exception as e:  # noqa: BLE001 —— watcher 不许因为一次失败就死掉
+            print("[bridge] 消费 .trigger_restart_snowluma 失败：" + repr(e), flush=True)
+        time.sleep(3)
+
+
+def api_quality_analyze(body: dict) -> dict:
+    """跑 `tools/分析对话质量.py`，把报告文本回给前端（只读，不改任何东西）。"""
+    script = ROOT / "tools" / "分析对话质量.py"
+    if not script.is_file():
+        raise ValueError("找不到 tools/分析对话质量.py（这一版发布包可能不完整）")
+    args = [sys.executable, str(script)]
+    for key, flag in (("group_id", "--group"), ("private_qq", "--private"), ("hours", "--hours")):
+        v = (body or {}).get(key)
+        if v not in (None, ""):
+            args += [flag, str(v)]
+    # ⚠ 子进程编码两端都要钉死 UTF-8（教训 #37 形态③）：那个脚本的报告里有 emoji，
+    # 而 Windows 子进程默认 stdout 是 GBK —— 不传 PYTHONIOENCODING 的话
+    # `print(report)` 直接 UnicodeEncodeError，退出码非 0 且 stdout 为空，
+    # 前端只会看到一句「执行失败」，看不出真实原因。
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    try:
+        out = subprocess.run(args, cwd=str(ROOT), capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=300, env=env)
+    except subprocess.TimeoutExpired:
+        raise ValueError("质量分析超过 300 秒仍未结束——先缩小范围（指定群 / 最近 N 小时）")
+    report = (out.stdout or "").strip()
+    if out.returncode != 0 and not report:
+        raise ValueError("质量分析脚本执行失败：" + (out.stderr or "")[-800:])
+    return {"ok": out.returncode == 0, "report": report,
+            "stderr": (out.stderr or "")[-2000:]}
 
 
 def _load_conn_check_module():
@@ -2118,6 +2202,8 @@ ROUTES_POST = {
     "/api/tuning/save": api_tuning_save,
     # 连接密钥 / SnowLuma（2026-10-26）
     "/api/secrets/save": api_secrets_save,
+    # 2026-10-27：质量分析（SnowLuma 相关运维只保留这一项 + 重启信号消费）
+    "/api/quality/analyze": api_quality_analyze,
     "/api/snowluma/start": lambda b: api_snowluma_start(),
 }
 
@@ -2340,6 +2426,10 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
+
+    # 后台消费 .trigger_restart_snowluma（原来只有旧 Qt 控制台读，现在没人读了）
+    threading.Thread(target=_snowluma_restart_watcher, daemon=True,
+                     name="snowluma-restart-watcher").start()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     port = server.server_address[1]

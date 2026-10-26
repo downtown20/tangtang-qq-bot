@@ -1,4 +1,8 @@
+import { useCallback, useEffect, useState } from 'react'
+import { Check, Loader2 } from 'lucide-react'
+
 import { getAt, setAt, coerce } from '../lib/configStore'
+import { api, type SecretsResponse } from '../lib/api'
 import './SettingsFields.css'
 
 export type FieldDef = {
@@ -6,6 +10,8 @@ export type FieldDef = {
   label: string
   type: string
   hint?: string
+  /** 仅 `secret` 类型：要写进 .env 的变量名。`auto` = 跟着当前 provider 走。 */
+  secret_env?: string
 }
 
 const CHOICES: Record<string, string[]> = {
@@ -43,6 +49,21 @@ export default function SettingsFields({
   const set = (path: string, type: string, value: unknown) =>
     onChange(setAt(config, path, value))
 
+  // 密钥状态（2026-10-27）：密钥不再有独立设置页，改成跟着它所属的那块配置走。
+  // 变量名固定由后端给（`provider_env` 跟着 provider 走，单一事实源在
+  // agent/secret_refs.py），这里**不另写一份映射**。
+  const [secrets, setSecrets] = useState<SecretsResponse | null>(null)
+  const refreshSecrets = useCallback(() => {
+    api
+      .secrets()
+      .then(setSecrets)
+      .catch(() => setSecrets(null))
+  }, [])
+  const hasSecretField = fields.some((f) => f.type === 'secret')
+  useEffect(() => {
+    if (hasSecretField) refreshSecrets()
+  }, [hasSecretField, refreshSecrets])
+
   return (
     <div className="dsl">
       {fields.map((f) => {
@@ -52,6 +73,36 @@ export default function SettingsFields({
           return (
             <div className="dsl-note" key={f.path}>
               {f.hint || f.label}
+            </div>
+          )
+        }
+
+        if (f.type === 'secret') {
+          // `auto` → 后端给的实际变量名（跟着当前 provider）
+          const envName =
+            f.secret_env === 'auto' ? (secrets?.provider_env ?? '') : (f.secret_env ?? '')
+          const entry = secrets?.entries.find((e) => e.name === envName)
+          return (
+            <div className="dsl-row" key={f.path}>
+              <div className="dsl-text">
+                <div className="dsl-title">{f.label}</div>
+                {/* 机制说明可关；「保存后要重启」这类操作提示必须留在 explain-only 外面 */}
+                {f.hint && <div className="dsl-desc explain-only">{f.hint}</div>}
+                <div className="dsl-desc">
+                  {entry?.configured ? (
+                    <>
+                      已保存 <code>{entry.name}</code> = <code>{entry.masked}</code>
+                    </>
+                  ) : (
+                    <>
+                      还没填 <code>{envName || '（先在「提供商」里选一家）'}</code>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="dsl-control">
+                <SecretInput envName={envName} onSaved={refreshSecrets} />
+              </div>
             </div>
           )
         }
@@ -84,6 +135,70 @@ export default function SettingsFields({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * 内联的密钥输入（2026-10-27）。
+ *
+ * 主人要求：不要独立的「连接密钥」设置页，密钥跟着它所属的那块配置走，
+ * 但值统一写 `.env`（`config.yaml` 只留 `${VAR}`）。
+ *
+ * 安全边界全在后端（白名单、只回掩码、行边界拒绝、写入后注入自检 + 回滚），
+ * 这里只负责把「粘贴新值 → 保存」这一小步接上界面。
+ */
+function SecretInput({ envName, onSaved }: { envName: string; onSaved: () => void }) {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [tip, setTip] = useState('')
+  const [err, setErr] = useState('')
+
+  const save = async () => {
+    if (!envName) {
+      setErr('先在「提供商」里选一家，才知道密钥写进哪个变量')
+      return
+    }
+    if (!value.trim()) {
+      setErr('先粘贴一个值')
+      return
+    }
+    setBusy(true)
+    setErr('')
+    setTip('')
+    try {
+      await api.saveSecret(envName, value.trim())
+      setValue('')
+      setTip('已写入 .env —— 重启糖糖后生效')
+      onSaved()
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="dsl-secret">
+      <div className="dsl-secret-line">
+        <input
+          type="password"
+          className="dsl-text-input"
+          placeholder="粘贴新值（不回显）"
+          spellCheck={false}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void save()
+          }}
+        />
+        <button type="button" className="dsl-secret-save" disabled={busy} onClick={() => void save()}>
+          {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
+          保存
+        </button>
+      </div>
+      {tip && <div className="dsl-secret-tip">{tip}</div>}
+      {err && <div className="dsl-secret-err">{err}</div>}
     </div>
   )
 }

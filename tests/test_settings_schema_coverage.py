@@ -48,7 +48,13 @@ GROUPS_PATH = BASE / "desktop/src/lib/settingsGroups.ts"
 #:
 #: `choice` 靠 `CHOICES[path]` 表渲染成下拉框（type 本身不参与分支判断）；
 #: `label` 是纯说明块，内容放 `hint`，`label` 可空。
-FIELD_TYPES = {"bool", "int", "float", "str", "list", "label", "choice"}
+#:
+#: `secret`（2026-10-27）：不是普通输入框，而是「一份要写进 .env 的密钥」。
+#: 独立的「连接密钥」页取消后，密钥跟着各自主人走（AI模型页 / SnowLuma 页 / 识图页），
+#: 渲染成「已配置 + 掩码」和粘贴框，保存走 /api/secrets/save。
+#: ⚠ 加这一条必须跟 `SettingsFields.tsx` 的渲染分支**同时**改：
+#:    只加类型不实现渲染 → 设置页静默少一行；只实现渲染不加类型 → 这个测试立刻红。
+FIELD_TYPES = {"bool", "int", "float", "str", "list", "label", "choice", "secret"}
 
 #: 不需要进设置页的 config 前缀/键 —— **每条都要写理由**。
 #: 理由不是注释装饰：下一个人会想「为什么这个不放进去」，不写他就自己塞进去了。

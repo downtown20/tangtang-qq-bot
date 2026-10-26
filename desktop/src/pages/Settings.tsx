@@ -5,7 +5,6 @@ import schemaJson from '../lib/settingsSchema.json'
 import { SETTINGS_GROUPS as GROUPS } from '../lib/settingsGroups'
 import SettingsFields, { type FieldDef } from '../components/SettingsFields'
 import ModelSettings from './settings/ModelSettings'
-import SecretsSettings from './settings/SecretsSettings'
 import './Settings.css'
 import '../components/SettingsFields.css'
 
@@ -130,9 +129,7 @@ export default function Settings({
               </div>
             )}
 
-            {section === 'secrets' ? (
-              <SecretsSettings />
-            ) : section === 'llm' ? (
+            {section === 'llm' ? (
               <ModelSettings />
             ) : current ? (
               <div className="settings-body">

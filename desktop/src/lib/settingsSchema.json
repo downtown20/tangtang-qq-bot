@@ -48,8 +48,9 @@
       {
         "path": "_api_key_hint",
         "label": "API 密钥",
-        "type": "label",
-        "hint": "🔑 在「连接与任务 → 连接密钥」里填——它写 .env，不写 config.yaml。"
+        "type": "secret",
+        "hint": "🔑 写进 `.env`，`config.yaml` 只留 `${...}` 引用（密钥进 config.yaml 会随 git 泄漏）。变量名跟着上面的「提供商」走。保存后重启糖糖生效。",
+        "secret_env": "auto"
       },
       {
         "path": "llm.base_url",
@@ -251,9 +252,10 @@
       },
       {
         "path": "_napcat_token_hint",
-        "label": "连接密钥",
-        "type": "label",
-        "hint": "🔑 SnowLuma Token 在「连接与任务 → 连接密钥」里填——它和 SnowLuma 网页面板里的「授权 Token」必须完全一致。"
+        "label": "授权 Token",
+        "type": "secret",
+        "hint": "🔑 必须和 SnowLuma 网页面板里 `HTTP API` / `WS 客户端` 两处的「授权 Token」完全一致。随便一串十六进制即可，写进 `.env` 的 `SNOWLUMA_TOKEN`。",
+        "secret_env": "SNOWLUMA_TOKEN"
       }
     ]
   },
@@ -342,8 +344,9 @@
       {
         "path": "_vision_key_hint",
         "label": "识图密钥",
-        "type": "label",
-        "hint": "🔑 只有「api 方式」需要识图 Key：暂时只能在 .env 里手写 QWEN_KEY（桌面端入口下一轮补）。main / local 都不需要。"
+        "type": "secret",
+        "hint": "🔑 只有「识图方式 = api」才需要；`main`（复用主模型）/ `local` 都不用。写进 `.env` 的 `QWEN_KEY`，对应 `config.yaml` 的 `llm.vision.api_key`。",
+        "secret_env": "QWEN_KEY"
       },
       {
         "path": "llm.vision.base_url",
@@ -686,18 +689,6 @@
         "label": "自动同步",
         "type": "bool",
         "hint": "开启后记忆库的改动会自动同步到其他设备（Syncthing）。只有一台机器跑糖糖的话可以关掉，少一点后台 IO。"
-      }
-    ]
-  },
-  {
-    "key": "secrets",
-    "title": "连接密钥 — 糖糖连 LLM、连 SnowLuma 各要一个令牌",
-    "fields": [
-      {
-        "path": "_secrets_hint",
-        "label": "只写 .env，不进 config.yaml",
-        "type": "label",
-        "hint": "下面两个输入框把值写进项目根目录的 .env（保存后重启糖糖生效）。config.yaml 只保留 ${VAR} 引用——密钥进 config.yaml 会随 git 泄漏。"
       }
     ]
   }

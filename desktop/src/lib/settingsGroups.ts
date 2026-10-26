@@ -18,7 +18,6 @@ import {
   History,
   RefreshCw,
   Tags,
-  KeyRound,
 } from 'lucide-react'
 
 export type SettingsSection = {
@@ -59,9 +58,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     group: '连接与任务',
     items: [
       { key: 'napcat', label: 'SnowLuma', icon: Plug },
-      // 2026-10-26：旧 Qt 控制台的「密钥管理」退役后，桌面端必须有地方填
-      // LLM Key 与 SnowLuma Token，否则连接自检对新用户是死胡同。
-      { key: 'secrets', label: '连接密钥', icon: KeyRound },
+      // 2026-10-27：独立的「连接密钥」页取消了（主人：不必把密钥凑到一个设置页）。
+      // 密钥改成跟着它所属的那块配置走 —— AI 模型页填 provider 的 Key、
+      // SnowLuma 页填授权 Token、识图页填识图 Key；值统一写 .env。
       { key: 'tasks', label: '任务可靠性', icon: ListChecks },
       { key: 'image_share', label: '图片分享', icon: ImagePlus },
       { key: 'daily_report', label: '每日播报', icon: Newspaper },

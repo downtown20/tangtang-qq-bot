@@ -15,6 +15,7 @@ import {
   Loader2,
   Plug,
   ShieldCheck,
+  Activity,
 } from 'lucide-react'
 import {
   api,
@@ -142,6 +143,25 @@ export default function Dashboard({
       setError((e as Error).message)
     } finally {
       setCheckBusy(false)
+    }
+  }
+
+  // 质量分析（2026-10-27）：SnowLuma 相关运维只保留这一项 + 重启信号消费。
+  // 报告可能很长（几万字），默认折叠，点「展开全文」再看。
+  const [quality, setQuality] = useState<string | null>(null)
+  const [qualityBusy, setQualityBusy] = useState(false)
+  const [qualityFull, setQualityFull] = useState(false)
+
+  const runQuality = async () => {
+    setQualityBusy(true)
+    try {
+      const r = await api.qualityAnalyze()
+      setQuality(r.report || '（分析了，但报告是空的——是不是最近没有对话？）')
+      setQualityFull(false)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setQualityBusy(false)
     }
   }
 
@@ -295,6 +315,24 @@ export default function Dashboard({
               自检
             </button>
           </div>
+
+          {/* 质量分析：把最近的对话回看一遍，找「她哪里答得不像她」 */}
+          <div className="row">
+            <div className="row-icon is-cyan">
+              <Activity size={17} />
+            </div>
+            <div className="row-main">
+              <div className="row-title">质量分析</div>
+              <div className="row-desc explain-only">
+                把最近的对话逐条回看，统计回复长度、重复度、是否答非所问这类信号，
+                给出一份可读的报告。只读，不改任何数据。
+              </div>
+            </div>
+            <button className="btn btn-ghost" onClick={() => void runQuality()} disabled={qualityBusy}>
+              {qualityBusy ? <Loader2 size={14} className="spin" /> : <Activity size={14} />}
+              分析
+            </button>
+          </div>
         </div>
       </div>
 
@@ -318,6 +356,34 @@ export default function Dashboard({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {quality && (
+        <div className="panel">
+          <div className="panel-head">
+            <span>质量分析报告</span>
+            <button className="btn btn-ghost" onClick={() => setQualityFull((v) => !v)}>
+              {qualityFull ? '收起' : '展开全文'}
+            </button>
+          </div>
+          <div className="panel-body">
+            {/* 报告是纯文本（脚本 print 出来的），用 pre 保它原本的排版 */}
+            <pre
+              className="quality-report"
+              style={{
+                maxHeight: qualityFull ? 'none' : 220,
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontSize: 'var(--fs-12)',
+                lineHeight: 1.6,
+                margin: 0,
+              }}
+            >
+              {quality}
+            </pre>
           </div>
         </div>
       )}
