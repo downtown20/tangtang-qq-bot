@@ -631,6 +631,12 @@
         "hint": "off=不启用；ollama=本机 Ollama（免费、离线，要先装好模型）；api=云端视觉 API（不装模型也能用，但要 key）。这决定图库页打标按钮走哪条路。"
       },
       {
+        "path": "image_tagging.model_ref",
+        "label": "用哪个模型档位",
+        "type": "model_ref",
+        "hint": "从「AI 模型」页已有的档位里选一个——接口地址、模型名、Key 一起带过来，不用在这三行里重填。留空则用下面的地址/模型/Key（老配置照旧能跑）。"
+      },
+      {
         "path": "image_tagging.ollama_host",
         "label": "Ollama 地址",
         "type": "str",

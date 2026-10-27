@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 
 import { getAt, setAt, coerce } from '../lib/configStore'
-import { api, type SecretsResponse } from '../lib/api'
+import { api, type ModelProfile, type SecretsResponse } from '../lib/api'
 import './SettingsFields.css'
 
 export type FieldDef = {
@@ -12,6 +12,13 @@ export type FieldDef = {
   hint?: string
   /** 仅 `secret` 类型：要写进 .env 的变量名。`auto` = 跟着当前 provider 走。 */
   secret_env?: string
+}
+
+/** 用途的中文名（与 `agent/model_refs.KIND_LABELS` 同一套词） */
+const KIND_LABELS: Record<string, string> = {
+  chat: '聊天',
+  vision: '识图',
+  tag: '打标',
 }
 
 const CHOICES: Record<string, string[]> = {
@@ -263,6 +270,10 @@ function FieldControl({
     )
   }
 
+  if (def.type === 'model_ref') {
+    return <ModelRefField value={value} onCommit={onCommit} />
+  }
+
   if (def.type === 'int' || def.type === 'float') {
     return (
       <NumberField kind={def.type} value={value} onCommit={onCommit} className="dsl-number" />
@@ -303,6 +314,64 @@ function FieldControl({
  * 只有「看起来已经是一个完整数字」时才 commit；失焦时再兜底 commit 一次
  * （点「保存」按钮之前浏览器一定先派发 blur）。
  */
+/**
+ * 「选模型档位」（2026-10-27）。
+ *
+ * 图库打标的接口地址 / 模型名 / Key 以前要各填一套；现在可以从「AI 模型」页
+ * 已有的档位里选一个，三项一起带过来（`agent/model_refs.resolve_model_ref` 是
+ * 唯一的翻译点）。用途（聊天/识图/打标）只作提示、**不是门禁**——老档位没有
+ * 这个标记，一律按聊天档显示，但一样能选来打标。
+ */
+function ModelRefField({
+  value,
+  onCommit,
+}: {
+  value: unknown
+  onCommit: (v: unknown) => void
+}) {
+  const [options, setOptions] = useState<ModelProfile[] | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    api
+      .models()
+      .then((d) => {
+        if (alive) setOptions(d.profiles ?? [])
+      })
+      .catch((e: Error) => {
+        if (alive) setError(e.message)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const current = String(value ?? '')
+  const kindsText = (p: ModelProfile) =>
+    (p.kinds ?? ['chat']).map((k) => KIND_LABELS[k] ?? k).join('+')
+
+  return (
+    <div className="dsl-modelref">
+      <select value={current} onChange={(e) => onCommit(e.target.value)}>
+        <option value="">不用档位（用下面的地址 / 模型 / Key）</option>
+        {(options ?? []).map((p) => (
+          <option key={p.id} value={p.id}>
+            {`${p.label || p.id} · ${kindsText(p)}`}
+          </option>
+        ))}
+      </select>
+      {error && <div className="dsl-secret-err">拉不到档位列表：{error}</div>}
+      {!error && options === null && <div className="dsl-secret-tip">正在读档位…</div>}
+      {!error && options !== null && options.length === 0 && (
+        <div className="dsl-secret-tip">
+          还没有档位——去「AI 模型」加一个，或继续用下面三项
+        </div>
+      )}
+    </div>
+  )
+}
+
 const COMPLETE_NUMBER = /^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/
 /** 输入过程中允许出现的字符（挡掉字母等噪音，但放行 `0.` / `-` / `1e` 这类中间态） */
 const DRAFT_CHARS = /^[-+]?[\d.]*([eE][-+]?\d*)?$/

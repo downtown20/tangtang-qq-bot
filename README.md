@@ -172,7 +172,7 @@ python -m pytest tests/ -q
 ## 目录结构
 
 ```text
-agent/                核心对话、记忆、人格、自治与工具模块（84 个业务模块）
+agent/                核心对话、记忆、人格、自治与工具模块（85 个业务模块）
 onebot/               糖糖自己的 OneBot 11 适配层代码（反向 WS 服务端 + HTTP 客户端）
 SnowLuma/             QQ 协议端落点——第三方程序，要你自己下载解压到这里（见上方「上手」第 3 步）
 knowledge/            知识库——糖糖可检索的背景知识，递归扫描 .md / .txt

@@ -196,6 +196,9 @@ web_search:
   timeout: 6
 image_tagging:
   provider: ollama
+  # 选一个「AI 模型」页里的档位（用途含打标的那类）——接口地址/模型名/Key 一起从档位带过来。
+  # 留空 = 用下面的 api_base / api_model / api_key（老配置照旧能跑）。
+  model_ref: ''
   dir: stickers_cg
   ollama_host: http://127.0.0.1:11434
   ollama_model: qwen3-vl:8b-instruct-q4_K_M

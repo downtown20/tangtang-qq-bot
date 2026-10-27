@@ -1525,15 +1525,27 @@ def api_gallery_tag_status(params: dict) -> dict:
     「进度」和「还剩多少张」分两个字段给：合成一个的话，跑完那一刻两个数字会互相打架。
     `source` = 图库页当前选中的库；合集时只做**只读汇总**（dispatch 到 scan_many）。
     """
+    from agent.model_refs import all_profiles, profiles_with_kind
+
     target = _tag_target(str((params or {}).get("source") or ""))
     tagger = _image_tagger()
     if target["source"] in GALLERY_GROUPS:
-        return tagger.status(
+        out = tagger.status(
             source=target["source"], dir_reason=target["reason"],
             scan_dirs=[_gallery_dir(k) for k in GALLERY_GROUPS[target["source"]]
                        if k in GALLERY_SOURCES])
-    return tagger.status(dir_path=target["dir"], source=target["source"],
-                         dir_reason=target["reason"])
+    else:
+        out = tagger.status(dir_path=target["dir"], source=target["source"],
+                            dir_reason=target["reason"])
+    # 2026-10-27：打标可以「选一个档位」而不是各填 base_url/model/key。
+    # 列出**全部**档位并带上用途：只给「用途=打标」的档位会让还没标用途的用户
+    # 一个都选不到（2026-10-27 之前的档位默认都是聊天档）。用途是推荐信息，
+    # 不是门禁——真正能不能打标由 `provider_ready` 判。
+    raw_cfg = _load_raw_config()
+    out["model_options"] = all_profiles(raw_cfg)
+    # 用途=打标的档位 id：前端拿来把这几个排在前面（**只是推荐，不是过滤**）
+    out["model_suggested"] = [p["id"] for p in profiles_with_kind(raw_cfg, "tag")]
+    return out
 
 
 def api_gallery_tag_run(body: dict) -> dict:

@@ -27,6 +27,9 @@ export type ModelProfile = {
   temperature?: number | string | null
   thinking?: string | null
   thinking_effort?: string | null
+  /** 用途标记（2026-10-27）：`chat` / `vision` / `tag`，可多选。
+   *  缺这个键的老档位一律按 `['chat']` 算（见 agent/model_refs.py）。 */
+  kinds?: string[]
 }
 
 export type SecretEntry = { name: string; label: string; configured: boolean; masked: string }

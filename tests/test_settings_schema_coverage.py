@@ -54,7 +54,8 @@ GROUPS_PATH = BASE / "desktop/src/lib/settingsGroups.ts"
 #: 渲染成「已配置 + 掩码」和粘贴框，保存走 /api/secrets/save。
 #: ⚠ 加这一条必须跟 `SettingsFields.tsx` 的渲染分支**同时**改：
 #:    只加类型不实现渲染 → 设置页静默少一行；只实现渲染不加类型 → 这个测试立刻红。
-FIELD_TYPES = {"bool", "int", "float", "str", "list", "label", "choice", "secret"}
+FIELD_TYPES = {"bool", "int", "float", "str", "list", "label", "choice", "secret",
+               "model_ref"}
 
 #: 不需要进设置页的 config 前缀/键 —— **每条都要写理由**。
 #: 理由不是注释装饰：下一个人会想「为什么这个不放进去」，不写他就自己塞进去了。

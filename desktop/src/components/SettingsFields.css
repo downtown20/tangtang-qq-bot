@@ -241,3 +241,14 @@
     transform: rotate(360deg);
   }
 }
+
+.dsl-modelref {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.dsl-modelref select {
+  width: 100%;
+}

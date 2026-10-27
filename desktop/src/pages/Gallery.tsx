@@ -204,8 +204,10 @@ export default function Gallery({
 
   const tagProvider = tagStatus?.config.provider ?? ''
   const tagOff = Boolean(tagStatus) && tagProvider === 'off'
-  /** 为什么不能打：配置类（provider_ready）优先，其次目录类（dir_ready） */
-  const tagBlocker = tagStatus ? tagStatus.provider_ready || tagStatus.dir_ready : ''
+  /** 为什么不能打：**分成两类**，出路不同（2026-10-27 分开渲染）
+   *  · `provider_ready` = 配置问题（没选方式 / 模型名空 / key 没配）→ 去设置
+   *  · `dir_ready`      = 范围问题（当前是合集，写操作只允许单库）→ 切库
+   * 以前合成一个「打标不可用」，配好 key 的人会一直怀疑 key。 */
   const tagPending = tagStatus?.scan.pending ?? 0
   const tagFiles = tagStatus?.scan.files ?? 0
   /** 面板里显示的库名（用列表接口给的 label，避免在这里再抄一份中英对照） */
@@ -582,17 +584,17 @@ export default function Gallery({
                   </button>
                 )}
               </>
-            ) : tagBlocker ? (
+            ) : tagStatus.provider_ready ? (
               <>
-                <button className="btn btn-ghost" disabled title={tagBlocker}>
+                <button className="btn btn-ghost" disabled title={tagStatus.provider_ready}>
                   <Tags size={14} />
                   打标不可用
                 </button>
                 {/* 原因必须显示在按钮**旁边**——塞进页面顶部的 error 等于没说 */}
-                <span className="tag-why" title={tagBlocker}>
-                  {tagBlocker}
+                <span className="tag-why" title={tagStatus.provider_ready}>
+                  {tagStatus.provider_ready}
                 </span>
-                {tagStatus.provider_ready && onOpenSettings && (
+                {onOpenSettings && (
                   <button
                     className="btn-link"
                     onClick={() => onOpenSettings('image_tagging')}
@@ -601,6 +603,40 @@ export default function Gallery({
                     <Settings size={13} />
                     去设置
                   </button>
+                )}
+              </>
+            ) : tagStatus.dir_ready ? (
+              /* 2026-10-27：这里**不是配置问题**，是「当前选中的是合集」。
+                 以前和上面的配置错误共用一个「打标不可用」，主人配好 key 后
+                 来回刷新仍看到它，自然会怀疑 key。文案与出路要分开：
+                 配置问题 → 去设置；范围问题 → 直接切到一个具体库。 */
+              <>
+                <button className="btn btn-ghost" disabled title={tagStatus.dir_ready}>
+                  <Tags size={14} />
+                  合集不能打标
+                </button>
+                <span className="tag-why" title={tagStatus.dir_ready}>
+                  {tagStatus.dir_ready}
+                </span>
+                {source === 'sticker' && (
+                  <span className="tag-why">
+                    切到一个库就能打：
+                    {(data?.sources ?? [])
+                      .filter((s) => s.key !== 'cg')
+                      .map((s) => (
+                        <button
+                          key={s.key}
+                          className="btn-link"
+                          onClick={() => {
+                            setLib(s.key)
+                            setPage(1)
+                          }}
+                          title={`切到「${s.label}」`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                  </span>
                 )}
               </>
             ) : (

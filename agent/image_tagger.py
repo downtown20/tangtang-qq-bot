@@ -58,6 +58,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -84,6 +85,9 @@ DEFAULTS: dict = {
     # —— 云端（OpenAI 兼容视觉 API）——
     "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "api_model": "qwen-vl-max",
+    # 档位引用（2026-10-27）：填了就用「设置 → AI 模型」里那个档位的
+    # base_url / model / key，覆盖上面三个扁平字段。留空 = 走老路（兼容）。
+    "model_ref": "",
     # key 留空时读环境变量 IMAGE_TAG_API_KEY（推荐放 .env，别把 key 写进 config.yaml）
     "api_key": "",
     # —— 通用 ——
@@ -126,12 +130,64 @@ _TAGGERS: dict[str, object] = {}
 
 # ── 配置与路径 ────────────────────────────────────────────────
 
+#: `${VAR}` 形态的密钥引用（与 `agent/secret_refs.py`、设置页的正则一致）
+_REF_PATTERN = re.compile(r"^\$\{([A-Z_][A-Z0-9_]*)\}$")
+
+
+def _env_file_value(name: str) -> str:
+    """从项目根的 `.env` 读一个键（不依赖进程环境）。
+
+    **为什么不用 `os.environ`**：bridge 是独立进程，它有自己的 `_load_dotenv()`
+    返回 dict、**不写 `os.environ`**。所以「密钥放 `.env`」这条既定做法在
+    bridge 侧必须自己读文件，否则同一个 `.env` 在 bot 进程能读到、
+    在 bridge 进程读不到——两套口径（教训 #38）。
+    """
+    try:
+        raw = (PROJECT_ROOT / ".env").read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    for line in raw.splitlines():
+        text = line.strip()
+        if not text or text.startswith("#") or "=" not in text:
+            continue
+        key, _, value = text.partition("=")
+        if key.strip() != name:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        return value
+    return ""
+
+
+def _resolve_secret(value) -> str:
+    """`${VAR}` → 实际值（先进程环境，再 `.env`）；字面量原样返回。
+
+    只有**整个字段**是一个引用时才替换（`${A}-${B}` 这种混合形态不支持，
+    也没有任何配置这么写过）——与设置页/`normalize_secret_fields()` 同一条判据。
+    """
+    text = str(value or "").strip()
+    match = _REF_PATTERN.match(text)
+    if not match:
+        return text
+    name = match.group(1)
+    return (os.environ.get(name) or "").strip() or _env_file_value(name)
+
+
 def load_config() -> dict:
     """读 `config.yaml` 的 `image_tagging` 节，缺的用 `DEFAULTS` 补。
 
     **每次调用都重读**：设置页改完立刻生效比「改完要重启」友好得多，
     而且这个函数只在按钮点击/列表刷新时跑，开销可以忽略。
     读失败一律回落默认值——打标是可选功能，配置坏了不能拖垮图库页。
+
+    2026-10-27 起多做两件事（都为了「统一到模型档位 / 统一到 .env」）：
+
+    1. `model_ref` 存在时，用那个档位的 base_url / model / key **覆盖**
+       `api_base` / `api_model` / `api_key`——图库打标不再各填一套连接信息。
+    2. `api_key` 若是 `${VAR}` 引用，解析成实际值（先进程环境，再 `.env`）。
+       bridge 进程不 load_dotenv，不解析就会把字面量 `${IMAGE_TAG_API_KEY}`
+       当 key 发出去（401）。
     """
     cfg = dict(DEFAULTS)
     try:
@@ -149,6 +205,36 @@ def load_config() -> dict:
             # 但用户手改总会漏，所以这里再兜一层：非字符串一律当不启用（fail-safe）。
             if not isinstance(cfg.get("provider"), str):
                 cfg["provider"] = "off"
+
+        # ① 档位引用：只在非本地（ollama）时生效——本地那条路没有 base_url 概念
+        ref = str(cfg.get("model_ref") or "").strip()
+        if ref and str(cfg.get("provider") or "") != "ollama":
+            from .model_refs import resolve_model_ref
+
+            hit = resolve_model_ref(raw, ref)
+            if hit is None:
+                cfg["model_ref_error"] = f"找不到档位「{ref}」（设置 → AI 模型）"
+            else:
+                if hit["base_url"]:
+                    cfg["api_base"] = hit["base_url"]
+                if hit["model"]:
+                    cfg["api_model"] = hit["model"]
+                if hit["api_key"]:
+                    cfg["api_key"] = hit["api_key"]
+                # 档位是云端连接：显式选它 = 走 api 这条路
+                cfg["provider"] = "api"
+                cfg["model_ref_label"] = hit["label"]
+
+        # ② 密钥：`${VAR}` 引用 → 实际值；留空时直接找 .env 的标准变量名。
+        #    为什么留空也要找：设置页把 key 改成「写 .env」之后，config 里就是空串，
+        #    而 bridge 进程不 load_dotenv（os.environ 里没有），不兜这一层就会
+        #    在界面报「API key 没配」——明明 .env 里写着（两套口径，教训 #38）。
+        resolved = _resolve_secret(cfg.get("api_key"))
+        if not resolved:
+            resolved = (os.environ.get("IMAGE_TAG_API_KEY") or "").strip() or _env_file_value(
+                "IMAGE_TAG_API_KEY"
+            )
+        cfg["api_key"] = resolved
     except Exception:  # 文件不在 / YAML 坏 / 没装 yaml：全部回落默认，不抛
         pass
     return cfg
@@ -351,6 +437,9 @@ def _provider_ready(cfg: dict) -> str:
             return "Ollama 地址是空的（默认 http://127.0.0.1:11434）"
         return ""
     if provider == "api":
+        # 档位引用写错了要**明说哪个档位找不到**，不能退化成「模型名是空的」
+        if cfg.get("model_ref_error"):
+            return str(cfg["model_ref_error"])
         if not str(cfg.get("api_model") or "").strip():
             return "API 模型名是空的"
         if not (os.environ.get("IMAGE_TAG_API_KEY") or str(cfg.get("api_key") or "").strip()):
