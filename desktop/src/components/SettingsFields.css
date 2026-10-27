@@ -252,3 +252,14 @@
 .dsl-modelref select {
   width: 100%;
 }
+
+.dsl-ollama {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dsl-ollama select {
+  min-width: 200px;
+}

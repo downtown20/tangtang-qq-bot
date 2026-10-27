@@ -965,6 +965,100 @@ def api_models_fetch(body: dict) -> dict:
     return {"models": ids, "count": len(ids), "endpoint": url}
 
 
+#: 名字里带这些片段的 Ollama 模型基本都能看图（`/api/show` 拿不到时的降级判据）
+_OLLAMA_VISION_HINTS = ("vl", "llava", "vision", "minicpm-v", "moondream", "qwen-vl")
+
+
+def _ollama_root(host: str) -> str:
+    """把用户填的地址归一成 Ollama **原生 API** 根（去掉 `/v1`）。
+
+    设置里可能填 `http://127.0.0.1:11434`（原生）或 `.../v1`（OpenAI 兼容）。
+    `/api/tags` 只在原生根上有，所以 `.../v1` 要退一级（2026-10-27）。
+    """
+    base = str(host or "").strip().rstrip("/")
+    if not base:
+        base = "http://127.0.0.1:11434"
+    for suffix in ("/v1", "/api"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    return base.rstrip("/")
+
+
+def api_ollama_models(body: dict) -> dict:
+    """列出一个 Ollama 端点上的模型 + 能力（给「选模型」下拉用）。
+
+    为什么需要它：`image_tagging.ollama_model` / 档位里的 `model` 现在是**手填
+    字符串**，填错要到真跑起来才暴露（2026-10-27 主人：「ollama 的模型需要
+    自动获取并通过选项选择模型」）。DSH Harness 那边是 provider 下带一份
+    models 清单，每个模型声明 `contextWindow` / `maxTokens` / `input: [text, image]`，
+    这里对齐同一个形状——`input` 直接决定「能不能用来识图/打标」。
+
+    数据来源：
+      · `GET  {root}/api/tags` → 模型列表（name/size/details.family）
+      · `POST {root}/api/show` → `capabilities`（含 `vision`）+ context_length
+
+    show 是**每模型一次**，用 4 线程并发；任何一步失败都降级而不是抛错
+    （Ollama 没装/没启动时，界面应该显示「拉不到」而不是白屏）。
+    """
+    import concurrent.futures
+
+    import httpx
+
+    root = _ollama_root(body.get("host", ""))
+    try:
+        r = httpx.get(root + "/api/tags", timeout=8.0)
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "host": root,
+            "models": [],
+            "error": f"连不上 Ollama（{root}）：{type(exc).__name__}: {exc}",
+        }
+
+    raw_models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(raw_models, list):
+        return {"ok": False, "host": root, "models": [], "error": "Ollama 返回里没有 models 列表"}
+
+    def probe(entry: dict) -> dict:
+        name = str(entry.get("name") or entry.get("model") or "").strip()
+        details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+        info: dict = {"id": name, "name": name, "size": entry.get("size")}
+        info["family"] = str(details.get("family") or "").strip()
+        info["parameter_size"] = str(details.get("parameter_size") or "").strip()
+        info["input"] = ["text"]
+        info["context_window"] = 0
+        try:
+            sr = httpx.post(root + "/api/show", json={"model": name}, timeout=12.0)
+            if sr.status_code < 400:
+                shown = sr.json() if isinstance(sr.json(), dict) else {}
+                caps = shown.get("capabilities") or []
+                if isinstance(caps, list) and "vision" in [str(c) for c in caps]:
+                    info["input"] = ["text", "image"]
+                model_info = shown.get("model_info") or {}
+                if isinstance(model_info, dict):
+                    for key, value in model_info.items():
+                        if str(key).lower().endswith("context_length") and isinstance(value, int):
+                            info["context_window"] = value
+                            break
+        except Exception:
+            pass  # 探不到就按名字猜，不影响列表本身
+        if "image" not in info["input"]:
+            lowered = name.lower()
+            if any(hint in lowered for hint in _OLLAMA_VISION_HINTS):
+                info["input"] = ["text", "image"]
+        info["vision"] = "image" in info["input"]
+        return info
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        models = list(pool.map(probe, [m for m in raw_models if isinstance(m, dict)]))
+
+    models = [m for m in models if m["id"]]
+    models.sort(key=lambda m: (not m["vision"], m["name"].lower()))
+    return {"ok": True, "host": root, "models": models, "count": len(models)}
+
+
 def api_models_activate(body: dict) -> dict:
     """只切换当前模型档位（可选同时改推理档位），不动其它配置。
 
@@ -2227,6 +2321,8 @@ ROUTES_GET = {
 ROUTES_POST = {
     "/api/config": lambda b: api_config_save(b),
     "/api/models/fetch": api_models_fetch,
+    # 2026-10-27：Ollama 模型自动获取（主人：「ollama 的模型需要自动获取并通过选项选择」）
+    "/api/models/ollama": api_ollama_models,
     "/api/models/activate": api_models_activate,
     "/api/gallery/tags": api_gallery_tags,
     "/api/gallery/trash": api_gallery_trash,

@@ -32,6 +32,32 @@ export type ModelProfile = {
   kinds?: string[]
 }
 
+/**
+ * Ollama 模型（`/api/models/ollama` 返回的形状）。
+ *
+ * 对齐 DSH Harness 的 `llm-pi-ai.providers.<id>.models[]`：每个模型带
+ * `contextWindow` 和 `input: [text, image]`。`input` 含 `image` 才可能用来
+ * 识图 / 打标——这比让用户自己判断「这个模型能不能看图」可靠。
+ */
+export type OllamaModel = {
+  id: string
+  name: string
+  size?: number | null
+  family?: string
+  parameter_size?: string
+  input: string[]
+  context_window: number
+  vision: boolean
+}
+
+export type OllamaModelsResponse = {
+  ok: boolean
+  host: string
+  models: OllamaModel[]
+  count?: number
+  error?: string
+}
+
 export type SecretEntry = { name: string; label: string; configured: boolean; masked: string }
 export type SecretsResponse = { provider_env: string; entries: SecretEntry[]; env_path: string }
 export type SnowlumaStatus = {
@@ -1661,6 +1687,17 @@ export const api = {
     request<{ models: string[]; count: number; endpoint: string }>('/api/models/fetch', {
       method: 'POST',
       body: JSON.stringify({ base_url, api_key }),
+    }),
+  /**
+   * 列出某个 Ollama 端点上的模型（含「能不能看图」）。
+   *
+   * 以前 `ollama_model` 靠手填字符串，填错要等真跑起来才暴露。现在从
+   * `/api/tags` + `/api/show` 自动拉——对标 DSH Harness 的 provider.models 清单。
+   */
+  ollamaModels: (host: string) =>
+    request<OllamaModelsResponse>('/api/models/ollama', {
+      method: 'POST',
+      body: JSON.stringify({ host }),
     }),
   // ── 连接密钥 / SnowLuma / 连接自检（2026-10-26 桌面端主入口化）──────
   secrets: () => request<SecretsResponse>('/api/secrets'),

@@ -645,8 +645,8 @@
       {
         "path": "image_tagging.ollama_model",
         "label": "Ollama 模型",
-        "type": "str",
-        "hint": "要能看图的多模态模型，先 ollama pull 拉下来。默认 qwen3-vl:8b-instruct-q4_K_M（量化后显存占用小、约 1.5 秒一张）。"
+        "type": "ollama_model",
+        "hint": "从本机 Ollama 已 pull 的模型里选（能看图的会标「可看图」——打标必须选那种）。列表来自 Ollama 自己的 /api/tags + /api/show，装了新模型点「刷新」。"
       },
       {
         "path": "image_tagging.api_base",

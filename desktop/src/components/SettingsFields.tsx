@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Loader2 } from 'lucide-react'
+import { Check, Loader2, RefreshCw } from 'lucide-react'
 
 import { getAt, setAt, coerce } from '../lib/configStore'
-import { api, type ModelProfile, type SecretsResponse } from '../lib/api'
+import { api, type ModelProfile, type OllamaModel, type SecretsResponse } from '../lib/api'
 import './SettingsFields.css'
 
 export type FieldDef = {
@@ -137,7 +137,12 @@ export default function SettingsFields({
               {f.hint && <div className="dsl-desc explain-only">{f.hint}</div>}
             </div>
             <div className="dsl-control">
-              <FieldControl def={f} value={value} onCommit={(v) => set(f.path, f.type, v)} />
+              <FieldControl
+                def={f}
+                value={value}
+                config={config}
+                onCommit={(v) => set(f.path, f.type, v)}
+              />
             </div>
           </div>
         )
@@ -213,10 +218,13 @@ function SecretInput({ envName, onSaved }: { envName: string; onSaved: () => voi
 function FieldControl({
   def,
   value,
+  config,
   onCommit,
 }: {
   def: FieldDef
   value: unknown
+  /** 整份配置：有几个控件要看**别的字段**才能干活（Ollama 模型列表要看 ollama_host） */
+  config: Record<string, unknown>
   onCommit: (v: unknown) => void
 }) {
   if (def.type === 'bool') {
@@ -268,6 +276,10 @@ function FieldControl({
         ))}
       </select>
     )
+  }
+
+  if (def.type === 'ollama_model') {
+    return <OllamaModelField value={value} config={config} onCommit={onCommit} />
   }
 
   if (def.type === 'model_ref') {
@@ -368,6 +380,82 @@ function ModelRefField({
           还没有档位——去「AI 模型」加一个，或继续用下面三项
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Ollama 模型下拉（2026-10-27）。
+ *
+ * 以前 `ollama_model` 是**手填字符串**，填错要等真跑起来（一张 1.5 秒 + 报错）
+ * 才发现。现在自动向 `/api/models/ollama` 拉列表——后端调 `/api/tags` 拿清单、
+ * 再对每个模型 `/api/show` 拿 `capabilities`，**能看图的会标出来**（打标/识图
+ * 必须选那种）。形状对齐 DSH Harness 的 `provider.models[]`。
+ *
+ * 地址取同级字段 `ollama_host`，不另加输入框——两处填地址必然不一致。
+ */
+function OllamaModelField({
+  value,
+  config,
+  onCommit,
+}: {
+  value: unknown
+  config: Record<string, unknown>
+  onCommit: (v: unknown) => void
+}) {
+  const host = String(getAt(config, 'image_tagging.ollama_host') ?? '')
+  const [models, setModels] = useState<OllamaModel[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = useCallback(async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      const r = await api.ollamaModels(host)
+      if (!r.ok) {
+        setErr(r.error || '拉不到模型列表')
+        setModels([])
+      } else {
+        setModels(r.models)
+      }
+    } catch (e) {
+      setErr((e as Error).message)
+      setModels([])
+    } finally {
+      setBusy(false)
+    }
+  }, [host])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const current = String(value ?? '')
+  const known = (models ?? []).some((m) => m.id === current)
+
+  return (
+    <div className="dsl-ollama">
+      <select value={current} onChange={(e) => onCommit(e.target.value)}>
+        <option value="">{models === null ? '正在拉模型列表…' : '（未选）'}</option>
+        {!known && current ? <option value={current}>{current}（不在列表里）</option> : null}
+        {(models ?? []).map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.vision ? `${m.id} · 可看图` : m.id}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={() => void load()}
+        disabled={busy}
+        title="重新向 Ollama 拉取模型列表（装了新模型后点一下）"
+      >
+        {busy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+        刷新
+      </button>
+      {err && <div className="dsl-secret-err">{err}</div>}
     </div>
   )
 }
