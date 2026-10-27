@@ -205,8 +205,10 @@
   flex: 0 0 auto;
   padding: 5px 12px;
   border-radius: 7px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
+  /* 原来写的 `--border-strong` / `--surface-2` / `--surface-3` 在 tokens.css 里
+     没有定义：整条声明静默失效，按钮看着像一段文字（2026-10-28 审出来的）。 */
+  border: 0.5px solid var(--border-l3);
+  background: var(--bg-module);
   color: var(--label-primary);
   font-size: var(--fs-12);
   cursor: pointer;
@@ -214,7 +216,7 @@
 }
 
 .dsl-secret-save:hover:not(:disabled) {
-  background: var(--surface-3);
+  background: var(--bg-hover);
 }
 
 .dsl-secret-save:disabled {
@@ -224,12 +226,12 @@
 
 .dsl-secret-tip {
   font-size: var(--fs-12);
-  color: var(--ok);
+  color: var(--success);
 }
 
 .dsl-secret-err {
   font-size: var(--fs-12);
-  color: var(--err);
+  color: var(--error);
 }
 
 .spin {

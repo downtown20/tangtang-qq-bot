@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import inspect
 import io
 import json
@@ -226,6 +227,12 @@ def _coerce_llm_numbers(cfg: dict) -> list[str]:
 
     写侧归一（这里）+ 读侧兜底（`agent/handler.py::_normalize_llm_numeric`）
     两层都要有：只修一边，下一次保存又把脏数据写回去。
+
+    **2026-10-28 加 `context_window`**：同一类脏数据在它身上**更隐蔽**——字符串
+    落盘不会让任何人报错：`agent/model_refs.py:243` 的 `_int_or()` 和本文件
+    `_context_badge()` 都用 `int()` 兜底，于是 `'65536'` 被静静接受。可类型契约
+    写的是数字（`desktop/src/lib/api.ts:54` `context_window?: number | null`）。
+    读侧兜底只是掩盖，不是契约——写侧收口才能保证「同一个量只有一种类型」。
     """
     fixed: list[str] = []
     llm = cfg.get("llm")
@@ -238,7 +245,8 @@ def _coerce_llm_numbers(cfg: dict) -> list[str]:
             if isinstance(p, dict):
                 targets.append((f"llm.models[{i}]", p))
     for prefix, node in targets:
-        for key, cast in (("max_tokens", int), ("temperature", float)):
+        for key, cast in (("max_tokens", int), ("temperature", float),
+                          ("context_window", int)):
             if key not in node:
                 continue
             raw = node[key]
@@ -250,6 +258,43 @@ def _coerce_llm_numbers(cfg: dict) -> list[str]:
             except (TypeError, ValueError):
                 pass
     return fixed
+
+
+#: `llm` 下由**别的写入口**独占的三个键：模型目录 / 当前档位 / provider 组表。
+#: 它们各自的唯一写入口是 `api_models_save` / `api_providers_save`，
+#: `api_config_save` 永不写它们（理由见 `api_config_save` 的 docstring）。
+MODEL_CATALOG_KEYS = ("models", "active_model", "providers")
+
+
+def _preserve_model_catalog(incoming: dict, existing: dict) -> list[str]:
+    """把 `incoming` 里的模型目录三件套**换成磁盘上的那一份**，返回动了哪些键。
+
+    为什么是「换成磁盘值」而不是「删掉」：`api_config_save` 是**整份 dict 重写**
+    （`yaml.dump(incoming)`），键不在 incoming 里就等于把它从 config.yaml 里删了。
+    删掉 `llm.models` = 用户所有模型档位凭空消失。所以这里做的是「请求体里的旧值
+    一律不生效，磁盘上的现役值原样保留」。
+
+    `llm` 整个不是 dict 时也不能让脏数据落盘（否则 `llm: oops` 会把整段 LLM 配置
+    干掉）：直接回退成磁盘那份。磁盘上也没有 `llm` 时才把键移除。
+    """
+    kept: list[str] = []
+    llm_in = incoming.get("llm")
+    llm_disk = existing.get("llm")
+    if not isinstance(llm_in, dict):
+        if isinstance(llm_disk, dict):
+            incoming["llm"] = copy.deepcopy(llm_disk)
+            kept.append("llm")
+        elif incoming.pop("llm", None) is not None:
+            kept.append("llm")
+        return kept
+    disk = llm_disk if isinstance(llm_disk, dict) else {}
+    for key in MODEL_CATALOG_KEYS:
+        if key in disk:
+            llm_in[key] = copy.deepcopy(disk[key])
+            kept.append("llm." + key)
+        else:
+            llm_in.pop(key, None)
+    return kept
 
 
 def _write_config(raw: dict) -> dict:
@@ -757,6 +802,29 @@ def api_config_save(body: dict, *, merge_missing_fields: bool = True) -> dict:
     `merge_missing_fields=False` 给「调用方已基于全量配置改写」的场景用
     （群管理的保存）：那种情况下补字段是**有害**的——它会把调用方故意删掉的
     `scenario` / `scenario_targets` 从旧配置里补回来，让「清除场景」静默失效。
+
+    ## 模型目录三件套：本函数**永不写**它们
+
+    `llm.models` / `llm.active_model` / `llm.providers` 一律以磁盘上的现役值为准
+    （`_preserve_model_catalog` 把请求体里的值换掉），返回里的
+    `preserved_models` 会说明这次动了哪几个键。
+
+    **为什么（2026-10-28 实测事故：填了「上下文窗口」，点保存后又被清空）**：
+    设置页底部那个「保存」发给本函数的，是**打开设置页那一刻**拉的整份配置快照。
+    用户在「AI 模型」页先点「保存参数」把 `llm.models[].context_window` 写成
+    65536（走 `POST /api/models/save`，那个入口是对的、实测落盘正确），再点底部
+    「保存」——旧快照里那份 `context_window: 0` 就把 65536 覆盖回 0。用户看到的是
+    「保存成功」，值却回到空。这不是某个字段的错，是**两个写入口写同一份事实**
+    （教训 #51「同一事实只许一个派生点」、#54「组级属性只留一份定义」）：设置页手上
+    的快照**迟早**是旧的，让它回写模型目录，这类覆盖就一定会再发生。
+
+    所以：模型目录的唯一写入口是 `api_models_save`，provider 组表的唯一写入口是
+    `api_providers_save`。设置页其余几百个字段照旧走这里，只是不许它碰这三样。
+
+    ⚠ 剥掉请求体里的值之后**必须把磁盘值补回去**：本函数是整份 dict 重写
+    （`yaml.dump(incoming)`），键不在就等着被从文件里删掉——那等于用户所有模型
+    档位凭空消失。所以 `_preserve_model_catalog` 做的是「旧值不生效、现役值保留」，
+    而不是单纯 del。
     """
     from agent.secret_refs import normalize_secret_fields
 
@@ -776,6 +844,9 @@ def api_config_save(body: dict, *, merge_missing_fields: bool = True) -> dict:
 
     if merge_missing_fields:
         merge_missing(incoming, existing)
+    # 模型目录三件套只认磁盘（必须放在 merge_missing 之后：补缺会把旧快照里的
+    # models 原样补进来，先剥后补等于白剥）。理由见 docstring 里的 2026-10-28 事故。
+    preserved = _preserve_model_catalog(incoming, existing)
     changed = normalize_secret_fields(incoming)
     # 数值字段类型收口——否则前端表单的字符串会被原样写回（见函数注释）
     changed += _coerce_llm_numbers(incoming)
@@ -788,7 +859,7 @@ def api_config_save(body: dict, *, merge_missing_fields: bool = True) -> dict:
         yaml.dump(incoming, f, allow_unicode=True,
                   default_flow_style=False, sort_keys=False)
     return {"ok": True, "normalized": changed, "backup": backup.name,
-            "restored_secrets": restored}
+            "restored_secrets": restored, "preserved_models": preserved}
 
 
 def _scenario_core(value: str) -> str:
@@ -1119,9 +1190,16 @@ def api_models_save(body: dict) -> dict:
         for key in ("max_tokens", "temperature"):
             if sel.get(key) not in (None, ""):
                 llm[key] = sel[key]
-        for key in ("thinking", "thinking_effort"):
-            if sel.get(key):
-                llm[key] = sel[key]
+        # `thinking` / `thinking_effort` 是**一对**：`thinking=off` 时 effort 必须
+        # 一起清空。原来的写法是 `for key in (...): if sel.get(key): llm[key] = ...`，
+        # 而 `thinking_effort` 被归一成空串（假值）→ 跳过 → 扁平字段留着上一档的
+        # `'medium'`。状态灯和 `/api/status` 读的正是扁平字段，于是界面显示「中等推理」
+        # 而实际已经关掉（教训 #51：同一事实两处派生必须互校）。
+        # 2026-10-28 在浏览器里切「关闭思考」后实测到：llm.thinking='off' 但
+        # llm.thinking_effort 仍是 'medium'。
+        if sel.get("thinking"):
+            llm["thinking"] = sel["thinking"]
+            llm["thinking_effort"] = str(sel.get("thinking_effort") or "")
         for key in ("base_url", "api_key"):
             if conn.get(key):
                 llm[key] = conn[key]

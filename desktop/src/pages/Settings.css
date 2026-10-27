@@ -125,6 +125,28 @@
   max-width: 720px;
 }
 
+/* 页头：左边一段说明、右边一个按钮。之前没有这条规则，「添加 provider」
+   掉在说明文字下面另起一行（2026-10-28 顺带修的层次问题）。
+   按钮用 margin-left:auto 而不是 space-between：关掉「讲解」时说明会
+   display:none，space-between 下按钮会跑到左边。 */
+.settings-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding-top: 2px;
+}
+
+.settings-head .settings-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-head .btn {
+  flex: none;
+  margin-left: auto;
+}
+
 /* 裸字段容器：DSH 的通用设置没有卡片包裹，行与行之间只有一条 0.5px 细线 */
 .settings-fields {
   padding-bottom: 4px;
@@ -172,77 +194,13 @@
 .model-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-/* 档位按 provider 分组（2026-10-28）：一组一个标题 + 计数，
- * 与 DSH 的 provider → models 两级结构对齐 */
-.model-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.model-group + .model-group {
-  margin-top: 6px;
-}
-
-.model-group-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-11);
-  color: var(--label-tertiary);
-  letter-spacing: 0.02em;
-}
-
-.model-group-count {
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-  font-size: 10px;
-  line-height: 15px;
-}
-
-/* ._3nPmjq_rowCard  border .5px / background settings-card-fill /
-   radius-xl(20) / column / gap 12 / padding 12px 14px */
-.model-card {
-  display: flex;
-  align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  background: var(--bg-module);
-  border: 0.5px solid var(--border-l2);
-  border-radius: var(--radius-xl);
-  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
-.model-card:hover {
-  border-color: var(--border-l3);
-}
-
-.model-card.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.model-card-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  color: inherit;
-}
-
-.model-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
+/* 行头的单选圆点（2026-10-28 清理：`model-group*` / `model-card*` /
+   `model-info` / `model-name` / `model-meta` / `model-params` 这一批是
+   上一版「档位卡片」的遗留样式，全项目已无使用者——`.msw-model-name`
+   是 ModelSwitcher 自己的前缀类，不是这几个）。 */
 .model-radio {
   width: 14px;
   height: 14px;
@@ -251,32 +209,6 @@
   flex: none;
 }
 
-.model-card.is-active .model-radio {
-  border-color: var(--accent);
-  background: radial-gradient(circle, var(--accent) 0 40%, transparent 45%);
-}
-
-.model-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-14);
-  font-weight: 500;
-}
-
-.model-meta {
-  margin-top: 2px;
-  font-size: var(--fs-12);
-  color: var(--label-tertiary);
-}
-
-.model-params {
-  display: flex;
-  gap: 14px;
-  font-size: var(--fs-12);
-  color: var(--label-tertiary);
-  font-variant-numeric: tabular-nums;
-}
 
 .badge {
   font-size: var(--fs-11);
@@ -404,9 +336,8 @@
   padding: 14px 16px;
 }
 
-.provider-card + .provider-card {
-  margin-top: 10px;
-}
+/* 卡间距只留 `.model-list` 的 gap 一处：这里再补 margin-top 会变成 22px
+   （flex gap 与 margin 不会折叠），两个来源写同一段留白就是漂移的开始。 */
 
 .provider-head {
   display: flex;
@@ -424,11 +355,11 @@
 }
 
 .provider-dot.is-ok {
-  background: var(--state-success, #3fb950);
+  background: var(--success);
 }
 
 .provider-dot.is-missing {
-  background: var(--state-error, #f85149);
+  background: var(--error);
 }
 
 /* 行头的名字是按钮：整行点开/收起，不用非去点那个小箭头 */
@@ -567,11 +498,29 @@
   color: var(--accent);
 }
 
-/* ── 一行模型：显示名 | 模型 ID | 徽标 | 展开 ── */
+/* ── 一行模型：身份（名字 + ID）· 能力标签组 · 当前 · 展开 / 删除 ──
+   收起态**不渲染输入框**：这一行是「浏览 / 切换」用的，输入框会让每一行看起来
+   像表单；更要紧的是收起态改完名字没有保存入口（保存按钮只在展开区），改动会
+   静默丢失。编辑收敛到展开区第一组，和「保存参数」在一起。 */
 .model-row-card {
-  border: 1px solid var(--border-l2);
-  border-radius: 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-sm);
   background: var(--bg-module);
+}
+
+/* 同一 provider 下的模型行间距 6px（provider 卡自己的 gap 是 12px）：
+   组内更紧、组间更松，用间距表达「它们属于同一个连接」。 */
+.model-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 展开中的那一行稍微加深边界：一屏多行时能立刻看出「正在编辑的是哪一行」。
+   顺序很重要：`.is-open` 在前，`.is-active` 在后 —— 当前模型正在编辑时
+   边框必须仍是 accent（同特异性，后定义者赢）。 */
+.model-row-card.is-open {
+  border-color: var(--border-l3);
 }
 
 .model-row-card.is-active {
@@ -581,21 +530,63 @@
 .model-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 7px 10px;
+  min-height: 40px;
 }
 
-.model-row .model-name-input {
-  flex: 0 1 38%;
+/* 身份两行：显示名在上（主），模型 ID 在下（等宽小字）。ID 与显示名相同时
+   只占一行——见 ModelRow 的 showId。 */
+.model-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--fs-13);
 }
 
-.model-row .model-id-input {
-  flex: 1 1 48%;
-  min-width: 0;
+.model-row-name {
   font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-row-id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 15px;
+  color: var(--label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 能力标签组：窗口徽标 + 「可看图」收成一组（之前是两个各自浮动的色块） */
+.model-caps {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.model-cap {
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-hover);
+  color: var(--label-secondary);
+  font-size: var(--fs-11);
+  line-height: 17px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.model-cap.is-vision {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .model-radio-btn {
@@ -610,65 +601,213 @@
   cursor: pointer;
 }
 
-.model-badge {
-  flex: 0 0 auto;
-  font-size: var(--fs-11);
-  color: var(--label-tertiary);
-  border: 1px solid var(--border-l2);
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.model-tag {
-  flex: 0 0 auto;
-  font-size: var(--fs-11);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 4px;
-  padding: 1px 6px;
+.model-row-card.is-active .model-radio {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 40%, transparent 45%);
 }
 
 .icon-btn.danger:hover {
   color: var(--error);
 }
 
-/* ── 展开后的能力参数 ── */
+/* ── 展开后的编辑区 ───────────────────────────────────────────
+   DSH 的 `.modelAdvanced` 实测值：两列网格 / gap 8 / padding 8px 4px 2px；
+   `.modelField` 是 column / gap 4；label 12px·18px tertiary；input 高 32、0.5px 边框。
+   本页内容宽约 520（面板 800 − 导航 188 − 左右 48），所以网格 gap 放到 10×14、
+   编辑区内边距 10px，比 DSH 略松但保持同一套比例。 */
 .model-editor {
-  border-top: 1px solid var(--border-l2);
-  padding-top: 4px;
+  border-top: 0.5px solid var(--border-l2);
+  padding: 10px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.model-editor .form-grid {
-  padding: 12px 8px;
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 0 4px;
 }
 
-.model-editor-flags {
+.model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.model-field-label {
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--label-tertiary);
+}
+
+.model-input {
+  height: 32px;
+  padding: 0 10px;
+  font-size: var(--fs-13);
+  color: var(--label-primary);
+  /* 只改 background-color：select 的箭头是 global.css 用 background-image
+     画的，写成 `background` 会把它一起清掉。 */
+  background-color: var(--bg-layer-2);
+  border: 0.5px solid var(--border-l4);
+  border-radius: var(--radius-sm);
+}
+
+.model-input:focus {
+  border-color: var(--accent);
+}
+
+.model-input::placeholder {
+  color: var(--label-caption);
+}
+
+.model-input-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.model-flags {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
-  padding: 0 10px 10px;
-  font-size: var(--fs-12);
+  gap: 10px;
+  min-height: 32px;
+}
+
+/* 「文本」不是可选项（后端 input 里永远是 text），所以它是静态标签而不是
+   一个不能点的复选框——别让用户去点一个 disabled 控件。 */
+.model-fixed {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: var(--radius-xs);
+  background: var(--bg-hover);
   color: var(--label-secondary);
+  font-size: var(--fs-12);
 }
 
-.flags-label {
-  font-weight: 600;
-  color: var(--label-tertiary);
-}
-
-.flag {
+.model-check {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-size: var(--fs-12);
+  color: var(--label-primary);
   cursor: pointer;
 }
 
-.flags-hint {
+/* global.css 给所有 input 定了 34px 高 + 边框，复选框要单独掰回来 */
+.model-check input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.model-field-hint {
+  font-size: var(--fs-11);
   color: var(--label-tertiary);
 }
 
-.model-editor .form-actions {
-  padding: 0 8px 8px;
+/* 高级参数：一条可点开的行头（不是一条边框）——用留白和缩进表达从属关系。
+   行头右侧常驻「温度 0.8 · 推理中」摘要：折叠不等于看不见。 */
+.model-advanced {
+  padding: 0 4px;
+}
+
+.model-advanced-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-12);
+  color: var(--label-secondary);
+  text-align: left;
+}
+
+.model-advanced-head:hover {
+  background: var(--bg-hover);
+  color: var(--label-primary);
+}
+
+.model-advanced-title {
+  font-weight: 500;
+}
+
+.model-advanced-sum {
+  margin-left: auto;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.model-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 0;
+}
+
+.model-editor-hint {
+  margin-right: auto;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+.model-editor-actions .btn {
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--fs-13);
+}
+
+/* ── 「请求行为」块（不属于某个 provider / 某个模型）──────────────
+   根因：`.settings-fields` 只有 padding-bottom、`.dsl-row` 只有 padding 16px 0，
+   字段因此贴着卡片边框（2026-10-28 主人报的「左右间距太紧」就是这里）。
+   左右内边距交给卡片负责，**不改 `.dsl-row` 本身**——它被多个 section 共用。 */
+.request-behavior {
+  margin-top: 18px;
+}
+
+.request-behavior .form-head {
+  padding: 14px 20px;
+  border-bottom: 0.5px solid var(--border-l2);
+}
+
+.settings-card-fields {
+  padding: 0 20px;
+}
+
+/* 这块的字段行改成两列网格：标签列 1fr / 控件列固定 260px。
+   space-between 下控件宽度不同（数字框 110、文本框撑满），左边缘是参差的；
+   固定控件列之后所有控件左边缘对齐，标签与控件间距同时从 24 放到 32。 */
+.settings-card-fields .dsl-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  align-items: center;
+  column-gap: 32px;
+  padding: 16px 0;
+}
+
+.settings-card-fields .dsl-row.is-wide {
+  display: flex;
+}
+
+.settings-card-fields .dsl-control {
+  width: 100%;
+  justify-content: flex-start;
 }
