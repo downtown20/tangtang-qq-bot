@@ -54,7 +54,13 @@ export default function ModelPicker({
     load()
   }, [])
 
-  // 点面板外面 / 按 Esc 关闭：命令面板的肌肉记忆
+  // 点面板外面 / 按 Esc 关闭：命令面板的肌肉记忆。
+  //
+  // ⚠ 监听器必须挂在**捕获阶段**（第三个参数 true）。设置页的弹窗容器上有
+  // `onMouseDown={(e) => e.stopPropagation()}`（防止点面板内部时把整个设置关掉），
+  // 冒泡阶段的 document 监听器**永远收不到事件**——表现就是「点空白处关不掉」
+  // （2026-10-28 主人在真实界面里当场发现，我只跑了 tsc + build 没在浏览器点过）。
+  // 捕获阶段先于冒泡，stopPropagation 挡不住它。
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) onClose()
@@ -62,10 +68,11 @@ export default function ModelPicker({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
-    document.addEventListener('mousedown', onDown)
+    document.addEventListener('mousedown', onDown, true)
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', onDown)
+      // 移除时的第三个参数必须与添加时一致，否则监听器根本不会摘掉
+      document.removeEventListener('mousedown', onDown, true)
       document.removeEventListener('keydown', onKey)
     }
   }, [onClose])

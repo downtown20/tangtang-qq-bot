@@ -280,16 +280,19 @@
   padding: 0 10px;
   font: inherit;
   font-size: 13px;
-  color: var(--text, #e6e6e6);
-  background: var(--bg-input, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  /* ⚠ 必须用项目真实变量（styles/tokens.css）：之前写的 `var(--text, #e6e6e6)`
+     在这套主题里**没有定义**，于是永远落到浅色字 + 白色 4% 的底 —— 浅色主题下
+     等于白底白字，主人当场看不出当前选的是哪个模型（2026-10-28 报的第二个 bug）。 */
+  color: var(--label-primary);
+  background: var(--bg-layer-2);
+  border: 1px solid var(--border-l2);
   border-radius: 7px;
   cursor: pointer;
   text-align: left;
 }
 
 .dsl-modelpick:hover {
-  border-color: var(--border-strong, rgba(255, 255, 255, 0.24));
+  border-color: var(--border-l3, var(--border-l2));
 }
 
 .dsl-modelpick span {
