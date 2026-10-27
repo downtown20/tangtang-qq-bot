@@ -32,6 +32,7 @@ import {
   type GalleryTagStatus,
 } from '../lib/api'
 import ContextMenu, { type MenuState } from '../components/ContextMenu'
+import ModelPicker from '../components/ModelPicker'
 import './Page.css'
 import './Gallery.css'
 
@@ -155,6 +156,9 @@ export default function Gallery({
     Awaited<ReturnType<typeof api.galleryTagProbe>> | null
   >(null)
 
+  /** 选模型面板开着吗（2026-10-27：方式和模型在同一份列表里选，不跳设置页） */
+  const [pickerOpen, setPickerOpen] = useState(false)
+
   const refreshTag = useCallback(async () => {
     try {
       setTagStatus(await api.galleryTagStatus(gallerySource))
@@ -216,6 +220,13 @@ export default function Gallery({
     (gallerySource === 'sticker_all' ? '贴图（三个库合集）' : gallerySource)
   const tagModel =
     tagProvider === 'api' ? tagStatus?.config.api_model : tagStatus?.config.ollama_model
+  /** 面板里「当前选中」的 key（与 /api/models/picker 的 current 同一套写法） */
+  const tagConfig = (tagStatus?.config ?? {}) as Record<string, unknown>
+  const pickerCurrent = String(tagConfig.model_ref || '')
+    ? `ref:${String(tagConfig.model_ref)}`
+    : tagProvider === 'ollama'
+      ? `ollama:${String(tagConfig.ollama_model ?? '')}`
+      : `api:${String(tagConfig.api_model ?? '')}`
 
   const startTag = useCallback(async () => {
     if (!tagStatus) return
@@ -271,6 +282,28 @@ export default function Gallery({
       setProbeBusy(false)
     }
   }, [probeCandidate, gallerySource])
+
+  /**
+   * 面板里直接换模型（2026-10-27）。
+   *
+   * 为什么不再「跳到设置页改」：主人反馈点完「改模型」回来显示的还是旧名字，
+   * 而且「打标方式」和「模型」两个控件分开填，容易出现方式=api 但模型名还是
+   * ollama 那个的自相矛盾组合。这里一次把方式和模型定下来，选完立刻重拉状态。
+   */
+  const pickModel = useCallback(
+    async (item: { kind: 'ref' | 'ollama'; value: string }) => {
+      try {
+        const r = await api.galleryTagModel({ kind: item.kind, value: item.value })
+        setPickerOpen(false)
+        // 先重拉状态（模型名/能不能跑都变了），再决定要不要报错
+        await refreshTag()
+        setTagError(r.provider_ready || '')
+      } catch (e) {
+        setTagError((e as Error).message)
+      }
+    },
+    [refreshTag],
+  )
 
   const stopTag = useCallback(async () => {
     try {
@@ -674,14 +707,23 @@ export default function Gallery({
                         {tagStatus.dir ?? '多个库（合集不能直接打标）'}
                       </div>
                       <div className="tag-pop-model">
-                        用 {tagProvider === 'api' ? '云端 API' : '本机 Ollama'} · {tagModel}
-                        {onOpenSettings && (
-                          <button
-                            className="btn-link"
-                            onClick={() => onOpenSettings('image_tagging')}
-                          >
-                            改模型
-                          </button>
+                        <span className="tag-pop-model-text">
+                          用 {tagProvider === 'api' ? '云端' : '本机 Ollama'} ·{' '}
+                          {tagModel || '未选模型'}
+                        </span>
+                        <button
+                          className="btn-link"
+                          onClick={() => setPickerOpen((v) => !v)}
+                          title="在同一份列表里选云端档位或本机模型——方式和模型一次定下来"
+                        >
+                          改模型
+                        </button>
+                        {pickerOpen && (
+                          <ModelPicker
+                            current={pickerCurrent}
+                            onPick={(item) => pickModel(item)}
+                            onClose={() => setPickerOpen(false)}
+                          />
                         )}
                       </div>
 

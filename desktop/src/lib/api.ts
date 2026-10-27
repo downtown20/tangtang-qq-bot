@@ -58,6 +58,40 @@ export type OllamaModelsResponse = {
   error?: string
 }
 
+/**
+ * 「选模型」面板的一项（`/api/models/picker`）。
+ *
+ * `kind` 决定「选它意味着什么」：`ref` = 用 AI 模型页的档位（云端），
+ * `ollama` = 用本机 Ollama 的某个模型。选中即同时确定「打标方式 + 模型」——
+ * 这两件事拆开就会出现「方式选了 api、模型还停在 ollama 名字」的矛盾组合。
+ */
+export type ModelPickerItem = {
+  key: string
+  label: string
+  sub: string
+  /** 上下文窗口徽标：`8K` / `256K` / `1M`（拿不到就空） */
+  badge: string
+  vision: boolean
+  kind: 'ref' | 'ollama'
+  value: string
+  provider: string
+}
+
+export type ModelPickerGroup = {
+  key: string
+  label: string
+  items: ModelPickerItem[]
+}
+
+export type ModelsPickerResponse = {
+  ok: boolean
+  groups: ModelPickerGroup[]
+  /** `ref:<档位id>` / `ollama:<模型名>` / `api:<模型名>`（老配置） */
+  current: string
+  ollama_host?: string | null
+  ollama_error?: string | null
+}
+
 export type SecretEntry = { name: string; label: string; configured: boolean; masked: string }
 export type SecretsResponse = { provider_env: string; entries: SecretEntry[]; env_path: string }
 export type SnowlumaStatus = {
@@ -1698,6 +1732,23 @@ export const api = {
     request<OllamaModelsResponse>('/api/models/ollama', {
       method: 'POST',
       body: JSON.stringify({ host }),
+    }),
+  /** 「选模型」面板的统一清单：云端档位 + 本机 Ollama，按 provider 分组。 */
+  modelsPicker: () => request<ModelsPickerResponse>('/api/models/picker'),
+  /**
+   * 面板里直接选模型（不跳设置页）：同时定下「打标方式 + 模型」。
+   * `kind="ref"` → 档位（provider=api）；`kind="ollama"` → 本机模型（provider=ollama）。
+   */
+  galleryTagModel: (payload: { kind: 'ref' | 'ollama'; value: string }) =>
+    request<{
+      ok: boolean
+      backup: string
+      provider: string
+      model: string
+      provider_ready: string
+    }>('/api/gallery/tag/model', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   // ── 连接密钥 / SnowLuma / 连接自检（2026-10-26 桌面端主入口化）──────
   secrets: () => request<SecretsResponse>('/api/secrets'),

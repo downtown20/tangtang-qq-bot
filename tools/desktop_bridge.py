@@ -678,7 +678,9 @@ def api_scenario_packs_save(body: dict) -> dict:
     # 会把 config.yaml 的注释全部丢掉——那份文件的注释是理解成本的一半。
     # 这里只重写 `scenario_reference` 这个块（并保留它上方的说明注释）。
     import yaml as _yaml
-    text = CONFIG_PATH.read_text(encoding="utf-8")
+    # ⚠ 同上：read_text 的通用换行会把 CRLF 折成 LF，后面判 nl 就永远选 LF，
+    # 保存一次把整份 config.yaml 的换行改掉（2026-10-27 在 `.env` 上踩过同形态）。
+    text = CONFIG_PATH.read_bytes().decode("utf-8")
     nl = "\r\n" if "\r\n" in text else "\n"
     lines = text.split(nl)
 
@@ -1057,6 +1059,207 @@ def api_ollama_models(body: dict) -> dict:
     models = [m for m in models if m["id"]]
     models.sort(key=lambda m: (not m["vision"], m["name"].lower()))
     return {"ok": True, "host": root, "models": models, "count": len(models)}
+
+
+def _context_badge(window) -> str:
+    """上下文窗口 → `64K` / `262K` / `1M` 这种徽标（没有就空串）。"""
+    try:
+        n = int(window or 0)
+    except (TypeError, ValueError):
+        return ""
+    if n <= 0:
+        return ""
+    if n >= 1024 * 1024:
+        return "%dM" % (n // (1024 * 1024))
+    if n >= 1024:
+        return "%dK" % (n // 1024)
+    return str(n)
+
+
+def api_models_picker(params: dict) -> dict:
+    """「选模型」面板的统一清单：按 provider 分组，云端档位 + 本机 Ollama 一屏。
+
+    ## 为什么要有它（2026-10-27 主人）
+
+    原话：「图库打标设置界面的打标方式和不同打标方式的模型设置都是**分开的、
+    不统一**，可以按照如图2的方式选择很方便」——图2 是 DSH Harness 的 picker：
+    搜索框 + 按 provider 分组 + 当前项打勾。
+
+    「打标方式」（api / ollama）和「模型」本来是同一个决定的两半，拆成两个控件
+    就会出现「方式选了 api、模型还停在 ollama 的名字」这种自相矛盾的组合。
+    所以这里把两边**合并成一份列表**，每项自带 `kind`（ref / ollama），
+    选中即同时确定「走哪条路 + 用哪个模型」。
+
+    `current` 是 `ref:<档位id>` / `ollama:<模型名>` / `api:<模型名>`（老配置没选档位）。
+    """
+    from agent.model_refs import all_profiles, kinds_of
+
+    raw = _load_raw_config()
+    tag_cfg = raw.get("image_tagging") if isinstance(raw.get("image_tagging"), dict) else {}
+    current_ref = str(tag_cfg.get("model_ref") or "").strip()
+    current_provider = str(tag_cfg.get("provider") or "off").strip()
+
+    groups: list[dict] = []
+
+    cloud_items = []
+    for profile in all_profiles(raw):
+        kinds = kinds_of(profile)
+        cloud_items.append({
+            "key": "ref:%s" % profile["id"],
+            "label": profile["label"] or profile["id"],
+            "sub": profile["model"] or "",
+            "badge": "",
+            "vision": "vision" in kinds,
+            "kind": "ref",
+            "value": profile["id"],
+            "provider": profile["provider"],
+        })
+    if cloud_items:
+        groups.append({
+            "key": "profiles",
+            "label": "云端档位（AI 模型页）",
+            "items": cloud_items,
+        })
+
+    got = api_ollama_models({"host": str(tag_cfg.get("ollama_host") or "")})
+    ollama_items = [
+        {
+            "key": "ollama:%s" % m["id"],
+            "label": m["name"],
+            "sub": m.get("family") or "",
+            "badge": _context_badge(m.get("context_window")),
+            "vision": bool(m.get("vision")),
+            "kind": "ollama",
+            "value": m["id"],
+            "provider": "ollama",
+        }
+        for m in got.get("models", [])
+    ]
+    groups.append({"key": "ollama", "label": "本机 Ollama", "items": ollama_items})
+
+    # 优先级**必须与 `image_tagger.load_config()` 一致**：provider=ollama 时
+    # `model_ref` 根本不生效，所以这里也必须先看 provider。否则会把「当前在用
+    # 本机模型」标成「云端档位 <model_ref>」——2026-10-27 实测踩到（current 报
+    # ref:default，界面却显示 qwen3-vl:8b-instruct-q8_0）。
+    if current_provider == "ollama":
+        current = "ollama:%s" % str(tag_cfg.get("ollama_model") or "")
+    elif current_ref:
+        current = "ref:%s" % current_ref
+    elif current_provider == "api":
+        current = "api:%s" % str(tag_cfg.get("api_model") or "")
+    else:
+        current = ""
+
+    return {
+        "ok": True,
+        "groups": groups,
+        "current": current,
+        "ollama_host": got.get("host"),
+        "ollama_error": None if got.get("ok") else got.get("error"),
+    }
+
+
+def _yaml_scalar(value) -> str:
+    """把值渲染成一个安全的 YAML 标量（简单值不加引号，空串写 `''`）。"""
+    text = str(value if value is not None else "")
+    if text == "":
+        return "''"
+    if re.fullmatch(r"[A-Za-z0-9_.:/@+-]+", text):
+        return text
+    return "'" + text.replace("'", "''") + "'"
+
+
+def _patch_image_tagging(values: dict) -> str:
+    """就地改 `image_tagging` 块里的几个键（保留注释与行序），返回备份文件名。
+
+    为什么不用 yaml.safe_dump 整份重写：`config.yaml` 的注释是理解成本的一半
+    （与 `api_scenario_packs_save` 同一条理由）。这里只动匹配到的那几行，
+    缺的键插在块尾。
+
+    写前必留备份；写后由调用方回读校验。
+    """
+    # ⚠ 必须 read_bytes().decode()：`read_text()` 的通用换行会把 CRLF 折成 LF，
+    # 于是下面 `"\r\n" in text` 永远为假 → nl 选 LF → 整份 config.yaml 变 LF。
+    # 2026-10-27 在 `.env` 上踩过一次同一形态（教训 #49 同族）。
+    text = CONFIG_PATH.read_bytes().decode("utf-8")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl)
+
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("image_tagging:"):
+            start = i
+            break
+    if start is None:
+        raise ValueError("config.yaml 里没有顶层 image_tagging")
+
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not lines[j][:1].isspace():
+            end = j
+            break
+
+    positions: dict[str, int] = {}
+    for i in range(start + 1, end):
+        match = re.match(r"^  ([A-Za-z_][A-Za-z0-9_]*):", lines[i])
+        if match:
+            positions[match.group(1)] = i
+
+    for key, value in values.items():
+        rendered = "  %s: %s" % (key, _yaml_scalar(value))
+        if key in positions:
+            lines[positions[key]] = rendered
+        else:
+            lines.insert(end, rendered)
+            end += 1
+
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    backup = CONFIG_PATH.with_name(f"config.yaml.bak_{stamp}")
+    backup.write_bytes(CONFIG_PATH.read_bytes())
+    CONFIG_PATH.write_text(nl.join(lines), encoding="utf-8", newline="")
+    return backup.name
+
+
+def api_gallery_tag_model(body: dict) -> dict:
+    """在图库打标面板里**直接选模型**（不再跳设置页）。
+
+    `body = {kind, value}`：
+      · `kind="ref"`    → 用云端档位：`model_ref=value`、`provider=api`
+      · `kind="ollama"` → 用本机模型：`ollama_model=value`、`provider=ollama`、`model_ref=''`
+
+    为什么把「打标方式」和「模型」合成一个动作（2026-10-27 主人）：
+    它们本来是同一个决定的两半，拆成两个控件会出现「方式选了 api、模型还停在
+    ollama 的名字」这种自相矛盾的组合。选完这一下，方式和模型一定是一致的。
+    """
+    kind = str((body or {}).get("kind") or "").strip()
+    value = str((body or {}).get("value") or "").strip()
+
+    if kind == "ref":
+        if not value:
+            raise ValueError("没选档位")
+        backup = _patch_image_tagging({"model_ref": value, "provider": "api"})
+    elif kind == "ollama":
+        if not value:
+            raise ValueError("没选 Ollama 模型")
+        backup = _patch_image_tagging({
+            "ollama_model": value,
+            "provider": "ollama",
+            "model_ref": "",
+        })
+    else:
+        raise ValueError(f"未知的模型来源：{kind or '(空)'}（可选 ref / ollama）")
+
+    cfg = _image_tagger().load_config()
+    return {
+        "ok": True,
+        "backup": backup,
+        "provider": cfg.get("provider"),
+        "model": cfg.get("api_model") if cfg.get("provider") == "api" else cfg.get("ollama_model"),
+        "provider_ready": _image_tagger()._provider_ready(cfg),
+    }
 
 
 def api_models_activate(body: dict) -> dict:
@@ -2283,6 +2486,8 @@ ROUTES_GET = {
     "/api/health": api_health,
     "/api/config": api_config,
     "/api/models": api_models,
+    # 2026-10-27：选模型面板的统一清单（云端档位 + 本机 Ollama，按 provider 分组）
+    "/api/models/picker": api_models_picker,
     "/api/groups": api_groups,
     "/api/gallery": api_gallery,          # 需要 query 参数（自带一个形参）
     "/api/stats": api_stats,
@@ -2323,6 +2528,8 @@ ROUTES_POST = {
     "/api/models/fetch": api_models_fetch,
     # 2026-10-27：Ollama 模型自动获取（主人：「ollama 的模型需要自动获取并通过选项选择」）
     "/api/models/ollama": api_ollama_models,
+    # 图库打标面板里直接选模型（不打发去设置页；方式和模型一次定下来）
+    "/api/gallery/tag/model": api_gallery_tag_model,
     "/api/models/activate": api_models_activate,
     "/api/gallery/tags": api_gallery_tags,
     "/api/gallery/trash": api_gallery_trash,
