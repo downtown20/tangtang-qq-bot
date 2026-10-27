@@ -176,6 +176,35 @@
   margin-bottom: 14px;
 }
 
+/* 档位按 provider 分组（2026-10-28）：一组一个标题 + 计数，
+ * 与 DSH 的 provider → models 两级结构对齐 */
+.model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-group + .model-group {
+  margin-top: 6px;
+}
+
+.model-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.model-group-count {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  font-size: 10px;
+  line-height: 15px;
+}
+
 /* ._3nPmjq_rowCard  border .5px / background settings-card-fill /
    radius-xl(20) / column / gap 12 / padding 12px 14px */
 .model-card {

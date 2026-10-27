@@ -1103,13 +1103,14 @@ def api_models_picker(params: dict) -> dict:
 
     cloud_items = []
     for profile in all_profiles(raw):
-        kinds = kinds_of(profile)
         cloud_items.append({
             "key": "ref:%s" % profile["id"],
             "label": profile["label"] or profile["id"],
             "sub": profile["model"] or "",
-            "badge": "",
-            "vision": "vision" in kinds,
+            # 2026-10-28：云端档位也有上下文窗口徽标了（档位可选填 context_window）
+            "badge": _context_badge(profile.get("context_window")),
+            # 「能不能看图」看 `input`（与 DSH 的 provider.models[].input 同义）
+            "vision": "image" in (profile.get("input") or []),
             "kind": "ref",
             "value": profile["id"],
             "provider": profile["provider"],

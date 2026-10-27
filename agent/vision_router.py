@@ -39,6 +39,28 @@ _DEFAULT_TAG_PROMPT = (
 )
 
 
+#: 本模块自己要读的 config.yaml（模块级常量，测试可以直接 monkeypatch）
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+
+
+def _resolve_env_values(mapping: dict) -> dict:
+    """把 `${VAR}` 形态的值换成实际值（认不出就原样留着）。
+
+    单独一个函数是因为它要跑**两次**：一次解析原配置，一次解析档位引用带进来的
+    新值（2026-10-28 起 `llm.vision.model_ref` 会覆盖 base_url/model/key）。
+    只写一次的话，档位里的 `${QWEN_KEY}` 会被当字面量发出去 → 401。
+    """
+    env_pattern = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+    resolved = {}
+    for key, value in mapping.items():
+        if isinstance(value, str):
+            match = env_pattern.match(value)
+            if match:
+                value = os.environ.get(match.group(1), value)
+        resolved[key] = value
+    return resolved
+
+
 def _load_vision_cfg() -> dict:
     try:
         import yaml
@@ -48,20 +70,36 @@ def _load_vision_cfg() -> dict:
         except Exception:
             # 主程序已加载 .env；独立标注工具没有时也不应因可选依赖崩溃。
             pass
-        cfg = yaml.safe_load(
-            Path(__file__).resolve().parent.parent.joinpath("config.yaml")
-            .read_text(encoding="utf-8"))
-        vision = (cfg.get("llm", {}) or {}).get("vision", {}) or {}
+        config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+        vision = (config.get("llm", {}) or {}).get("vision", {}) or {}
         # VisionRouter 独立读取 config.yaml，不能直接复用 main 的已解析副本；
         # 否则 `${QWEN_KEY}` 会作为字面量发送，稳定得到 401 云端错误。
-        env_pattern = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
-        resolved = {}
-        for key, value in vision.items():
-            if isinstance(value, str):
-                match = env_pattern.match(value)
-                if match:
-                    value = os.environ.get(match.group(1), value)
-            resolved[key] = value
+        resolved = _resolve_env_values(vision)
+
+        # 2026-10-28：档位引用 —— 选了「AI 模型」页里能看图的档位，就用它的
+        # 接口地址 / 模型名 / Key（与打标的 `image_tagging.model_ref` 同一套）。
+        # 档位是云端 OpenAI 兼容连接，所以 provider 一律归成 api。
+        ref = str(resolved.get("model_ref") or "").strip()
+        if ref:
+            try:
+                from .model_refs import resolve_model_ref
+
+                hit = resolve_model_ref(config, ref)
+            except Exception:
+                hit = None
+            if hit:
+                if hit["base_url"]:
+                    resolved["base_url"] = hit["base_url"]
+                if hit["model"]:
+                    resolved["model"] = hit["model"]
+                if hit["api_key"]:
+                    resolved["api_key"] = hit["api_key"]
+                resolved["provider"] = "api"
+                resolved["model_ref_label"] = hit["label"]
+                # 覆盖进来的新值同样可能是 `${VAR}` —— 再解析一次
+                resolved = _resolve_env_values(resolved)
+            else:
+                resolved["model_ref_error"] = f"找不到档位「{ref}」（设置 → AI 模型）"
         return resolved
     except Exception:
         return {}

@@ -85,12 +85,49 @@ def profiles_with_kind(config, kind: str) -> list[dict]:
     ]
 
 
+def _int_or(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def input_of(profile) -> list[str]:
+    """这个模型能吃什么：`["text"]` 或 `["text", "image"]`。
+
+    优先读显式的 `input` 字段（与 DSH Harness 的
+    `llm-pi-ai.providers.<id>.models[].input` 同名同义）；没写时从 `kinds` 退推——
+    带 `vision` 就当能看图，这样老的 `kinds: [vision]` 不改配置也能识别成多模态。
+    """
+    raw = profile.get("input") if isinstance(profile, dict) else None
+    if isinstance(raw, str):
+        raw = [raw]
+    if isinstance(raw, list):
+        out: list[str] = []
+        for item in raw:
+            key = str(item or "").strip().lower()
+            if key in ("text", "image") and key not in out:
+                out.append(key)
+        if out:
+            return out
+    # 没写 `input` 时再看 `kinds`；两个都没写 = **未知**（返回空表）。
+    # 为什么不用默认的 `["chat"]` 去推：那会把「没标注的老档位」一律当成
+    # 不能看图（2026-10-28 实测：老档位一选就报「不能看图」，属于误拦）。
+    kinds = profile.get("kinds") if isinstance(profile, dict) else None
+    if not kinds:
+        return []
+    return ["text", "image"] if "vision" in kinds_of(profile) else ["text"]
+
+
 def all_profiles(config) -> list[dict]:
     """所有档位的摘要（给「选档位」下拉用）。**不含 api_key。**
 
     为什么列出全部而不是只列「用途匹配」的：2026-10-27 之前的档位都没有
     `kinds` 键（都算聊天档），只列 tag 档会让用户一个都选不到。
     用途在这里是**推荐信息**，门禁由使用方自己判（打标看 provider_ready）。
+
+    `input` / `context_window` 与 DSH Harness 的 `provider.models[]` 同名，
+    界面拿它们显示「可看图」和 `256K` 徽标（2026-10-28 起云端档位也有徽标了）。
     """
     return [
         {
@@ -99,6 +136,8 @@ def all_profiles(config) -> list[dict]:
             "provider": str(p.get("provider") or "").strip(),
             "model": str(p.get("model") or "").strip(),
             "kinds": kinds_of(p),
+            "input": input_of(p),
+            "context_window": _int_or(p.get("context_window"), 0),
         }
         for p in _raw_profiles(config)
         if str(p.get("id") or "").strip()
@@ -122,6 +161,8 @@ def resolve_model_ref(config, ref_id) -> dict | None:
             "id": ref,
             "label": str(profile.get("label") or ref),
             "kinds": kinds_of(profile),
+            "input": input_of(profile),
+            "context_window": _int_or(profile.get("context_window"), 0),
             "provider": str(profile.get("provider") or "").strip(),
             "base_url": str(profile.get("base_url") or "").strip(),
             "model": str(profile.get("model") or "").strip(),

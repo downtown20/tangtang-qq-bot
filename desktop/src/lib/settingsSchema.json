@@ -342,6 +342,12 @@
         "hint": "识图走哪条路。main = 用主模型的视觉能力（不额外花钱）；api = 单独调下面的识图端点；local = 本地模型"
       },
       {
+        "path": "llm.vision.model_ref",
+        "label": "用哪个模型档位",
+        "type": "model_ref",
+        "hint": "从「AI 模型」页的档位里选一个能看图的，它的接口地址 / 模型名 / Key 会一起带过来（识图方式自动按 api 走）。留空则用下面几行手填的值。"
+      },
+      {
         "path": "llm.vision.model",
         "label": "API 模型（仅 api 方式）",
         "type": "str",

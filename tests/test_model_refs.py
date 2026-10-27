@@ -105,6 +105,7 @@ llm:
     model: vl-model
     api_key: ${VISION_TEST_KEY}
     kinds: [tag]
+    input: [text, image]
 image_tagging:
   provider: api
   model_ref: vl
@@ -166,3 +167,85 @@ image_tagging:
     assert cfg["api_model"] == "old-model"
     assert cfg["api_key"] == "sk-old-literal"
     assert tagger._provider_ready(cfg) == ""
+
+# ── 档位能力：打标必须能看图（2026-10-28）────────────────────────────
+def test_chat_only_profile_is_rejected_for_tagging(tagger_home):
+    """选了聊天档（`input` 只有 text）→ 开跑前就拦住。
+
+    实测事故形态：`model_ref=default` 把 api_model 换成 deepseek-v4.1-flash、
+    key 从 115 变 51 字符，打标会一路打到模型那边才失败。
+    """
+    tagger, home = tagger_home
+    (home / "config.yaml").write_text(
+        """\
+llm:
+  models:
+  - id: chat
+    label: 聊天档
+    provider: custom
+    base_url: https://example.com/v1
+    model: chat-model
+    api_key: sk-chat
+    input: [text]
+image_tagging:
+  provider: api
+  model_ref: chat
+""",
+        encoding="utf-8",
+    )
+    cfg = tagger.load_config()
+    reason = tagger._provider_ready(cfg)
+    assert "不能看图" in reason, reason
+    assert "聊天档" in reason, reason
+
+
+def test_vision_capable_profile_passes_ready_check(tagger_home):
+    tagger, home = tagger_home
+    (home / "config.yaml").write_text(
+        """\
+llm:
+  models:
+  - id: vl
+    label: 视觉档
+    provider: custom
+    base_url: https://example.com/v1
+    model: vl-model
+    api_key: sk-vl
+    input: [text, image]
+image_tagging:
+  provider: api
+  model_ref: vl
+""",
+        encoding="utf-8",
+    )
+    cfg = tagger.load_config()
+    assert tagger._provider_ready(cfg) == ""
+    assert cfg["model_input"] == ["text", "image"]
+
+def test_legacy_profile_without_capability_is_not_blocked(tagger_home):
+    """既没写 `input` 也没写 `kinds` 的老档位 —— **不能**被拦。
+
+    「未知」不等于「不能看图」：2026-10-27 之前建的所有档位都属于这一类，
+    一律拦住会把老配置全挡在门外。所以 `input_of` 对这种情况返回空表，
+    `_provider_ready` 只在「明确标注了能力且不含 image」时才报错。
+    """
+    tagger, home = tagger_home
+    (home / "config.yaml").write_text(
+        """\
+llm:
+  models:
+  - id: legacy
+    label: 老档位
+    provider: custom
+    base_url: https://example.com/v1
+    model: legacy-model
+    api_key: sk-legacy
+image_tagging:
+  provider: api
+  model_ref: legacy
+""",
+        encoding="utf-8",
+    )
+    cfg = tagger.load_config()
+    assert cfg["model_input"] == [], "未知能力必须是空表，不能猜成 [text]"
+    assert tagger._provider_ready(cfg) == "", "老档位不该被挡"

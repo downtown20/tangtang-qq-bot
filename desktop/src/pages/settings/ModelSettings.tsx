@@ -7,6 +7,16 @@ import '../Settings.css'
 
 const PROVIDERS = ['custom', 'deepseek', 'openai', 'anthropic', 'xai']
 
+/** provider → 人话（分组标题用；对应 DSH 的 provider displayName） */
+const PROVIDER_LABELS: Record<string, string> = {
+  custom: '自建中转（OpenAI 兼容）',
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  xai: 'xAI',
+  ollama: '本机 Ollama',
+}
+
 type Draft = {
   id: string
   label: string
@@ -18,6 +28,10 @@ type Draft = {
   temperature: string
   thinking: string
   thinking_effort: string
+  /** 上下文窗口（tokens，空 = 不知道；界面显示成 64K / 1M 徽标） */
+  context_window: string
+  /** 能看图吗 —— 存的就是 `input` 里有没有 image（DSH 的同义字段） */
+  vision: boolean
 }
 
 const emptyDraft = (): Draft => ({
@@ -31,6 +45,8 @@ const emptyDraft = (): Draft => ({
   temperature: '0.8',
   thinking: 'on',
   thinking_effort: 'high',
+  context_window: '',
+  vision: false,
 })
 
 function toDraft(p: ModelProfile): Draft {
@@ -45,6 +61,8 @@ function toDraft(p: ModelProfile): Draft {
     temperature: String(p.temperature ?? ''),
     thinking: p.thinking ?? '',
     thinking_effort: p.thinking_effort ?? '',
+    context_window: p.context_window ? String(p.context_window) : '',
+    vision: (p.input ?? []).includes('image'),
   }
 }
 
@@ -106,6 +124,26 @@ export default function ModelSettings() {
     }
   }
 
+  /**
+   * 档位按 provider 分组（2026-10-28 第 4 件）。
+   *
+   * 一屏看清「这家有几个模型」，与 DSH Harness 的 provider → models 两级结构对齐。
+   * 顺序按 config 里第一次出现的 provider，不打乱用户自己的排列。
+   */
+  const grouped = useMemo(() => {
+    const order: string[] = []
+    const map = new Map<string, ModelProfile[]>()
+    for (const p of profiles) {
+      const key = p.provider || 'custom'
+      if (!map.has(key)) {
+        map.set(key, [])
+        order.push(key)
+      }
+      map.get(key)!.push(p)
+    }
+    return order.map((key) => ({ provider: key, items: map.get(key)! }))
+  }, [profiles])
+
   const activate = (id: string) => persist(profiles, id)
 
   const remove = async (id: string) => {
@@ -127,6 +165,9 @@ export default function ModelSettings() {
       temperature: d.temperature,
       thinking: d.thinking,
       thinking_effort: d.thinking_effort,
+      // 2026-10-28：能力与窗口跟档位一起落库（DSH 的 provider.models[] 同名字段）
+      context_window: Number(d.context_window) || 0,
+      input: d.vision ? ['text', 'image'] : ['text'],
     }
     const next = profiles.some((p) => p.id === id)
       ? profiles.map((p) => (p.id === id ? entry : p))
@@ -167,7 +208,13 @@ export default function ModelSettings() {
             <div className="settings-empty">还没有模型档位，点右上角「添加模型」。</div>
           </div>
         )}
-        {profiles.map((p) => (
+        {grouped.map((group) => (
+          <div key={group.provider} className="model-group">
+            <div className="model-group-label">
+              {PROVIDER_LABELS[group.provider] ?? group.provider}
+              <span className="model-group-count">{group.items.length}</span>
+            </div>
+            {group.items.map((p) => (
           <div
             key={p.id}
             className={'model-card' + (p.id === active ? ' is-active' : '')}
@@ -187,6 +234,14 @@ export default function ModelSettings() {
             <div className="model-params">
               <span>温度 {p.temperature ?? '—'}</span>
               <span>最大 {p.max_tokens ?? '—'}</span>
+              {(p.input ?? []).includes('image') && <span>可看图</span>}
+              {p.context_window ? (
+                <span>
+                  {p.context_window >= 1048576
+                    ? `${Math.round(p.context_window / 1048576)}M`
+                    : `${Math.round(p.context_window / 1024)}K`}
+                </span>
+              ) : null}
               <span>思考 {p.thinking_effort || p.thinking || '—'}</span>
             </div>
             <button className="btn btn-ghost" title="编辑" onClick={() => setEditing(toDraft(p))}>
@@ -200,6 +255,8 @@ export default function ModelSettings() {
             >
               <Trash2 size={13} />
             </button>
+          </div>
+            ))}
           </div>
         ))}
       </div>
@@ -262,6 +319,10 @@ function ModelForm({
 
   const set = (k: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...draft, [k]: e.target.value })
+
+  /** 勾选框用：`set` 只能写字符串，布尔要单独一条 */
+  const setBool = (k: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...draft, [k]: e.target.checked })
 
   const doFetch = async () => {
     setFetching(true)
@@ -398,6 +459,19 @@ function ModelForm({
             onChange={set('model')}
             placeholder="deepseek-v4.1-flash"
           />
+        </label>
+
+        <label className="field">
+          <span>上下文窗口</span>
+          <input
+            value={draft.context_window}
+            onChange={set('context_window')}
+            placeholder="例如 65536（留空 = 不知道）"
+          />
+        </label>
+        <label className="field field-check">
+          <span>能看图</span>
+          <input type="checkbox" checked={draft.vision} onChange={setBool('vision')} />
         </label>
 
         <label className="field">

@@ -224,6 +224,10 @@ def load_config() -> dict:
                 # 档位是云端连接：显式选它 = 走 api 这条路
                 cfg["provider"] = "api"
                 cfg["model_ref_label"] = hit["label"]
+                # 2026-10-28：打标必须能看图。档位选了聊天档（`input` 只有 text）
+                # 时要在**开跑之前**拦住——否则几十张图一路失败，还看不出原因
+                # （实测：`model_ref=default` 把 api_model 换成了 deepseek-v4.1-flash）。
+                cfg["model_input"] = hit.get("input") or []
 
         # ② 密钥：`${VAR}` 引用 → 实际值；留空时直接找 .env 的标准变量名。
         #    为什么留空也要找：设置页把 key 改成「写 .env」之后，config 里就是空串，
@@ -442,6 +446,16 @@ def _provider_ready(cfg: dict) -> str:
             return str(cfg["model_ref_error"])
         if not str(cfg.get("api_model") or "").strip():
             return "API 模型名是空的"
+        # 2026-10-28：选了档位还要确认它**能看图**。打标是给图片打标签，
+        # 聊天档（`input` 只有 text）会一路打到模型那边才失败——代价是一轮
+        # API 调用加一句看不懂的报错。实测：model_ref=default 把 api_model
+        # 换成了 deepseek-v4.1-flash，key 也从 115 变成 51 字符。
+        inputs = cfg.get("model_input") or []
+        # 只在「明确标注了能力」且不含 image 时拦；`[]` = 这个档位没标过能力，
+        # 不猜（老档位全部属于这一类，猜错会把人挡在门外）。
+        if inputs and "image" not in inputs:
+            label = cfg.get("model_ref_label") or cfg.get("model_ref") or "这个档位"
+            return f"档位「{label}」不能看图——打标要选标注了「能看图」的档位，或改用本机 Ollama"
         if not (os.environ.get("IMAGE_TAG_API_KEY") or str(cfg.get("api_key") or "").strip()):
             return "API key 没配：设置里填，或在 .env 里写 IMAGE_TAG_API_KEY"
         return ""

@@ -30,6 +30,16 @@ export type ModelProfile = {
   /** 用途标记（2026-10-27）：`chat` / `vision` / `tag`，可多选。
    *  缺这个键的老档位一律按 `['chat']` 算（见 agent/model_refs.py）。 */
   kinds?: string[]
+  /**
+   * 这个模型能吃什么（2026-10-28）。
+   *
+   * 与 DSH Harness 的 `llm-pi-ai.providers.<id>.models[].input` 同名同义：
+   * `["text"]` 或 `["text","image"]`。**含 image 才能用来识图 / 打标**——
+   * 比让用户勾「用途」可靠（用途是能力的**推论**，不是反过来）。
+   */
+  input?: string[]
+  /** 上下文窗口（tokens）。界面显示成 `64K` / `1M` 徽标。 */
+  context_window?: number | null
 }
 
 /**
