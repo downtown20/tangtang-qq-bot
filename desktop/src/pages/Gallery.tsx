@@ -222,11 +222,15 @@ export default function Gallery({
     tagProvider === 'api' ? tagStatus?.config.api_model : tagStatus?.config.ollama_model
   /** 面板里「当前选中」的 key（与 /api/models/picker 的 current 同一套写法） */
   const tagConfig = (tagStatus?.config ?? {}) as Record<string, unknown>
-  const pickerCurrent = String(tagConfig.model_ref || '')
-    ? `ref:${String(tagConfig.model_ref)}`
-    : tagProvider === 'ollama'
-      ? `ollama:${String(tagConfig.ollama_model ?? '')}`
-      : `api:${String(tagConfig.api_model ?? '')}`
+  // 2026-10-28：只有一个 `model_ref` 决定用哪个模型（'' = 当前聊天模型、
+  // `ollama:x` = 本机、`<id>` = 档位），所以 current 直接由它派生——
+  // 不再按 provider 分支猜，那正是「界面显示 A、实际在用 B」的来源（教训 #51）。
+  const tagRef = String(tagConfig.model_ref || '')
+  const pickerCurrent = !tagRef
+    ? 'main'
+    : tagRef.startsWith('ollama:')
+      ? tagRef
+      : `ref:${tagRef}`
 
   const startTag = useCallback(async () => {
     if (!tagStatus) return
@@ -291,7 +295,7 @@ export default function Gallery({
    * ollama 那个的自相矛盾组合。这里一次把方式和模型定下来，选完立刻重拉状态。
    */
   const pickModel = useCallback(
-    async (item: { kind: 'ref' | 'ollama'; value: string }) => {
+    async (item: { kind: 'main' | 'ref' | 'ollama'; value: string }) => {
       try {
         const r = await api.galleryTagModel({ kind: item.kind, value: item.value })
         setPickerOpen(false)

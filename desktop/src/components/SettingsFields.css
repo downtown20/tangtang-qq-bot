@@ -263,3 +263,38 @@
 .dsl-ollama select {
   min-width: 200px;
 }
+
+/* 「选模型」触发按钮 + 弹出面板的定位上下文（面板复用 ModelPicker） */
+.dsl-modelpick-wrap {
+  position: relative;
+}
+
+.dsl-modelpick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text, #e6e6e6);
+  background: var(--bg-input, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dsl-modelpick:hover {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.24));
+}
+
+.dsl-modelpick span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

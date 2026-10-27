@@ -139,7 +139,7 @@
 |------|------|
 | handler.py | 消息路由中枢 ⚠️ 仍偏大，已拆出 handler_commands.py / handler_autonomy.py，可继续拆 |
 | memory.py | 记忆系统——语义提取/画像合成/事实簇/整合 |
-| model_refs.py | 模型档位解析 + **provider 组表唯一换算点** `provider_conn()`——接口地址/Key 只在 `llm.providers` 里存一份，档位只写 `provider: <组id>` 引用（教训 #54）；handler/识图/打标都走它，**别处不许自己翻 providers** |
+| model_refs.py | 模型解析两件事：① **provider 组表唯一换算点** `provider_conn()`——接口地址/Key 只在 `llm.providers` 里存一份，档位只写 `provider: <组id>` 引用（教训 #54）；② **「选一个模型」唯一换算点** `resolve_conn()`——`model_ref` 只有三种写法（`''`=当前聊天档 / `<档位id>` / `ollama:<模型名>`），识图与打标都只调它，**别处不许自己翻 providers，也不许再加「方式」这种第二维度**（2026-10-28 主人拍板） |
 | store.py | 数据库统一入口——SQLite 唯一访问层 |
 | personality.py | 人格引擎——系统提示词（稳定前缀缓存契约）+ 角色卡加载 |
 | protocols.py | 行为协议单一事实源——纠正信号/理解与思考协议/背景块标记 bg()/用户消息组装 |

@@ -206,28 +206,59 @@ def load_config() -> dict:
             if not isinstance(cfg.get("provider"), str):
                 cfg["provider"] = "off"
 
-        # ① 档位引用：只在非本地（ollama）时生效——本地那条路没有 base_url 概念
+        # ① 「用哪个模型」—— 只有这一个维度（2026-10-28 主人拍板删掉打标方式）。
+        #    值的三种写法见 `model_refs.resolve_conn`：空 = 当前聊天档位、
+        #    `ollama:模型名` = 本机、档位 id = 那个档位。
+        #    三个内部字段（provider / api_* / ollama_*）仍由这里**推导**出来，
+        #    下游 `_call_api` / `_call_ollama` 一行没改——它们真的走两条路
+        #    （OpenAI 兼容 vs Ollama 原生），保留分支是对的，只是不再让用户选。
         ref = str(cfg.get("model_ref") or "").strip()
-        if ref and str(cfg.get("provider") or "") != "ollama":
-            from .model_refs import resolve_model_ref
+        legacy = cfg.get("provider")
+        legacy = legacy.strip().lower() if isinstance(legacy, str) else ""
+        legacy_ollama = str(cfg.get("ollama_model") or "").strip()
+        legacy_api = bool(str(cfg.get("api_base") or "").strip()) and bool(
+            str(cfg.get("api_model") or "").strip())
 
-            hit = resolve_model_ref(raw, ref)
-            if hit is None:
-                cfg["model_ref_error"] = f"找不到档位「{ref}」（设置 → AI 模型）"
-            else:
-                if hit["base_url"]:
-                    cfg["api_base"] = hit["base_url"]
-                if hit["model"]:
-                    cfg["api_model"] = hit["model"]
-                if hit["api_key"]:
-                    cfg["api_key"] = hit["api_key"]
-                # 档位是云端连接：显式选它 = 走 api 这条路
+        from .model_refs import ollama_host_of, resolve_conn
+
+        host = ollama_host_of(raw)
+
+        if not ref and legacy == "off":
+            # 显式关闭（老配置写的 `provider: 'off'`）：尊重它，不去猜主模型
+            cfg["provider"] = "off"
+            return cfg
+        elif not ref and legacy == "ollama" and legacy_ollama:
+            # 老格式（方式和模型分开写、没有 model_ref）：原样沿用，不逼人改配置
+            cfg["provider"] = "ollama"
+            cfg["ollama_host"] = host
+        elif not ref and legacy == "api" and legacy_api:
+            # 老格式的 api 自带端点 + 模型名：同样是原样沿用
+            cfg["provider"] = "api"
+        else:
+            conn = resolve_conn(raw, ref, ollama_host=host)
+            if conn.get("error"):
+                cfg["provider"] = "off"
+                cfg["model_ref_error"] = conn["error"]
+            elif conn["kind"] == "ollama":
+                cfg["provider"] = "ollama"
+                cfg["ollama_host"] = host
+                cfg["ollama_model"] = conn["model"]
+                cfg["model_ref_label"] = conn["label"]
+                cfg["model_input"] = conn["input"]
+            elif str(conn.get("base_url") or "").strip() and str(conn.get("model") or "").strip():
                 cfg["provider"] = "api"
-                cfg["model_ref_label"] = hit["label"]
-                # 2026-10-28：打标必须能看图。档位选了聊天档（`input` 只有 text）
-                # 时要在**开跑之前**拦住——否则几十张图一路失败，还看不出原因
+                cfg["api_base"] = conn["base_url"]
+                cfg["api_model"] = conn["model"]
+                if conn.get("api_key"):
+                    cfg["api_key"] = conn["api_key"]
+                cfg["model_ref_label"] = conn["label"]
+                # 2026-10-28：打标必须能看图。选了聊天档（`input` 只有 text）时要在
+                # **开跑之前**拦住——否则几十张图一路失败，还看不出原因
                 # （实测：`model_ref=default` 把 api_model 换成了 deepseek-v4.1-flash）。
-                cfg["model_input"] = hit.get("input") or []
+                cfg["model_input"] = conn["input"]
+            else:
+                cfg["provider"] = "off"
+                cfg["model_ref_error"] = "还没有可用的识图模型——去「AI 模型」页选一个能看图的"
 
         # ② 密钥：`${VAR}` 引用 → 实际值；留空时直接找 .env 的标准变量名。
         #    为什么留空也要找：设置页把 key 改成「写 .env」之后，config 里就是空串，
@@ -433,7 +464,7 @@ def _provider_ready(cfg: dict) -> str:
     """空串 = 可以开跑；非空 = **为什么不能**（直接显示给用户，不让他猜）。"""
     provider = str(cfg.get("provider") or "off").strip()
     if provider == "off":
-        return "还没选打标方式：设置 → 图库打标 → 打标方式"
+        return cfg.get("model_ref_error") or "还没选打标用的模型：设置 → 图库打标 → 点「选模型」"
     if provider == "ollama":
         if not str(cfg.get("ollama_model") or "").strip():
             return "Ollama 模型名是空的"

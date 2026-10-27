@@ -392,21 +392,80 @@
 .provider-card {
   border: 1px solid var(--border-l2);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 10px 14px;
   background: var(--bg-layer-2);
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+/* 展开时给回原来的内边距：收起态要紧凑，展开态要能呼吸 */
+.provider-card.is-open {
+  padding: 14px 16px;
+}
+
 .provider-card + .provider-card {
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .provider-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 24px;
+}
+
+/* Key 配没配：一个点就够（DSH 的 credentialDot），不占一整行文字 */
+.provider-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.provider-dot.is-ok {
+  background: var(--state-success, #3fb950);
+}
+
+.provider-dot.is-missing {
+  background: var(--state-error, #f85149);
+}
+
+/* 行头的名字是按钮：整行点开/收起，不用非去点那个小箭头 */
+.provider-name-btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--label-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.provider-name-btn:hover {
+  color: var(--accent, #58a6ff);
+}
+
+/* 协议 / 模型数：小圆角标签（DSH 的 rowTag） */
+.provider-chip {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--border-l2);
+  border-radius: 4px;
+  font-size: var(--fs-11, 11px);
+  line-height: 16px;
+  color: var(--label-secondary);
+}
+
+.provider-head .icon-btn {
+  margin-left: auto;
 }
 
 .provider-name {

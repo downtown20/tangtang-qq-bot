@@ -1315,14 +1315,31 @@ def api_models_picker(params: dict) -> dict:
 
     `current` 是 `ref:<档位id>` / `ollama:<模型名>` / `api:<模型名>`（老配置没选档位）。
     """
-    from agent.model_refs import all_profiles, kinds_of
+    from agent.model_refs import active_profile, all_profiles
 
     raw = _load_raw_config()
     tag_cfg = raw.get("image_tagging") if isinstance(raw.get("image_tagging"), dict) else {}
     current_ref = str(tag_cfg.get("model_ref") or "").strip()
-    current_provider = str(tag_cfg.get("provider") or "off").strip()
 
     groups: list[dict] = []
+
+    # 第一组永远是「当前聊天模型」——对应 `model_ref` 留空的那条语义。
+    # 2026-10-28 起「主模型」是列表里的一等选项，而不是一个隐藏的默认值。
+    main_prof = active_profile(raw) or {}
+    groups.append({
+        "key": "main",
+        "label": "当前聊天模型",
+        "items": [{
+            "key": "main",
+            "label": str(main_prof.get("label") or main_prof.get("id") or "（未设置）"),
+            "sub": str(main_prof.get("model") or ""),
+            "badge": _context_badge(main_prof.get("context_window")),
+            "vision": "image" in (main_prof.get("input") or []),
+            "kind": "main",
+            "value": "",
+            "provider": "main",
+        }],
+    })
 
     cloud_items = []
     for profile in all_profiles(raw):
@@ -1361,18 +1378,14 @@ def api_models_picker(params: dict) -> dict:
     ]
     groups.append({"key": "ollama", "label": "本机 Ollama", "items": ollama_items})
 
-    # 优先级**必须与 `image_tagger.load_config()` 一致**：provider=ollama 时
-    # `model_ref` 根本不生效，所以这里也必须先看 provider。否则会把「当前在用
-    # 本机模型」标成「云端档位 <model_ref>」——2026-10-27 实测踩到（current 报
-    # ref:default，界面却显示 qwen3-vl:8b-instruct-q8_0）。
-    if current_provider == "ollama":
-        current = "ollama:%s" % str(tag_cfg.get("ollama_model") or "")
+    # current 与 `image_tagger.load_config()` 用的是同一个值（`model_ref` 本身），
+    # 这样不会再出现「界面显示 A、实际在用 B」的两套口径（教训 #38/#51）。
+    if current_ref.startswith("ollama:"):
+        current = current_ref
     elif current_ref:
         current = "ref:%s" % current_ref
-    elif current_provider == "api":
-        current = "api:%s" % str(tag_cfg.get("api_model") or "")
     else:
-        current = ""
+        current = "main"
 
     return {
         "ok": True,
@@ -1448,33 +1461,37 @@ def _patch_image_tagging(values: dict) -> str:
 
 
 def api_gallery_tag_model(body: dict) -> dict:
-    """在图库打标面板里**直接选模型**（不再跳设置页）。
+    """在图库打标面板里**直接选模型**（不再跳设置页，也不再有「打标方式」）。
 
-    `body = {kind, value}`：
-      · `kind="ref"`    → 用云端档位：`model_ref=value`、`provider=api`
-      · `kind="ollama"` → 用本机模型：`ollama_model=value`、`provider=ollama`、`model_ref=''`
+    `body = {kind, value}` —— 三种来源最后都落成**一个** `image_tagging.model_ref`：
 
-    为什么把「打标方式」和「模型」合成一个动作（2026-10-27 主人）：
-    它们本来是同一个决定的两半，拆成两个控件会出现「方式选了 api、模型还停在
-    ollama 的名字」这种自相矛盾的组合。选完这一下，方式和模型一定是一致的。
+      · `kind="main"`   → `model_ref=''`（用当前聊天档位）
+      · `kind="ref"`    → `model_ref=<档位 id>`
+      · `kind="ollama"` → `model_ref="ollama:<模型名>"`
+
+    为什么只剩一个键（2026-10-28 主人拍板）：「打标方式 × 模型」是两个维度相乘，
+    组合里大半是坏的——api 没 Key、local 没装模型、main 不能看图。主人原话：
+    「这类方式选择完全不用了，只需要给一个像图库选择模型的那样就行了，
+    总要选一个模型，没有别的选择」。语义与识图的 `llm.vision.model_ref` 一致，
+    解析唯一入口是 `agent/model_refs.resolve_conn()`。
     """
     kind = str((body or {}).get("kind") or "").strip()
     value = str((body or {}).get("value") or "").strip()
 
-    if kind == "ref":
+    if kind == "main":
+        ref = ""
+    elif kind == "ref":
         if not value:
             raise ValueError("没选档位")
-        backup = _patch_image_tagging({"model_ref": value, "provider": "api"})
+        ref = value
     elif kind == "ollama":
         if not value:
-            raise ValueError("没选 Ollama 模型")
-        backup = _patch_image_tagging({
-            "ollama_model": value,
-            "provider": "ollama",
-            "model_ref": "",
-        })
+            raise ValueError("没选本机模型")
+        ref = f"ollama:{value}"
     else:
-        raise ValueError(f"未知的模型来源：{kind or '(空)'}（可选 ref / ollama）")
+        raise ValueError(f"未知的模型来源：{kind or '(空)'}（可选 main / ref / ollama）")
+
+    backup = _patch_image_tagging({"model_ref": ref})
 
     cfg = _image_tagger().load_config()
     return {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Loader2, RefreshCw } from 'lucide-react'
+import { Check, ChevronDown, Loader2, RefreshCw } from 'lucide-react'
 
 import { getAt, setAt, coerce } from '../lib/configStore'
 import { api, type ModelProfile, type OllamaModel, type SecretsResponse } from '../lib/api'
+import ModelPicker from './ModelPicker'
 import './SettingsFields.css'
 
 export type FieldDef = {
@@ -341,44 +342,50 @@ function ModelRefField({
   value: unknown
   onCommit: (v: unknown) => void
 }) {
-  const [options, setOptions] = useState<ModelProfile[] | null>(null)
-  const [error, setError] = useState('')
+  const [open, setOpen] = useState(false)
+  const [label, setLabel] = useState('')
+  const current = String(value ?? '')
+  // 面板要的 `current` 形状与配置里存的**不是同一个**：配置里 `''` = 主模型、
+  // `ollama:x` = 本机、`<id>` = 档位；面板用 `main` / `ollama:x` / `ref:<id>`。
+  // 只在这一处转换，别的地方不许再各写一套（教训 #38）。
+  const key = current === '' ? 'main' : current.startsWith('ollama:') ? current : `ref:${current}`
 
   useEffect(() => {
     let alive = true
     api
-      .models()
-      .then((d) => {
-        if (alive) setOptions(d.profiles ?? [])
+      .modelsPicker()
+      .then((r) => {
+        if (!alive) return
+        const all = (r.groups ?? []).flatMap((g) => g.items)
+        setLabel(all.find((it) => it.key === key)?.label ?? (current || '当前聊天模型'))
       })
-      .catch((e: Error) => {
-        if (alive) setError(e.message)
+      .catch(() => {
+        if (alive) setLabel(current || '当前聊天模型')
       })
     return () => {
       alive = false
     }
-  }, [])
-
-  const current = String(value ?? '')
-  const kindsText = (p: ModelProfile) =>
-    (p.kinds ?? ['chat']).map((k) => KIND_LABELS[k] ?? k).join('+')
+  }, [key, current])
 
   return (
-    <div className="dsl-modelref">
-      <select value={current} onChange={(e) => onCommit(e.target.value)}>
-        <option value="">不用档位（用下面的地址 / 模型 / Key）</option>
-        {(options ?? []).map((p) => (
-          <option key={p.id} value={p.id}>
-            {`${p.label || p.id} · ${kindsText(p)}`}
-          </option>
-        ))}
-      </select>
-      {error && <div className="dsl-secret-err">拉不到档位列表：{error}</div>}
-      {!error && options === null && <div className="dsl-secret-tip">正在读档位…</div>}
-      {!error && options !== null && options.length === 0 && (
-        <div className="dsl-secret-tip">
-          还没有档位——去「AI 模型」加一个，或继续用下面三项
-        </div>
+    <div className="dsl-modelref dsl-modelpick-wrap">
+      <button type="button" className="dsl-modelpick" onClick={() => setOpen(true)}>
+        <span>{label || '正在读…'}</span>
+        <ChevronDown size={13} />
+      </button>
+      {open && (
+        <ModelPicker
+          current={key}
+          onClose={() => setOpen(false)}
+          onPick={(item) => {
+            // 三种来源 → 一个 `model_ref` 字符串（`model_refs.resolve_conn` 是唯一解析点）
+            const next =
+              item.kind === 'main' ? '' : item.kind === 'ollama' ? `ollama:${item.value}` : item.value
+            onCommit(next)
+            setLabel(item.label)
+            setOpen(false)
+          }}
+        />
       )}
     </div>
   )

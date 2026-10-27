@@ -160,6 +160,11 @@ export default function ModelSettings({
   const [tip, setTip] = useState('')
   const [busy, setBusy] = useState('')
   const [openId, setOpenId] = useState('')
+  // provider 卡**默认全部收起**，与 DSH Harness 一致（它的 `expanded` 初始是
+  // `new Set()`，每行只露一行头，点箭头才展开编辑区）。2026-10-28 主人批评：
+  // 「AI模型每个卡片都是打开状态」——一屏全是输入框，找不到重点。
+  // 用 Set 而不是单值：可以同时展开两个组对比（DSH 也是这个语义）。
+  const [openProviders, setOpenProviders] = useState<Set<string>>(() => new Set())
   const [models, setModels] = useState<ModelDraft[]>([])
   const [providers, setProviders] = useState<ProviderDraft[]>([])
   const [secrets, setSecrets] = useState<Record<string, boolean>>({})
@@ -200,6 +205,15 @@ export default function ModelSettings({
 
   const active = data?.active ?? ''
   const providerList = data?.providers ?? []
+
+  const toggleProvider = (pid: string) => {
+    setOpenProviders((prev) => {
+      const next = new Set(prev)
+      if (next.has(pid)) next.delete(pid)
+      else next.add(pid)
+      return next
+    })
+  }
 
   /** 模型目录按 provider 分组（顺序 = 组表顺序，不打乱用户的排列） */
   const grouped = useMemo(() => {
@@ -417,17 +431,42 @@ export default function ModelSettings({
           const indices = grouped.get(group.id) ?? []
           const env = envNameOf(group.api_key)
           const configured = env ? Boolean(secrets[env]) : Boolean(group.api_key)
+          const isOpen = openProviders.has(group.id)
           return (
-            <div key={group.id} className="provider-card">
+            <div
+              key={group.id}
+              className={'provider-card' + (isOpen ? ' is-open' : '')}
+            >
+              {/* 行头：一行 = 状态点 + 名称 + 协议 + 模型数 + 箭头 + 删除。
+                  收起时**不渲染任何输入框**——这是照 DSH Harness 的
+                  `rowCard → rowHead + (expanded ? body : null)` 做的。 */}
               <div className="provider-head">
-                <input
-                  className="provider-name"
-                  value={draft.label}
-                  placeholder="provider 名称（例如：自建中转）"
-                  onChange={(e) => patchProvider(group.id, { label: e.target.value })}
-                  onBlur={() => void commitProvider(group.id)}
+                <span
+                  className={'provider-dot' + (configured ? ' is-ok' : ' is-missing')}
+                  title={configured ? 'API Key 已配' : 'API Key 还没配'}
                 />
+                <button
+                  className="provider-name-btn"
+                  onClick={() => toggleProvider(group.id)}
+                  title={isOpen ? '收起' : '展开'}
+                >
+                  {draft.label || group.id}
+                </button>
+                <span className="provider-chip">
+                  {PROTOCOLS.find((p) => p.value === draft.api)?.label ?? draft.api}
+                </span>
+                {indices.length > 0 && (
+                  <span className="provider-chip">{indices.length} 个模型</span>
+                )}
                 {busy === group.id && <Loader2 size={13} className="spin" />}
+                <button
+                  className="icon-btn"
+                  onClick={() => toggleProvider(group.id)}
+                  aria-expanded={isOpen}
+                  title={isOpen ? '收起' : '展开'}
+                >
+                  {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
                 <button
                   className="btn btn-ghost btn-danger"
                   title="删除这个 provider（还有模型引用时会被拒绝）"
@@ -437,38 +476,50 @@ export default function ModelSettings({
                 </button>
               </div>
 
-              {group.derived && (
-                <div className="provider-note">
-                  这一组是从旧配置里读出来的（地址 / Key 还写在模型档位上）——改一次
-                  就落成正式的 provider 组。
-                </div>
-              )}
+              {isOpen && (
+                <>
+                  {group.derived && (
+                    <div className="provider-note">
+                      这一组是从旧配置里读出来的（地址 / Key 还写在模型档位上）——改一次
+                      就落成正式的 provider 组。
+                    </div>
+                  )}
 
-              <div className="provider-grid">
-                <label className="field field-wide">
-                  <span>API 地址</span>
-                  <input
-                    value={draft.base_url}
-                    placeholder="https://api.example.com（会自动补 /v1）"
-                    onChange={(e) => patchProvider(group.id, { base_url: e.target.value })}
-                    onBlur={() => void commitProvider(group.id)}
-                  />
-                </label>
-                <label className="field">
-                  <span>API 协议</span>
-                  <select
-                    value={draft.api}
-                    onChange={(e) => {
-                      patchProvider(group.id, { api: e.target.value })
-                      void commitProvider(group.id)
-                    }}
-                  >
-                    {PROTOCOLS.map((p) => (
-                      <option key={p.value} value={p.value}>{p.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+                  <div className="provider-grid">
+                    <label className="field field-wide">
+                      <span>名称</span>
+                      <input
+                        className="provider-name"
+                        value={draft.label}
+                        placeholder="provider 名称（例如：自建中转）"
+                        onChange={(e) => patchProvider(group.id, { label: e.target.value })}
+                        onBlur={() => void commitProvider(group.id)}
+                      />
+                    </label>
+                    <label className="field field-wide">
+                      <span>API 地址</span>
+                      <input
+                        value={draft.base_url}
+                        placeholder="https://api.example.com（会自动补 /v1）"
+                        onChange={(e) => patchProvider(group.id, { base_url: e.target.value })}
+                        onBlur={() => void commitProvider(group.id)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>API 协议</span>
+                      <select
+                        value={draft.api}
+                        onChange={(e) => {
+                          patchProvider(group.id, { api: e.target.value })
+                          void commitProvider(group.id)
+                        }}
+                      >
+                        {PROTOCOLS.map((p) => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
 
               <div className="provider-key">
                 <span className="provider-key-state">
@@ -568,13 +619,15 @@ export default function ModelSettings({
                 />
               ))}
 
-              <button
-                className="btn btn-ghost provider-add-model"
-                onClick={() => addModel(group.id)}
-              >
-                <Plus size={13} />
-                添加模型
-              </button>
+                  <button
+                    className="btn btn-ghost provider-add-model"
+                    onClick={() => addModel(group.id)}
+                  >
+                    <Plus size={13} />
+                    添加模型
+                  </button>
+                </>
+              )}
             </div>
           )
         })}

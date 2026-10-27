@@ -107,7 +107,7 @@ def test_scan_of_missing_dir_is_zero_not_crash(gallery):
 # ── 「为什么不能跑」要说清楚 ─────────────────────────────────
 
 @pytest.mark.parametrize("provider,patch,expect_in", [
-    ("off", {}, "还没选打标方式"),
+    ("off", {}, "还没选打标用的模型"),
     ("ollama", {"ollama_model": ""}, "模型名是空的"),
     ("ollama", {"ollama_host": ""}, "地址是空的"),
     ("api", {"api_model": ""}, "API 模型名是空的"),
@@ -134,10 +134,10 @@ def test_provider_ready_ok_for_complete_config(monkeypatch):
 # ── 跑一轮：入口护栏 ─────────────────────────────────────────
 
 def test_run_refuses_when_not_configured(gallery):
-    """没选方式 → 明确拒绝，且**不启动线程**（否则界面显示「在跑」但什么都没发生）。"""
+    """没选模型 → 明确拒绝，且**不启动线程**（否则界面显示「在跑」但什么都没发生）。"""
     out = T.run()
     assert out["ok"] is False
-    assert "还没选打标方式" in out["error"]
+    assert "还没选打标用的模型" in out["error"]
     assert T.status()["progress"]["running"] is False
 
 

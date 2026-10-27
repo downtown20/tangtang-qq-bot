@@ -330,3 +330,130 @@ def resolve_model_ref(config, ref_id) -> dict | None:
             "api_key": conn["api_key"],
         }
     return None
+
+
+#: 「本机 Ollama 模型」在 model_ref 里的写法：`ollama:qwen3-vl:8b`。
+#:
+#: 为什么用前缀而不是再加一个 `provider` 字段（2026-10-28 主人拍板）：
+#: 「识图方式 / 打标方式」是两个维度乘在一起——「方式(main/local/api) × 模型」，
+#: 组合里有大半是坏的（api 没 Key、local 没装模型、main 不能看图）。主人原话：
+#: 「这类方式选择完全不用了，只需要给一个像图库选择模型的那样就行了，
+#: 总要选一个模型，没有别的选择」。于是把维度压平成**一个字符串**：
+#: 它就是「哪个模型」，连接信息由它自己决定。
+OLLAMA_PREFIX = "ollama:"
+
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+
+
+def ollama_host_of(config) -> str:
+    """本机 Ollama 端点：`image_tagging.ollama_host` 优先，否则默认本机。"""
+    section = (config or {}).get("image_tagging")
+    if isinstance(section, dict):
+        host = str(section.get("ollama_host") or "").strip()
+        if host:
+            return host.rstrip("/")
+    return DEFAULT_OLLAMA_HOST
+
+
+def active_profile(config) -> dict | None:
+    """当前聊天档位（`llm.active_model` 指向的那个）。
+
+    一个都没写时的兜底顺序：配置里的第一个档位。给「model_ref 留空 = 用主模型」
+    这条语义用（也让老配置不用选也还能跑）。
+    """
+    llm = _llm_of(config)
+    want = str(llm.get("active_model") or "").strip()
+    profiles = _raw_profiles(config)
+    if want:
+        for profile in profiles:
+            if str(profile.get("id") or "").strip() == want:
+                return profile
+    return profiles[0] if profiles else None
+
+
+def resolve_conn(config, value, *, ollama_host=None) -> dict:
+    """把一个 `model_ref` 字符串解析成实际连接信息——**唯一换算点**。
+
+    三种写法（界面上是一个下拉，选项自带前缀，用户看不到这些细节）：
+
+      · 空字符串            → 用当前聊天档位（`llm.active_model`）
+      · `ollama:模型名`     → 本机 Ollama，端点 `{host}/v1`（OpenAI 兼容）
+      · 某个档位 id         → 那个档位（连接信息走 `provider_conn` 的组表）
+
+    返回 `{"kind", "label", "base_url", "model", "api_key", "input",
+    "context_window", "error"}`；`api_key` 可能是 `${VAR}` 引用，解析是使用方的事
+    （与 `resolve_model_ref` 同一约定：引用/字面量的分辨点不许散成两个）。
+    解析不出来时 `error` 非空、`base_url`/`model` 为空——调用方据此给出人话提示。
+    """
+    ref = str(value or "").strip()
+    out = {
+        "kind": "",
+        "label": "",
+        "base_url": "",
+        "model": "",
+        "api_key": "",
+        "input": [],
+        "context_window": 0,
+        "error": "",
+    }
+
+    if ref.startswith(OLLAMA_PREFIX):
+        model = ref[len(OLLAMA_PREFIX):].strip()
+        if not model:
+            out["error"] = "本机模型写成了空的（应形如 ollama:qwen3-vl:8b）"
+            return out
+        host = str(ollama_host or "").strip() or ollama_host_of(config)
+        out.update({
+            "kind": "ollama",
+            "label": f"{model}（本机）",
+            "base_url": f"{host.rstrip('/')}/v1",
+            "model": model,
+            # Ollama 不校验 Key，但 OpenAI 兼容客户端要求这个头非空
+            "api_key": "ollama",
+            # 能力未知：Ollama 的模型清单里才有「能否看图」，这里不瞎猜
+            "input": [],
+        })
+        return out
+
+    if ref:
+        hit = resolve_model_ref(config, ref)
+        if hit is None:
+            out["error"] = f"找不到模型「{ref}」（设置 → AI 模型）"
+            return out
+        out.update({
+            "kind": "profile",
+            "label": hit["label"],
+            "base_url": hit["base_url"],
+            "model": hit["model"],
+            "api_key": hit["api_key"],
+            "input": hit["input"],
+            "context_window": hit["context_window"],
+        })
+        return out
+
+    # 留空 = 用当前聊天档位
+    profile = active_profile(config)
+    if profile is not None:
+        conn = provider_conn(config, profile)
+        out.update({
+            "kind": "main",
+            "label": str(profile.get("label") or profile.get("id") or ""),
+            "base_url": conn["base_url"],
+            "model": str(profile.get("model") or "").strip(),
+            "api_key": conn["api_key"],
+            "input": input_of(profile),
+            "context_window": _int_or(profile.get("context_window"), 0),
+        })
+        return out
+
+    # 连档位都没有的老配置（纯扁平 llm.*）
+    llm = _llm_of(config)
+    out.update({
+        "kind": "flat",
+        "label": str(llm.get("model") or ""),
+        "base_url": str(llm.get("base_url") or "").strip(),
+        "model": str(llm.get("model") or "").strip(),
+        "api_key": str(llm.get("api_key") or "").strip(),
+    })
+    return out
+

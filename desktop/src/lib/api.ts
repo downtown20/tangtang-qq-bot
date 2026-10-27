@@ -114,7 +114,12 @@ export type ModelPickerItem = {
   /** 上下文窗口徽标：`8K` / `256K` / `1M`（拿不到就空） */
   badge: string
   vision: boolean
-  kind: 'ref' | 'ollama'
+  /**
+   * 来源。2026-10-28 起多了一种 `main`（= 当前聊天模型，对应 `model_ref` 留空）：
+   * 主人要求「总要选一个模型，没有别的选择」，所以主模型是清单里的**一等选项**，
+   * 而不是藏在背后的默认值。
+   */
+  kind: 'main' | 'ref' | 'ollama'
   value: string
   provider: string
 }
@@ -1826,10 +1831,11 @@ export const api = {
   /** 「选模型」面板的统一清单：云端档位 + 本机 Ollama，按 provider 分组。 */
   modelsPicker: () => request<ModelsPickerResponse>('/api/models/picker'),
   /**
-   * 面板里直接选模型（不跳设置页）：同时定下「打标方式 + 模型」。
-   * `kind="ref"` → 档位（provider=api）；`kind="ollama"` → 本机模型（provider=ollama）。
+   * 面板里直接选模型（不跳设置页）。三种来源最后都落成**一个** `model_ref`：
+   * `main` → `''`（当前聊天模型）、`ref` → 档位 id、`ollama` → `ollama:<模型名>`。
+   * 2026-10-28 起不再有「打标方式」——方式和模型本来就是同一个决定。
    */
-  galleryTagModel: (payload: { kind: 'ref' | 'ollama'; value: string }) =>
+  galleryTagModel: (payload: { kind: 'main' | 'ref' | 'ollama'; value: string }) =>
     request<{
       ok: boolean
       backup: string

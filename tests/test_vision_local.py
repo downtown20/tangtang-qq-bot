@@ -58,7 +58,29 @@ def test_local_vision_logs_ollama_error_body(caplog):
     assert any("std::bad_alloc" in record.message for record in caplog.records)
 
 
-def test_vision_router_resolves_env_references(monkeypatch):
+def test_vision_router_resolves_env_references(tmp_path, monkeypatch):
+    """`${VAR}` 引用要解析成实际值（否则会把它当字面量发出去 → 401）。
+
+    2026-10-28：改成**自己造配置**。原来它直接读项目根的真实 config.yaml，
+    而主人把识图切到本机模型后，那里面已经没有 `${QWEN_KEY}` 了 → 测试变成在
+    测「当前配置长什么样」而不是「解析逻辑对不对」。测试不该钉用户配置的值。
+    """
     monkeypatch.setenv("QWEN_KEY", "test-qwen-key")
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        "llm:\n"
+        "  vision:\n"
+        "    enabled: true\n"
+        "    provider: api\n"
+        "    base_url: https://example.test/v1\n"
+        "    model: qwen-vl-plus\n"
+        "    api_key: ${QWEN_KEY}\n",
+        encoding="utf-8")
+    monkeypatch.setattr(vision_router, "CONFIG_PATH", cfg_file)
+
     cfg = vision_router._load_vision_cfg()
     assert cfg["api_key"] == "test-qwen-key"
+    # 老结构（有端点 + 模型名、没有 model_ref）原样沿用，不被主档位覆盖
+    assert cfg["base_url"] == "https://example.test/v1"
+    assert cfg["model"] == "qwen-vl-plus"
+    assert cfg["provider"] == "api"

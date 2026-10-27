@@ -76,30 +76,45 @@ def _load_vision_cfg() -> dict:
         # 否则 `${QWEN_KEY}` 会作为字面量发送，稳定得到 401 云端错误。
         resolved = _resolve_env_values(vision)
 
-        # 2026-10-28：档位引用 —— 选了「AI 模型」页里能看图的档位，就用它的
-        # 接口地址 / 模型名 / Key（与打标的 `image_tagging.model_ref` 同一套）。
-        # 档位是云端 OpenAI 兼容连接，所以 provider 一律归成 api。
+        # 2026-10-28：**只剩「选一个模型」**（`llm.vision.model_ref`），不再有
+        # 「识图方式」这个第二维度开关（主人原话：「这类方式选择完全不用了，
+        # 只需要给一个像图库选择模型的那样就行了，总要选一个模型」）。
+        #
+        # 值的三种写法见 `model_refs.resolve_conn`：空 = 当前聊天档位、
+        # `ollama:模型名` = 本机 Ollama、档位 id = 那个档位。
+        # 选中了就一律走 api 后端——Ollama 的 `/v1/chat/completions` 也是
+        # OpenAI 兼容的（2026-10-28 实测能传 base64 图片并返回描述），
+        # 本机 MiniCPM-V 引擎留作兜底。
         ref = str(resolved.get("model_ref") or "").strip()
-        if ref:
-            try:
-                from .model_refs import resolve_model_ref
+        legacy_base = str(resolved.get("base_url") or "").strip()
+        legacy_model = str(resolved.get("model") or "").strip()
+        if not ref and legacy_base and legacy_model:
+            # 老配置（「方式」+ 独立端点 + 模型名，没有 model_ref）：原样沿用。
+            # 新写法是**推荐**，不是「不迁移就坏掉」——否则一次升级就把所有
+            # 老配置的识图打断（教训 #21：有原则的例外要写明为什么）。
+            resolved["provider"] = str(resolved.get("provider") or "local").strip().lower() or "local"
+            return resolved
+        try:
+            from .model_refs import ollama_host_of, resolve_conn
 
-                hit = resolve_model_ref(config, ref)
-            except Exception:
-                hit = None
-            if hit:
-                if hit["base_url"]:
-                    resolved["base_url"] = hit["base_url"]
-                if hit["model"]:
-                    resolved["model"] = hit["model"]
-                if hit["api_key"]:
-                    resolved["api_key"] = hit["api_key"]
-                resolved["provider"] = "api"
-                resolved["model_ref_label"] = hit["label"]
-                # 覆盖进来的新值同样可能是 `${VAR}` —— 再解析一次
-                resolved = _resolve_env_values(resolved)
-            else:
-                resolved["model_ref_error"] = f"找不到档位「{ref}」（设置 → AI 模型）"
+            conn = resolve_conn(config, ref, ollama_host=ollama_host_of(config))
+        except Exception:
+            conn = {}
+        if conn.get("error"):
+            resolved["model_ref_error"] = conn["error"]
+            resolved["provider"] = "local"
+        elif str(conn.get("base_url") or "").strip() and str(conn.get("model") or "").strip():
+            resolved["base_url"] = conn["base_url"]
+            resolved["model"] = conn["model"]
+            if conn.get("api_key"):
+                resolved["api_key"] = conn["api_key"]
+            resolved["provider"] = "api"
+            resolved["model_ref_label"] = conn["label"]
+            # 覆盖进来的新值同样可能是 `${VAR}` —— 再解析一次
+            resolved = _resolve_env_values(resolved)
+        else:
+            # 一个可用连接都没有（老配置 + 扁平字段也空）：退回本机引擎
+            resolved["provider"] = "local"
         return resolved
     except Exception:
         return {}

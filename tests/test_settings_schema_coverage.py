@@ -72,7 +72,6 @@ EXEMPT: dict[str, str] = {
     "llm.seductive_base_url": "历史残留字段：亲密模式已并入主模型，留着只为兼容老配置",
     "llm.seductive_model": "历史残留字段：亲密模式已并入主模型，留着只为兼容老配置",
     "llm.seductive_provider": "历史残留字段：亲密模式已并入主模型，留着只为兼容老配置",
-    "llm.vision.api_key": "密钥：写在 .env 里，界面只显示是否已配",
     "llm.models": "模型清单是数组，由模型页「AI 模型」单独管理（表单放不下结构化列表）",
     "llm.active_model": "当前模型由模型页的切换器管理，放设置页会出现两个切换点",
     "llm.light_effort": "轻量档位与模型页一起管理——单独放会让两处口径漂移",
@@ -103,12 +102,11 @@ EXEMPT: dict[str, str] = {
     "llm.temperature": "档位级参数，在 AI 模型页展开模型后编辑",
     "llm.thinking": "档位级参数，在 AI 模型页展开模型后编辑",
     "llm.thinking_effort": "档位级参数，在 AI 模型页展开模型后编辑",
-    "llm.vision.model": "识图模型名，由识图页选档位（llm.vision.model_ref）带过来——手填会与档位不一致",
-    "llm.vision.base_url": "识图端点，由识图页选档位带过来；手填会与档位不一致",
-    "image_tagging.api_base": "打标端点，由图库页选模型（model_ref）带过来",
-    "image_tagging.api_model": "打标模型名，由图库页选模型带过来（那里有「可看图」标记与窗口徽标）",
-    "image_tagging.api_key": "密钥：写在 .env（IMAGE_TAG_API_KEY）里，界面只显示是否已配",
-    "image_tagging.ollama_model": "本机 Ollama 模型名，由图库页的选模型面板写（能看能力标记）",
+    # 2026-10-28 第二轮：主人要求「识图方式 / 打标方式这类方式选择完全不用了，
+    # 只需要给一个像图库选择模型的那样」——这两种功能的连接信息本来就该只由
+    # `model_ref` 决定，动手删了之后上面那批键**已经不在 config.yaml 里**了，
+    # 对应的豁免条目也一并删掉（闸门 `test_exempt_entries_actually_exist` 就是
+    # 为「豁免清单长出一片没人巡视的空地」设的，教训 #30）。
 }
 
 
