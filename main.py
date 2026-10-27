@@ -71,7 +71,7 @@ from dotenv import load_dotenv
 from onebot.ws_client import NapCatClient
 from agent.handler import MessageHandler
 from agent.telemetry import build_log_handlers
-from agent.paths import log_path  # 日志落盘位置单一事实源（2026-10-15 T55-F）
+from agent.paths import log_path, sweep_stale_runtime_files  # 日志落盘位置单一事实源（2026-10-15 T55-F）
 from agent.secret_refs import (collapse_unresolved_secrets, literal_secret_fields,
                                normalize_secret_fields, unfilled_secrets)
 
@@ -614,6 +614,17 @@ class TangTang:
 
 
 async def main():
+    # 启动收尾：清掉第三方工具丢在项目根的临时 pcm。
+    # `pilk.silk_to_wav` 用 `tempfile.mktemp(suffix='.pcm')` 建中间文件后**从不删除**
+    # （2026-10-27 实测根目录堆了 10 个 / 55MB；`*.pcm` 被 .gitignore 挡着，
+    # `git status` 看不出来，只有 dir 能看见）。放在最前面：先扫干净再干活。
+    try:
+        swept = sweep_stale_runtime_files()
+        if swept:
+            logger.info("清掉 %d 个遗留临时音频文件（pilk 解码残留）", len(swept))
+    except Exception as exc:  # 收尾工作不该影响启动
+        logger.debug("清理遗留临时文件失败：%s", exc)
+
     tangtang = TangTang()
 
     # SIGTERM（控制台 kill）→ 优雅退出

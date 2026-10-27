@@ -897,3 +897,67 @@
   gap: 8px;
 }
 
+/* ── 试打一张（2026-10-27）─────────────────────────────────────────
+ * 放在「开始打标」上方：验证通道本来就该发生在批量之前。
+ * 结果区把**模型原话**整段给人看——标签提取错了，得先看它是怎么描述的。 */
+.tag-probe {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tag-probe-why {
+  font-size: var(--fs-11);
+  line-height: 1.4;
+  color: var(--label-tertiary);
+}
+
+.tag-probe-out {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, var(--bg-hover));
+  border-radius: var(--radius-sm);
+  background: var(--bg-module);
+  font-size: var(--fs-12);
+}
+
+.tag-probe-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+
+.tag-probe-raw {
+  font-family: var(--font-mono);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.tag-probe-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-probe-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  font-size: var(--fs-11);
+  color: var(--label-secondary);
+}
+
+.tag-probe-note {
+  font-size: var(--fs-11);
+  color: var(--label-tertiary);
+}
+

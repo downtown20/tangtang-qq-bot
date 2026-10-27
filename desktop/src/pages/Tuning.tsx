@@ -41,7 +41,10 @@ type FieldError = string | null
 function validate(item: TuningGroup['items'][number], raw: string): FieldError {
   const text = raw.trim()
   if (text === '') return '不能为空'
-  if (!/^-?\d+(\.\d+)?$/.test(text)) return '只能填数字'
+  /* 放行 `0.` / `-` / `.5` 这类输入中间态：输入框是 type="text"，用户敲小数点的
+     那一瞬字符串就是 "0."，此时报「只能填数字」等于不让人输小数（0.081 这类
+     精细参数正是这一页的用途）。真正能不能存由后端校验。 */
+  if (!/^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(text)) return '只能填数字'
   const num = Number(text)
   if (item.kind === 'int' && !Number.isInteger(num)) return '这一项必须是整数'
   if (num < item.lo) return `不能小于 ${item.lo}`
@@ -266,8 +269,13 @@ export default function Tuning() {
                 </div>
                 <div className="tuning-row-input">
                   <input
-                    type="number"
-                    step={item.kind === 'int' ? 1 : 0.01}
+                    /* type="text" 而不是 number：number 输入框的 DOM 存不下「0.」和「-」
+                       这种中间态（实测 `el.value = "0."` 读回来是空串），用户敲小数点的
+                       瞬间 value 变空，validate 立刻报「不能为空」，等于小数根本输不进去。
+                       范围/整数/精度全部由 `validate()` 判，后端是最终判据。 */
+                    type="text"
+                    inputMode={item.kind === 'int' ? 'numeric' : 'decimal'}
+                    autoComplete="off"
                     value={item.raw}
                     onChange={(e) => setField(item.key, e.target.value)}
                     className={item.err ? 'invalid' : ''}

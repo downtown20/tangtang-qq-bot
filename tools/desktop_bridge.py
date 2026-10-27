@@ -661,27 +661,16 @@ def api_scenario_packs_save(body: dict) -> dict:
     if not isinstance(packs_in, list):
         raise ValueError("packs 必须是列表")
 
+    # 字段规整**不在这里写**：交给 `agent/scenario_packs.coerce_pack`。
+    # 2026-10-26 的 `allow_groups` 事故根因就是这里曾经手写了一份 8 键白名单——
+    # 加字段时只改了读取侧，于是那个键每次保存都**静默消失**，而 handler 的守卫
+    # 把缺失当 False，「群聊注入」被悄悄关掉（界面上还显示着开）。
+    # 现在字段表只有一份：`PACK_DEFAULTS`（教训 #38：同一个量只许一个换算点）。
     cleaned = []
-    for item in packs_in:
-        if not isinstance(item, dict):
-            continue
-        scenario = str(item.get("scenario") or "").strip()
-        if not scenario:
-            continue
-        cleaned.append({
-            "id": str(item.get("id") or "main").strip() or "main",
-            "scenario": scenario,
-            "dir": str(item.get("dir") or "").strip(),
-            "label": str(item.get("label") or "").strip(),
-            "budget": int(item.get("budget") or 0),
-            "require_marker": bool(item.get("require_marker", True)),
-            "ttl_seconds": max(0, int(item.get("ttl_seconds") or 0)),
-            # 白名单必须跟得上字段：落在白名单外的键会在每次保存时**静默消失**。
-            # 2026-10-26 实证：`allow_groups`（群聊是否允许注入这个包）就是被这里
-            # 丢掉的，配置从 `true` 变「没有这个键」，而 handler 的守卫把缺失当 False，
-            # 于是「群聊注入」被静默关掉。新增 pack 字段时**必须同步加到这里**。
-            "allow_groups": bool(item.get("allow_groups", False)),
-        })
+    for i, item in enumerate(packs_in):
+        pack = _sp.coerce_pack(item, i)
+        if pack is not None:
+            cleaned.append(pack)
     if not cleaned:
         raise ValueError("至少要有一个包（每个包要有 scenario）")
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 # 项目根——本文件位于 agent/ 下，上一级即项目根
@@ -57,6 +58,53 @@ def log_path(name: str = "tangtang.log") -> Path:
     命名为 `tangtang.log.YYYY-MM-DD`，跟随主文件所在目录，无需另行处理。
     """
     return _ensure_dir(LOG_DIR) / name
+
+
+# ── 路由根目录垃圾清扫（2026-10-27）────────────────────────────────────
+#: 会落在**项目根**的第三方临时文件。
+#: 主要嫌疑是 `pilk`（SILK→WAV 解码）：`silk_to_wav` 里
+#: `pcm_path = tempfile.mktemp(suffix='.pcm')`，用它解码完**从不删除**。
+#: 2026-10-27 实测根目录躺着 10 个 `tmpXXXXXXXX.pcm` 共 55MB——而 `*.pcm`
+#: 被 `.gitignore` 挡着，`git status` 完全看不见，只有 `dir` 才看得见。
+STALE_ROOT_GLOBS: tuple[str, ...] = ("tmp*.pcm",)
+
+
+def sweep_stale_runtime_files(
+    *,
+    root: Path | None = None,
+    max_age_seconds: float = 7200,
+    globs: tuple[str, ...] = STALE_ROOT_GLOBS,
+) -> list[Path]:
+    """删掉第三方工具丢在项目根的临时文件，返回删除清单。
+
+    两个安全闸：
+
+    1. **只删够老的**（默认 2 小时）。pilk 的 pcm 是秒级中间产物，正在被它写的
+       文件绝不能动；按 mtime 卡一个远大于处理耗时的阈值即可。
+    2. **失败一律吞掉**。这是启动收尾工作，没有理由因为它让 bot 起不来
+       （只读盘、权限异常、文件被占用都当成「这轮算了」）。
+
+    调用方：`main.py` 启动早期。测试里可以直接传 `root=` 指向 tmp_path。
+    """
+    base = Path(root or PROJECT_ROOT)
+    cutoff = time.time() - max_age_seconds
+    removed: list[Path] = []
+    for pattern in globs:
+        try:
+            candidates = list(base.glob(pattern))
+        except OSError:
+            continue
+        for path in candidates:
+            try:
+                if not path.is_file():
+                    continue
+                if path.stat().st_mtime > cutoff:
+                    continue
+                path.unlink()
+                removed.append(path)
+            except OSError:
+                continue
+    return removed
 
 
 def find_python310() -> Path | None:

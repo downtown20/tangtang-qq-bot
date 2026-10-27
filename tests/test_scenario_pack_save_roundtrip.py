@@ -149,3 +149,52 @@ def test_save_creates_backup(bridge):
     backup_name = out.get("backup")
     assert backup_name, "返回值里必须带 backup 文件名"
     assert (cfg.parent / backup_name).is_file(), "备份文件必须真的存在"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 下面两条是**结构性根治**的判据（2026-10-27 补）
+#
+# 上面四条钉的是「`allow_groups` 这一个字段别丢」——但 `allow_groups` 只是
+# 那次事故的名字，根因是「保存链路另有一份手写字段表」。只钉住一个字段名，
+# 下一个新字段照样会丢。
+#
+# 所以再加一条**与字段名无关**的判据：往 `PACK_DEFAULTS` 里塞一个从没存在过的
+# 字段，保存链路必须自动带上它。如果哪天有人在桥里重新手写白名单，这条会红——
+# 它检测的是「有几份字段表」，不是「某个字段在不在」。
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_coerce_pack_always_returns_every_default_key():
+    """`coerce_pack` 的返回必须覆盖 `PACK_DEFAULTS` 的每一个键（+ scenario / dir）。"""
+    from agent import scenario_packs as sp
+
+    pack = sp.coerce_pack({"scenario": "seductive"})
+    assert pack is not None
+    missing = set(sp.PACK_DEFAULTS) - set(pack)
+    assert not missing, f"coerce_pack 漏了这些字段：{sorted(missing)}"
+    assert pack["scenario"] == "seductive"
+    assert pack["dir"], "dir 为空时要补默认目录，否则注入端读到空路径"
+
+
+def test_new_pack_field_survives_save_without_touching_the_bridge(bridge, monkeypatch):
+    """给 `PACK_DEFAULTS` 加一个新字段，保存链路必须**自动**支持它。
+
+    这条不依赖任何具体字段名——它就是「字段表唯一」这件事本身的行为判据。
+    """
+    from agent import scenario_packs as sp
+
+    monkeypatch.setattr(sp, "PACK_DEFAULTS", {**sp.PACK_DEFAULTS, "future_field": 7})
+
+    cfg = bridge.CONFIG_PATH
+    bridge.api_scenario_packs_save({
+        "packs": [{
+            "id": "main", "scenario": "seductive", "dir": "knowledge/k",
+            "label": "范本", "budget": 100, "require_marker": True,
+            "ttl_seconds": 0, "allow_groups": True, "future_field": 42,
+        }]
+    })
+    pack = _read(cfg)["scenario_reference"]["packs"][0]
+    assert pack.get("future_field") == 42, (
+        "PACK_DEFAULTS 里新加的字段被保存链路吃掉了——说明还存在第二份手写字段表"
+        "（`api_scenario_packs_save` 应该只调 coerce_pack，不许自己拼字典）")
+    assert pack.get("allow_groups") is True, "原有字段不能因为加字段而丢"

@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { ScenarioPack, ScenarioOption } from '../lib/api'
+import { NumberField } from './SettingsFields'
 import './SpecialMode.css'
 
 const HOUR = 3600
@@ -141,10 +142,10 @@ export default function SpecialMode() {
 
               <label>
                 <span>总量预算（字符）</span>
-                <input
-                  type="number"
+                <NumberField
+                  kind="int"
                   value={draft.budget}
-                  onChange={(e) => setDraft({ ...draft, budget: Number(e.target.value) || 0 })}
+                  onCommit={(v) => setDraft({ ...draft, budget: Number(v) || 0 })}
                 />
                 <em>超了只告警，不截断——字数在蒸馏阶段控制</em>
               </label>
@@ -197,18 +198,19 @@ export default function SpecialMode() {
               {draft.ttl_seconds > 0 ? (
                 <label>
                   <span>有效期（小时）</span>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0.5"
+                  {/* 用共用的 NumberField：`type="number"` 的 DOM 存不下「6.」这种
+                      中间态，会让 6.5 小时永远填不进去（见 SettingsFields 的注释）。 */}
+                  <NumberField
+                    kind="float"
                     value={draft.ttl_seconds / HOUR}
-                    onChange={(e) =>
+                    onCommit={(v) =>
                       setDraft({
                         ...draft,
-                        ttl_seconds: Math.max(1800, Math.round(Number(e.target.value) * HOUR)),
+                        ttl_seconds: Math.max(1800, Math.round(Number(v) * HOUR)),
                       })
                     }
                   />
+                  <em>最少 0.5 小时（1800 秒），可以填 6.5 这种半小时</em>
                 </label>
               ) : null}
 

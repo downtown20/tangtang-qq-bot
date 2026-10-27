@@ -40,7 +40,9 @@ logger = logging.getLogger("标注")
 BASE = Path(__file__).resolve().parent.parent
 STICKER_DIRS = [
     ("默认(糖糖)", BASE / "stickers"),
-    ("CG(色色)", BASE / "stickers_cg"),
+    # 分组名只描述「哪个图库」，不写内容标签（CLAUDE.md 教训 #52：
+    # 内容名不进信息架构；判断走下面的 CG_DIR_NAMES，与显示名无关）
+    ("CG 图库", BASE / "stickers_cg"),
     ("丛雨(murasame)", BASE / "stickers_murasame"),
     ("米雪儿(michele)", BASE / "stickers_michele"),
 ]

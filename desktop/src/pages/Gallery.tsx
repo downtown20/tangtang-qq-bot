@@ -20,6 +20,7 @@ import {
   Tags,
   Square,
   Settings,
+  FlaskConical,
 } from 'lucide-react'
 import {
   api,
@@ -144,6 +145,16 @@ export default function Gallery({
   const [tagError, setTagError] = useState('')
   const tagRenameTouched = useRef(false)
 
+  /* ── 试打一张（2026-10-27）─────────────────────────────────────────
+   * 配好 API Key / 本地模型之后**先验证通道**：只跑模型、不写 metadata.json。
+   * 价值在「第一次批量跑之前」——否则 key 填错、模型名不对、显存不够，
+   * 要等几十张失败才从日志里看出来（2026-10-26 的 6 条尾巴之一）。 */
+  const [probeBusy, setProbeBusy] = useState(false)
+  const [probeError, setProbeError] = useState('')
+  const [probeResult, setProbeResult] = useState<
+    Awaited<ReturnType<typeof api.galleryTagProbe>> | null
+  >(null)
+
   const refreshTag = useCallback(async () => {
     try {
       setTagStatus(await api.galleryTagStatus(gallerySource))
@@ -236,6 +247,28 @@ export default function Gallery({
       setTagBusy(false)
     }
   }, [tagStatus, tagScope, selectedNamesForTag, gallerySource, tagRename, tagOverwrite, refreshTag])
+
+  /** 试打的那一张：优先当前勾选的第一张，否则列表第一张（不猜、不让他手动填名字） */
+  const probeCandidate = selectedNamesForTag[0] ?? data?.items?.[0]?.name ?? ''
+
+  const runProbe = useCallback(async () => {
+    if (!probeCandidate) {
+      setProbeError('这个图库没有可试的图')
+      return
+    }
+    setProbeBusy(true)
+    setProbeError('')
+    setProbeResult(null)
+    try {
+      const r = await api.galleryTagProbe({ source: gallerySource, name: probeCandidate })
+      if (!r.ok) setProbeError(r.error || '试打失败（先看设置里的打标方式与 Key）')
+      else setProbeResult(r)
+    } catch (e) {
+      setProbeError((e as Error).message)
+    } finally {
+      setProbeBusy(false)
+    }
+  }, [probeCandidate, gallerySource])
 
   const stopTag = useCallback(async () => {
     try {
@@ -703,6 +736,65 @@ export default function Gallery({
                         <div className="tag-pop-error">
                           <AlertCircle size={12} />
                           {tagError}
+                        </div>
+                      )}
+
+                      {/* 试打一张：先验证通道再批量。不写 metadata、不改文件名 */}
+                      <div className="tag-probe">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => void runProbe()}
+                          disabled={probeBusy || !probeCandidate}
+                          title={
+                            probeCandidate
+                              ? `只打这一张：${probeCandidate}（不写标签、不改文件名）`
+                              : '这个图库没有可试的图'
+                          }
+                        >
+                          {probeBusy ? (
+                            <Loader2 size={12} className="spin" />
+                          ) : (
+                            <FlaskConical size={12} />
+                          )}
+                          试打一张
+                        </button>
+                        <span className="tag-probe-why">
+                          只跑模型验证通道，不写 metadata、不改文件名
+                        </span>
+                      </div>
+
+                      {probeError && (
+                        <div className="tag-pop-error">
+                          <AlertCircle size={12} />
+                          {probeError}
+                        </div>
+                      )}
+
+                      {probeResult && (
+                        <div className="tag-probe-out">
+                          <div className="tag-probe-head">
+                            <b>{probeResult.name || probeCandidate}</b>
+                            <span>
+                              {probeResult.provider} · {probeResult.model}
+                            </span>
+                          </div>
+                          <div className="tag-probe-raw">
+                            {probeResult.raw?.trim() || '（模型没吐内容）'}
+                          </div>
+                          <div className="tag-probe-tags">
+                            {Object.entries(probeResult.tags || {})
+                              .filter(([, v]) => v)
+                              .map(([k, v]) => (
+                                <span key={k} className="tag-probe-tag">
+                                  {k}: {String(v)}
+                                </span>
+                              ))}
+                          </div>
+                          {probeResult.rename_to && (
+                            <div className="tag-probe-note">
+                              打标后会改名为：{probeResult.rename_to}
+                            </div>
+                          )}
                         </div>
                       )}
 

@@ -170,11 +170,13 @@ def test_provider_key_env_names_match_console_and_runtime():
      2026-09-20 已修）。
     """
     from agent.secret_refs import FIXED_SECRET_PATHS, PROVIDER_KEY_ENV
-    console_path = BASE / "糖糖控制台_qt.py"
-    if not console_path.is_file():
-        # 2026-10-26：Qt 控制台从根目录移进 `运维/`（功能保留，根目录不再有它）
-        console_path = BASE / "运维" / "糖糖控制台_qt.py"
-    assert console_path.is_file(), f"找不到 Qt 控制台：{console_path}"
+    # 2026-10-26：Qt 控制台从根目录移进 `运维/`（功能保留，根目录不再有它）。
+    # 这里**只认一个位置**：双路径兜底会让「有人把它搬回根目录」也悄悄通过，
+    # 而根目录规范化正是 2026-10-26 那一轮的核心目标（教训 #35：文档/约定当代码测）。
+    console_path = BASE / "运维" / "糖糖控制台_qt.py"
+    assert console_path.is_file(), f"找不到 Qt 控制台（应该在 运维/ 下）：{console_path}"
+    assert not (BASE / "糖糖控制台_qt.py").exists(), (
+        "根目录又出现 QT 控制台了——2026-10-26 已定：它只住在 运维/")
     console = console_path.read_text(encoding="utf-8")
     handler = (BASE / "agent" / "handler.py").read_text(encoding="utf-8")
     assert "PROVIDER_KEY_ENV.get(_provider" in handler, (

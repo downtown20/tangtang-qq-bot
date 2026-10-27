@@ -1,6 +1,6 @@
 # 小糖糖桌面端（React + Electron）
 
-DSH（DeepSeek Harness）风格的桌面控制台，替代旧的 PySide6 控制台。**旧控制台保留不动**，两者可以并存。
+DSH（DeepSeek Harness）风格的桌面控制台，替代旧的 PySide6 控制台。旧的 Qt 控制台已移进 `运维/`（功能保留，根目录不再有它），两者可以并存。
 
 ```
 QQ消息 → SnowLuma → bot(agent/handler.py) → LLM → 回复

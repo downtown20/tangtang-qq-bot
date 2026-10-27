@@ -1737,6 +1737,36 @@ export const api = {
     return request<GalleryTagStatus>(`/api/gallery/tag/status${q ? `?${q}` : ''}`)
   },
 
+  /**
+   * 试打一张：只跑模型、**不写 metadata.json**。
+   *
+   * 为什么要它：配好 API Key / 本地模型之后，先让用户看到「这条路通不通、
+   * 模型到底吐什么」。否则第一次就是几十张批量失败，而失败原因（key 填错、
+   * 模型名不对、显存不够）往往要翻日志才知道。`raw` 是模型原话——
+   * 标签提取错了，得先看它是怎么描述的。
+   */
+  galleryTagProbe: (payload: { source: string; name: string }) =>
+    request<{
+      ok: boolean
+      error?: string
+      name?: string
+      provider?: string
+      model?: string
+      raw?: string
+      tags?: {
+        persons?: string
+        act?: string
+        emotions?: string
+        scene_tags?: string
+        desc?: string
+      }
+      rename_to?: string
+      note?: string
+    }>('/api/gallery/tag/probe', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   galleryTagRun: (payload: GalleryTagRunRequest = {}) =>
     request<{
       ok: boolean

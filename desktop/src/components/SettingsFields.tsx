@@ -265,13 +265,7 @@ function FieldControl({
 
   if (def.type === 'int' || def.type === 'float') {
     return (
-      <input
-        className="dsl-number"
-        type="number"
-        step={def.type === 'float' ? 'any' : 1}
-        value={value === undefined || value === null ? '' : String(value)}
-        onChange={(e) => onCommit(coerce(def.type, e.target.value))}
-      />
+      <NumberField kind={def.type} value={value} onCommit={onCommit} className="dsl-number" />
     )
   }
 
@@ -283,6 +277,83 @@ function FieldControl({
       value={value === undefined || value === null ? '' : String(value)}
       spellCheck={false}
       onChange={(e) => onCommit(e.target.value)}
+    />
+  )
+}
+
+/**
+ * 数字输入（2026-10-27 修：0.0x 与负数打不进去）。
+ *
+ * 这里踩的是**两层**坑，缺一层都修不好。
+ *
+ * ① `type="number"` 的 DOM 存不下小数/负数的中间态。实测（DevTools 里对
+ *    `input[type=number]` 直接设 value 再读回）：
+ *      "0" → "0"    "0." → ""    "0.0" → "0.0"    "0.08" → "0.08"
+ *      ".5" → ".5"  "-"  → ""
+ *    也就是说用户敲「0」再敲「.」的那一刻，`input.value` 返回的是**空串**。
+ *
+ * ② 旧实现把 value 直连配置（`value={String(value)}` + `onChange={coerce}`），
+ *    拿到空串就走 `coerce("") = 0`，再把 value 重置成 "0" —— 于是用户想输默认的
+ *    `0.08`，实际看到的是：
+ *      打「0」→ 显示 0 ／ 打「.」→ **点消失** ／ 打「0」→ 0 ／ 打「8」→ 8
+ *    最终只能得到 `0.8` 或 `8`，永远输不进 `0.08`。而群聊饥渴度默认正是 0.08，
+ *    主人要的「精确调参」在 UI 这一层就被锁死成一位小数。
+ *
+ * 修法：换成 `type="text"` + `inputMode`，本地 draft 保留用户正在敲的原始字符串，
+ * 只有「看起来已经是一个完整数字」时才 commit；失焦时再兜底 commit 一次
+ * （点「保存」按钮之前浏览器一定先派发 blur）。
+ */
+const COMPLETE_NUMBER = /^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/
+/** 输入过程中允许出现的字符（挡掉字母等噪音，但放行 `0.` / `-` / `1e` 这类中间态） */
+const DRAFT_CHARS = /^[-+]?[\d.]*([eE][-+]?\d*)?$/
+
+export function NumberField({
+  kind,
+  value,
+  onCommit,
+  className,
+}: {  kind: 'int' | 'float'
+  value: unknown
+  onCommit: (v: unknown) => void
+  className?: string
+}) {
+  const outer = value === undefined || value === null ? '' : String(value)
+  const [draft, setDraft] = useState(outer)
+  const [editing, setEditing] = useState(false)
+
+  useEffect(() => {
+    // 不在编辑时以外部值为准：切页 / 恢复默认 / 保存后重载都会走到这里。
+    // 编辑中绝不覆盖 draft —— 覆盖就等于又把用户打的字吃掉（就是这个 bug 本身）。
+    if (!editing) setDraft(outer)
+  }, [outer, editing])
+
+  const emit = (raw: string) => {
+    if (COMPLETE_NUMBER.test(raw)) onCommit(coerce(kind, raw))
+  }
+
+  return (
+    <input
+      className={className}
+      type="text"
+      inputMode={kind === 'float' ? 'decimal' : 'numeric'}
+      autoComplete="off"
+      value={draft}
+      onFocus={() => setEditing(true)}
+      onChange={(e) => {
+        const raw = e.target.value
+        if (!DRAFT_CHARS.test(raw)) return
+        setDraft(raw)
+        emit(raw)
+      }}
+      onBlur={() => {
+        setEditing(false)
+        // 清空后直接点保存时保持原值，比悄悄写成 0 安全；真想清零就输「0」
+        if (draft === '') {
+          setDraft(outer)
+          return
+        }
+        emit(draft)
+      }}
     />
   )
 }
