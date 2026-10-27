@@ -34,53 +34,10 @@
     "title": "AI模型 — 控制糖糖的「大脑」（亲密模式、困难轮次都跟随此处）",
     "fields": [
       {
-        "path": "llm.provider",
-        "label": "提供商",
-        "type": "choice",
-        "hint": "走哪家 API。custom = 自建/中转站（本项目用的是 buddybackend）；换服务商时要同时改下面的 base_url 和密钥"
-      },
-      {
-        "path": "llm.model",
-        "label": "模型",
-        "type": "str",
-        "hint": "模型名"
-      },
-      {
-        "path": "_api_key_hint",
-        "label": "API 密钥",
-        "type": "secret",
-        "hint": "🔑 写进 `.env`，`config.yaml` 只留 `${...}` 引用（密钥进 config.yaml 会随 git 泄漏）。变量名跟着上面的「提供商」走。保存后重启糖糖生效。",
-        "secret_env": "auto"
-      },
-      {
-        "path": "llm.base_url",
-        "label": "接口地址",
-        "type": "str",
-        "hint": "接口地址"
-      },
-      {
-        "path": "llm.max_tokens",
-        "label": "最大Token",
-        "type": "int",
-        "hint": "一次回复「正文 + 思考」**总共**能生成多少 token——两者共用这一个预算。\n"
-      },
-      {
-        "path": "llm.temperature",
-        "label": "温度",
-        "type": "float",
-        "hint": "0=死板 2=疯癫。建议 0.7-1.0。\n"
-      },
-      {
-        "path": "llm.thinking",
-        "label": "思考模式",
-        "type": "choice",
-        "hint": "思考模式。on = 每次生成前先想一轮（更准、更慢、更贵）；off = 直接答；auto = 由模型自己决定"
-      },
-      {
-        "path": "llm.thinking_effort",
-        "label": "思考强度",
-        "type": "choice",
-        "hint": "思考投入档位。low/medium/high 影响想多久——高档在复杂问题上明显更好，但在闲聊上纯属浪费"
+        "path": "_llm_models_note",
+        "label": "模型在哪配",
+        "type": "label",
+        "hint": "💡 模型、接口地址、API Key、最大 tokens、温度、思考强度都在左侧「AI 模型」页——按 provider 分组，一组填一次地址和 Key，组下挂多个模型。这一页只放请求行为类的系统开关（工具循环、超时、后台任务思考）。\n"
       },
       {
         "path": "llm.light_thinking",
@@ -330,6 +287,12 @@
     "title": "识图 — 看懂群友发的图片",
     "fields": [
       {
+        "path": "_vision_models_note",
+        "label": "识图模型在哪配",
+        "type": "label",
+        "hint": "💡 识图用哪个模型，由下面的「用哪个模型档位」选一个**勾了「图片」输入类型**的档位；它的地址 / 模型名 / Key 由「AI 模型」页统一管。识图方式选 `api` 时必须选档位——这里不再手填模型名和地址。\n"
+      },
+      {
         "path": "llm.vision.enabled",
         "label": "启用识图",
         "type": "bool",
@@ -339,32 +302,13 @@
         "path": "llm.vision.provider",
         "label": "识图方式",
         "type": "choice",
-        "hint": "识图走哪条路。main = 用主模型的视觉能力（不额外花钱）；api = 单独调下面的识图端点；local = 本地模型"
+        "hint": "识图走哪条路。main = 用主模型的视觉能力（不额外花钱）；local = 本机模型；api = 用下面选的那个档位（端点 / Key 在「AI 模型」页，不在这里填）"
       },
       {
         "path": "llm.vision.model_ref",
         "label": "用哪个模型档位",
         "type": "model_ref",
-        "hint": "从「AI 模型」页的档位里选一个能看图的，它的接口地址 / 模型名 / Key 会一起带过来（识图方式自动按 api 走）。留空则用下面几行手填的值。"
-      },
-      {
-        "path": "llm.vision.model",
-        "label": "API 模型（仅 api 方式）",
-        "type": "str",
-        "hint": "填入你的视觉模型名（OpenAI 兼容格式，与你接入的 API 对应）"
-      },
-      {
-        "path": "_vision_key_hint",
-        "label": "识图密钥",
-        "type": "secret",
-        "hint": "🔑 只有「识图方式 = api」才需要；`main`（复用主模型）/ `local` 都不用。写进 `.env` 的 `QWEN_KEY`，对应 `config.yaml` 的 `llm.vision.api_key`。",
-        "secret_env": "QWEN_KEY"
-      },
-      {
-        "path": "llm.vision.base_url",
-        "label": "API 地址（仅 api 方式）",
-        "type": "str",
-        "hint": "填入你的 OpenAI 兼容 API 地址（通常以 /v1 结尾）"
+        "hint": "从「AI 模型」页的档位里选一个**勾了「图片」输入类型**的。选中即把识图方式切成 api，它的接口地址 / 模型名 / Key 一起带过来。留空 = 按上面的「识图方式」走（main 用主模型、local 用本机模型）。"
       }
     ]
   },
@@ -631,6 +575,12 @@
     "title": "图库打标 —— 这里只调参数和模型（打标方式、模型名、端点、key、缩图边长、超时）。打哪些图、打完是否改名、是否覆盖已有标签，去图库页设置并打标。",
     "fields": [
       {
+        "path": "_tag_models_note",
+        "label": "打标模型在哪配",
+        "type": "label",
+        "hint": "💡 打标用哪个模型在图库页的「改模型」里选（那里能看到「可看图」标记和上下文窗口徽标）。这一页只调打标的参数：尺寸、超时。\n"
+      },
+      {
         "path": "image_tagging.provider",
         "label": "打标方式",
         "type": "choice",
@@ -647,30 +597,6 @@
         "label": "Ollama 地址",
         "type": "str",
         "hint": "本机默认 http://127.0.0.1:11434。跑在另一台机器上时填内网地址。"
-      },
-      {
-        "path": "image_tagging.ollama_model",
-        "label": "Ollama 模型",
-        "type": "ollama_model",
-        "hint": "从本机 Ollama 已 pull 的模型里选（能看图的会标「可看图」——打标必须选那种）。列表来自 Ollama 自己的 /api/tags + /api/show，装了新模型点「刷新」。"
-      },
-      {
-        "path": "image_tagging.api_base",
-        "label": "API 地址",
-        "type": "str",
-        "hint": "OpenAI 兼容的 /v1 根地址，例如 https://dashscope.aliyuncs.com/compatible-mode/v1。程序会拼 /chat/completions。"
-      },
-      {
-        "path": "image_tagging.api_model",
-        "label": "API 模型",
-        "type": "str",
-        "hint": "服务商那边的多模态模型名，例如 qwen-vl-max / gpt-4o-mini。"
-      },
-      {
-        "path": "image_tagging.api_key",
-        "label": "API key",
-        "type": "str",
-        "hint": "建议留空，改在 .env 里写 IMAGE_TAG_API_KEY——config.yaml 会进 git。填了这里就以环境变量优先。"
       },
       {
         "path": "image_tagging.max_side",

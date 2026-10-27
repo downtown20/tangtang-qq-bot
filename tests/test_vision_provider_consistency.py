@@ -58,15 +58,33 @@ class TestPredicateConsistency:
 
 
 class TestConfigMatchesDesign:
-    """config.yaml 必须与 T1 的设计一致：识图开、走 main。"""
+    """config.yaml 必须与设计一致：识图开着，且不走一条注定失败的路。
+
+    2026-10-28 放宽过一次。原来断言 `provider == 'main'`，但主人把识图切成了
+    `local`（本机模型）——那是**产品支持的模式**（`agent/vision_router.py` 有实现），
+    和 `main` 一样不需要额外 Key。把「必须 main」写死等于禁止用户用这个功能。
+
+    真正要钉的是两条会**静默失败**的：
+      · `enabled=False` → 前端「启用识图」显示为关，她再也看不懂图；
+      · `provider='api'` 却没有任何可用端点（没选档位、也没填端点+模型）
+        → 识图一路失败而界面上看不出来。
+    """
 
     def test_vision_enabled_and_main(self):
         cfg = yaml.safe_load((ROOT / 'config.yaml').read_text(encoding='utf-8'))
         v = cfg['llm']['vision']
         assert v.get('enabled') is True, (
             "识图被关掉了（enabled=%r）—— 前端的「启用识图」会显示为关" % v.get('enabled'))
-        assert str(v.get('provider')) == 'main', (
-            "识图方式不是 main（provider=%r）—— 选 api 又没配 Key 会一路失败" % v.get('provider'))
+        provider = str(v.get('provider') or 'main')
+        assert provider in {'main', 'local', 'api'}, (
+            "识图方式写坏了（provider=%r）—— 只认 main / local / api" % provider)
+        if provider == 'api':
+            has_endpoint = bool(
+                str(v.get('model_ref') or '').strip()
+                or (str(v.get('base_url') or '').strip()
+                    and str(v.get('model') or '').strip()))
+            assert has_endpoint, (
+                "识图选了 api，但既没选档位、也没填端点和模型名 —— 这条路会一路失败")
 
     def test_console_offers_main_choice(self):
         """前端必须把 main 作为可选（且是第一个 = 默认推荐）。"""

@@ -6198,12 +6198,22 @@ class MessageHandler(AutonomyMixin):
             if prof is None:  # active 指向不存在的 id → 退回第一条，不静默用错模型
                 prof = next((p for p in profiles if isinstance(p, dict)), None)
             if prof:
-                for _key in ("provider", "base_url", "api_key", "model",
-                             "max_tokens", "temperature", "thinking",
-                             "thinking_effort"):
+                # 连接信息（base_url / api_key）是**组级**属性：2026-10-28 起收敛到
+                # `llm.providers`（一张组表），档位只写 `provider: <组id>` 引用。
+                # 唯一换算点是 `provider_conn()`——它逐字段回退到老结构（档位自带、
+                # 扁平 llm.*），所以老配置行为一字不变（教训 #38：同一个量只许一个
+                # 换算点；教训 #54：组级属性不许存成条目级副本）。
+                from .model_refs import provider_conn
+
+                conn = provider_conn(self.llm_config, prof)
+                for _key in ("provider", "model", "max_tokens", "temperature",
+                             "thinking", "thinking_effort"):
                     _val = prof.get(_key)
                     if _val not in (None, ""):
                         cfg[_key] = _val
+                for _key in ("base_url", "api_key"):
+                    if conn.get(_key):
+                        cfg[_key] = conn[_key]
 
         sed_name = getattr(scenario, 'name', None) if scenario else None
         is_seductive = sed_name == "seductive"

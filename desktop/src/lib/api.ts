@@ -16,12 +16,24 @@ export type BotStatus = {
   log_seq: number
 }
 
+/**
+ * 一个模型档位（`llm.models[]`）。
+ *
+ * 2026-10-28 起**连接信息不在档位里**：`base_url` / `api_key` 收敛到
+ * `llm.providers` 组表（一张表管一组模型，对齐 DSH Harness 的
+ * `providers.<id>`）。档位只写 `provider: <组id>` 引用。
+ *
+ * `api_key` 这个字段**前端拿不到**了：它既没人用（改 Key 在 provider 卡里），
+ * 留着就是一条把明文 Key 塞进 network 面板的路径。
+ */
 export type ModelProfile = {
   id: string
   label: string
   provider: string
-  base_url: string
-  api_key: string
+  /** 组的人话名（`自建中转（OpenAI 兼容）`），界面显示用 */
+  provider_label?: string
+  /** 兼容字段：老配置里档位还带着自己的地址（读的时候后端会用到，界面不再显示） */
+  base_url?: string
   model: string
   max_tokens?: number | string | null
   temperature?: number | string | null
@@ -40,6 +52,26 @@ export type ModelProfile = {
   input?: string[]
   /** 上下文窗口（tokens）。界面显示成 `64K` / `1M` 徽标。 */
   context_window?: number | null
+}
+
+/**
+ * 一个 provider 组（`llm.providers[]`）——**组级**连接。
+ *
+ * 这是 2026-10-28 从 DSH Harness 抄来的那层：地址 / 协议 / 密钥在组上写一次，
+ * 组下挂多个模型。原来每个档位各存一份（教训 #54 的反模式）。
+ *
+ * `api_key` 是**掩码或 `${VAR}` 引用**，明文永远拿不到（`_mask_secret`）。
+ * 保存时如果回传的值像掩码，后端会忽略它——所以界面上改 Key 走单独的写入框。
+ */
+export type ModelProvider = {
+  id: string
+  label: string
+  /** 协议，目前只有 `openai-completions` */
+  api: string
+  base_url: string
+  api_key: string
+  /** true = 后端从老配置（档位 / 扁平 llm.*）推出来的，还没落进组表 */
+  derived?: boolean
 }
 
 /**
@@ -123,6 +155,8 @@ export type ModelsResponse = {
   profiles: ModelProfile[]
   active: string
   legacy: boolean
+  /** provider 组表（2026-10-28）。老配置里这一层是从档位推导出来的（`derived`）。 */
+  providers: ModelProvider[]
 }
 
 export type GroupInfo = {
@@ -1727,10 +1761,56 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ config }),
     }),
-  fetchModels: (base_url: string, api_key: string) =>
+  /**
+   * 保存模型目录（增删改 + 当前档位）。
+   *
+   * 为什么不走 `saveConfig`：设置页 state 里有一份**早于这次改动**的整份配置
+   * 快照，用它回写会把刚改好的模型目录覆盖回旧值（两个保存入口互相踩）。
+   * 这里只写 `llm.models` / `llm.active_model`，连接字段归 provider 组。
+   */
+  saveModels: (payload: { models: ModelProfile[]; active: string }) =>
+    request<{ ok: boolean; count: number; active: string; backup: string }>(
+      '/api/models/save',
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  /**
+   * 拉某个 provider 组的可用模型列表（OpenAI 兼容 `/models`）。
+   *
+   * 只传 `provider_id` 是首选方式：组里的真 Key 留在后端（界面拿到的是掩码，
+   * 传掩码过去只会 401）。`base_url` + `api_key` 直传是给「还没保存的 provider」
+   * 用的后备路径。
+   */
+  fetchModels: (payload: {
+    provider_id?: string
+    base_url?: string
+    api_key?: string
+  }) =>
     request<{ models: string[]; count: number; endpoint: string }>('/api/models/fetch', {
       method: 'POST',
-      body: JSON.stringify({ base_url, api_key }),
+      body: JSON.stringify(payload),
+    }),
+  /**
+   * 保存 / 删除一个 provider 组（组级连接的**唯一写入点**）。
+   *
+   * `api_key` 缺省 = 不动原值；回传掩码也会被后端忽略。
+   * `remove: true` 在「还有模型引用这一组」时会被拒绝（不留没有端点的档位）。
+   */
+  saveProvider: (payload: {
+    id: string
+    label?: string
+    api?: string
+    base_url?: string
+    api_key?: string
+    remove?: boolean
+  }) =>
+    request<{
+      ok: boolean
+      backup?: string
+      profiles_cleaned?: number
+      provider?: ModelProvider
+    }>('/api/providers/save', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   /**
    * 列出某个 Ollama 端点上的模型（含「能不能看图」）。

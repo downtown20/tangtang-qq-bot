@@ -106,12 +106,16 @@ llm:
     provider: main
     # 2026-10-28：选了「AI 模型」页里能看图的档位，就用它的地址/模型/Key
     model_ref: ''
+  providers:
+  - id: deepseek
+    label: 'DeepSeek'
+    api: openai-completions
+    base_url: 'https://api.deepseek.com'
+    api_key: '${DEEPSEEK_KEY}'
   models:
   - id: default
     label: DeepSeek Chat
     provider: deepseek
-    base_url: https://api.deepseek.com
-    api_key: ${DEEPSEEK_KEY}
     model: deepseek-chat
     max_tokens: 64000
     temperature: 0.8

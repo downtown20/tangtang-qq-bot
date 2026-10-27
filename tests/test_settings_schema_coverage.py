@@ -89,6 +89,26 @@ EXEMPT: dict[str, str] = {
     # 若哪天这两个键从 config.yaml 里彻底删掉，把下面两条一起删——不要留一片空地给闸门巡视（#30）。
     "image_tagging.dir": "已移到图库页按次传参（打哪个库）；config 里的旧值只作兜底（老配置升级后不该换目录），设置页不再编辑",
     "image_tagging.rename": "已移到图库页按次传参（打完是否改名）；config 里的旧值只作兜底（老配置的行为不该被默默改掉），设置页不再编辑",
+    # ── 2026-10-28：模型配置收口到「AI 模型」页 ──────────────────────
+    # 主人要求「不允许单独配置模型的地方全部到『AI模型』中配置，其他地方只允许
+    # 下拉选择」。这些键仍然存在于 config.yaml，只是**只有一个写入口**——
+    # 别处再开一个就会重新出现「两处口径漂移」（教训 #38/#51）。
+    # 设置页对应位置留着说明块（`_llm_models_note` / `_vision_models_note` /
+    # `_tag_models_note`），不是默默消失（教训 #48）。
+    "llm.providers": "provider 组表（地址 / 协议 / 密钥的唯一定义处），由 AI 模型页的 provider 卡编辑",
+    "llm.provider": "当前档位所属的 provider 组 id，在 AI 模型页切换档位时同步",
+    "llm.base_url": "从当前档位的 provider 组同步下来的扁平冗余（老代码兼容用），只在 AI 模型页改组表",
+    "llm.model": "当前档位的模型 ID，切换档位时同步——单独编辑会让两处口径漂移",
+    "llm.max_tokens": "档位级参数，在 AI 模型页展开模型后编辑（模型目录里那份才是真的）",
+    "llm.temperature": "档位级参数，在 AI 模型页展开模型后编辑",
+    "llm.thinking": "档位级参数，在 AI 模型页展开模型后编辑",
+    "llm.thinking_effort": "档位级参数，在 AI 模型页展开模型后编辑",
+    "llm.vision.model": "识图模型名，由识图页选档位（llm.vision.model_ref）带过来——手填会与档位不一致",
+    "llm.vision.base_url": "识图端点，由识图页选档位带过来；手填会与档位不一致",
+    "image_tagging.api_base": "打标端点，由图库页选模型（model_ref）带过来",
+    "image_tagging.api_model": "打标模型名，由图库页选模型带过来（那里有「可看图」标记与窗口徽标）",
+    "image_tagging.api_key": "密钥：写在 .env（IMAGE_TAG_API_KEY）里，界面只显示是否已配",
+    "image_tagging.ollama_model": "本机 Ollama 模型名，由图库页的选模型面板写（能看能力标记）",
 }
 
 

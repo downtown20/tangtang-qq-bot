@@ -130,7 +130,12 @@ export default function Settings({
             )}
 
             {section === 'llm' ? (
-              <ModelSettings />
+              <ModelSettings
+                fields={current?.fields ?? []}
+                config={config}
+                baseline={baseline}
+                onChange={setConfig}
+              />
             ) : current ? (
               <div className="settings-body">
                 <p className="settings-desc">{current.title}</p>

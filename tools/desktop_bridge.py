@@ -252,6 +252,28 @@ def _coerce_llm_numbers(cfg: dict) -> list[str]:
     return fixed
 
 
+def _write_config(raw: dict) -> dict:
+    """备份 → 数值收口 → 全量写回 `config.yaml`；返回 `{backup, coerced}`。
+
+    为什么收成一个函数：写盘原本散在 `api_config_save` / `api_models_activate`
+    等处，任何一处漏了备份就没法回滚。**`yaml.dump` 会丢注释**——这是既存事实
+    （`api_models_activate` 一直如此），不是这里引入的。
+
+    **数值收口**必须在这里：前端表单来的 `"64000"` 要写成 `64000`，否则糖糖
+    下一轮 LLM 调用直接 500（见 `_coerce_llm_numbers` 的事故记录）。
+    """
+    import yaml
+
+    coerced = _coerce_llm_numbers(raw)
+    backup = CONFIG_PATH.with_suffix(
+        ".yaml.bak_" + time.strftime("%Y%m%d_%H%M%S"))
+    shutil.copy2(CONFIG_PATH, backup)
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, allow_unicode=True,
+                  default_flow_style=False, sort_keys=False)
+    return {"backup": backup.name, "coerced": coerced}
+
+
 def api_config() -> dict:
     raw = _load_raw_config()
     env = _load_dotenv()
@@ -897,13 +919,38 @@ def api_group_manage_save(body: dict) -> dict:
     }
 
 def api_models() -> dict:
-    """模型清单。当前读扁平 llm.*；llm.models 结构由 /api/models/* 管理。"""
+    """模型清单 + provider 组表（2026-10-28）。
+
+    `base_url` / `api_key` 收敛到 `llm.providers`（组表）之后，界面要画的是
+    「provider 卡（地址 / 协议 / 密钥）」+「它下面挂的模型目录」——所以组表
+    一起返回。组里的 `api_key` 一律掩码：真值可能就在 config 里，也可能只是
+    `${VAR}` 引用，两种都不该原样交给界面（`_mask_secret` 对引用原样返回，
+    对明文只露形状）。
+
+    组表用 `virtual_providers()` 算：老配置里没有 `llm.providers`，组是从档位
+    和扁平 `llm.*` 推出来的（带 `derived: True`）。**读的时候不写盘**——界面
+    第一次打开不该改用户的 config。
+    """
+    from agent.model_refs import virtual_providers
+
     raw = _load_raw_config()
     llm = raw.get("llm") or {}
+    providers = []
+    for group in virtual_providers(raw):
+        item = dict(group)
+        item["api_key"] = _mask_secret(group.get("api_key"))
+        providers.append(item)
+
     profiles = llm.get("models")
     if isinstance(profiles, list) and profiles:
         active = llm.get("active_model") or (profiles[0].get("id") if profiles else "")
-        return {"profiles": profiles, "active": active, "legacy": False}
+        # 档位里的 `api_key` 不出网关（2026-10-28）：连接信息已经归 provider 组，
+        # 界面也不再编辑档位级 Key。留着它就是一条没人用、但会把明文 Key
+        # 塞进浏览器 network 面板的路径。
+        clean = [{k: v for k, v in p.items() if k != "api_key"}
+                 if isinstance(p, dict) else p for p in profiles]
+        return {"profiles": clean, "active": active, "legacy": False,
+                "providers": providers}
     # 兼容旧扁平结构：合成一个「默认」档
     return {
         "profiles": [{
@@ -911,7 +958,6 @@ def api_models() -> dict:
             "label": llm.get("model") or "默认模型",
             "provider": llm.get("provider") or "deepseek",
             "base_url": llm.get("base_url") or "",
-            "api_key": _mask_secret(llm.get("api_key")),
             "model": llm.get("model") or "",
             "max_tokens": llm.get("max_tokens"),
             "temperature": llm.get("temperature"),
@@ -920,6 +966,174 @@ def api_models() -> dict:
         }],
         "active": "default",
         "legacy": True,
+        "providers": providers,
+    }
+
+
+def api_providers_save(body: dict) -> dict:
+    """保存 / 删除一个 provider 组——组级连接的**唯一写入点**（2026-10-28）。
+
+    为什么单开一个端点而不是走 `/api/config`：组表是「一条记录管一组模型」，
+    改它必须**同时**把引用它的档位里那份过期副本清掉，否则又变成两处定义
+    （教训 #54：组级属性存成条目级副本，改哪份生效靠遍历顺序）。这个收敛动作
+    放在 bridge 里一次做完，界面只提交组本身。
+
+    body:
+      · `{id, label, api, base_url, api_key}`  保存（id 已存在则改）
+      · `{id, remove: True}`                   删除（仍被档位引用则拒绝）
+
+    `api_key` 缺省 = 不动原值。这是刻意的：界面拿到的是掩码，回传掩码会把真
+    Key 写坏（`_is_masked` 再兜一道）。
+    """
+    from agent.model_refs import virtual_providers
+
+    raw = _load_raw_config()
+    llm = dict(raw.get("llm") or {})
+    pid = str(body.get("id") or "").strip()
+    if not pid:
+        raise ValueError("缺少 provider id")
+
+    profiles = llm.get("models")
+    profiles = [p for p in profiles if isinstance(p, dict)] if isinstance(profiles, list) else []
+    used_by = [str(p.get("id") or "") for p in profiles
+               if str(p.get("provider") or "").strip() == pid]
+
+    # 组表按**完整视图**写：连推导出来的组也一次性落成真组。否则它会长期停在
+    # 「一半用户编辑过、一半靠推」的混合态——下次谁读都得再推一遍，而「哪一半
+    # 是真的」这种问题正是教训 #54 的温床。
+    merged: dict[str, dict] = {}
+    for group in virtual_providers(raw):
+        gid = str(group.get("id") or "").strip()
+        if gid:
+            merged[gid] = dict(group)
+
+    if body.get("remove"):
+        if used_by:
+            raise ValueError(
+                f"这个 provider 还被 {len(used_by)} 个模型引用（{', '.join(used_by[:3])}），"
+                "先把它们改成别的 provider 或删掉")
+        if pid not in merged:
+            raise ValueError(f"找不到 provider: {pid}")
+        removed = merged.pop(pid)
+        for group in merged.values():
+            group.pop("derived", None)
+        llm["providers"] = list(merged.values())
+        raw["llm"] = llm
+        backup = _write_config(raw)["backup"]
+        return {"ok": True, "removed": pid, "base_url": removed.get("base_url") or "",
+                "backup": backup}
+
+    # 新建组时以「推导值」为基线：老配置里 base_url/api_key 散在**档位**里，
+    # 直接建个空组再收敛副本，会把用户唯一的 Key 一起弄丢（只改地址就断线）。
+    entry = merged.get(pid) or {"id": pid}
+    for key in ("label", "api", "base_url"):
+        if key in body:
+            entry[key] = str(body.get(key) or "").strip()
+    entry.setdefault("label", pid)
+    entry.setdefault("api", "openai-completions")
+    # 密钥：缺省不动；掩码回传也当没传（防把真 Key 写成「sk-a…xyz（35 字符）」）
+    if "api_key" in body:
+        incoming = str(body.get("api_key") or "").strip()
+        if not _is_masked(incoming):
+            entry["api_key"] = incoming
+    merged[pid] = entry
+    # 落成真组之后，`derived` 标记就该消失（它描述的只是「读的时候是推的」）
+    for group in merged.values():
+        group.pop("derived", None)
+    llm["providers"] = list(merged.values())
+
+    # 收敛：引用这一组的档位不再各自保存 base_url / api_key（组表是唯一源）
+    clean = []
+    for prof in profiles:
+        item = dict(prof)
+        if str(item.get("provider") or "").strip() == pid:
+            item.pop("base_url", None)
+            item.pop("api_key", None)
+        clean.append(item)
+    if isinstance(llm.get("models"), list):
+        llm["models"] = clean
+
+    raw["llm"] = llm
+    written = _write_config(raw)
+    return {
+        "ok": True,
+        "provider": entry,
+        "profiles_cleaned": len([p for p in profiles
+                                if str(p.get("provider") or "").strip() == pid]),
+        "backup": written["backup"],
+    }
+
+
+def api_models_save(body: dict) -> dict:
+    """保存模型目录（`llm.models` + `llm.active_model`）——模型页的写入口。
+
+    为什么不走 `/api/config`：设置页的 React state 里有一份**早于这次改动**的
+    整份配置快照，用它回写会把刚改好的模型目录覆盖回旧值（两个保存入口互相踩，
+    教训 #51 同族）。模型的增删改只经这里。
+
+    `models` 里**不该带连接字段**：`base_url` / `api_key` 归 `llm.providers`
+    （`/api/providers/save`）。带过来的一律丢掉——组级属性只留一份定义（教训 #54）。
+
+    同时把当前档位的取值同步到扁平 `llm.*`：`_get_llm_config` 在有 models 时按
+    档位覆盖，扁平字段只服务「没有 models 的老配置」，但状态灯和 `/api/status`
+    还在读它，保持同步省得两处口径漂移。
+    """
+    from agent.model_refs import provider_conn
+
+    raw = _load_raw_config()
+    llm = dict(raw.get("llm") or {})
+    models = body.get("models")
+    if not isinstance(models, list):
+        raise ValueError("models 必须是数组")
+
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        mid = str(item.get("id") or "").strip()
+        if not mid:
+            raise ValueError("模型档位缺 id")
+        if mid in seen:
+            raise ValueError(f"模型档位 id 重复: {mid}")
+        seen.add(mid)
+        entry = dict(item)
+        entry.pop("base_url", None)
+        entry.pop("api_key", None)
+        clean.append(entry)
+
+    llm["models"] = clean
+    active = str(body.get("active") or "").strip()
+    if active and active not in seen:
+        raise ValueError(f"当前档位不存在: {active}")
+    if active:
+        llm["active_model"] = active
+    current = str(llm.get("active_model") or "").strip()
+    sel = next((p for p in clean if str(p.get("id")) == current), None)
+    sel = sel or (clean[0] if clean else None)
+    if sel:
+        conn = provider_conn({"llm": {**llm, "models": clean}}, sel)
+        if conn.get("provider"):
+            llm["provider"] = conn["provider"]
+        llm["model"] = str(sel.get("model") or "")
+        for key in ("max_tokens", "temperature"):
+            if sel.get(key) not in (None, ""):
+                llm[key] = sel[key]
+        for key in ("thinking", "thinking_effort"):
+            if sel.get(key):
+                llm[key] = sel[key]
+        for key in ("base_url", "api_key"):
+            if conn.get(key):
+                llm[key] = conn[key]
+
+    raw["llm"] = llm
+    written = _write_config(raw)
+    return {
+        "ok": True,
+        "count": len(clean),
+        "active": str(llm.get("active_model") or ""),
+        "backup": written["backup"],
+        "coerced": written["coerced"],
     }
 
 
@@ -938,6 +1152,15 @@ def api_models_fetch(body: dict) -> dict:
 
     base = _normalize_base(body.get("base_url", ""))
     key = (body.get("api_key") or "").strip()
+    # 优先按 provider 组 id 取连接（2026-10-28）：组里的真 Key 留在后端解析，
+    # 界面只发 id——它手上只有掩码，把掩码当 Key 发过来只会 401。
+    pid = str(body.get("provider_id") or "").strip()
+    if pid:
+        from agent.model_refs import provider_by_id
+
+        group = provider_by_id(_load_raw_config(), pid) or {}
+        base = _normalize_base(group.get("base_url") or base)
+        key = str(group.get("api_key") or key).strip()
     if not base:
         raise ValueError("缺少 base_url")
     # 引用形式（${VAR}）先解析，否则会把它当字面量发出去 → 401
@@ -1301,9 +1524,19 @@ def api_models_activate(body: dict) -> dict:
 
     llm["models"] = new_profiles
     llm["active_model"] = target
-    for key in ("provider", "base_url", "model", "api_key"):
-        if sel.get(key):
-            llm[key] = sel[key]
+    # 连接信息走组表（2026-10-28）：档位里可能已经没有 base_url/api_key 了
+    # （保存 provider 时被收敛掉），这里必须从 `llm.providers` 取，否则激活
+    # 一次就会把扁平字段写成空串 → 下一轮请求没有端点。
+    from agent.model_refs import provider_conn
+
+    conn = provider_conn(raw, sel)
+    if conn.get("provider"):
+        llm["provider"] = conn["provider"]
+    if sel.get("model"):
+        llm["model"] = sel["model"]
+    for key in ("base_url", "api_key"):
+        if conn.get(key):
+            llm[key] = conn[key]
     for key in ("max_tokens", "temperature"):
         if sel.get(key) not in (None, ""):
             llm[key] = sel[key]
@@ -1314,25 +1547,16 @@ def api_models_activate(body: dict) -> dict:
     elif not has_effort and sel.get("thinking"):
         llm["thinking"] = sel["thinking"]
 
-    backup = CONFIG_PATH.with_suffix(
-        ".yaml.bak_" + time.strftime("%Y%m%d_%H%M%S"))
-    shutil.copy2(CONFIG_PATH, backup)
     raw["llm"] = llm
-    # 数值字段类型收口——档位里的 max_tokens/temperature 可能是字符串，
-    # 直接写盘会让糖糖下一轮 LLM 调用 500（见 _coerce_llm_numbers 注释）
-    coerced = _coerce_llm_numbers(raw)
-    import yaml
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(raw, f, allow_unicode=True,
-                  default_flow_style=False, sort_keys=False)
+    written = _write_config(raw)
     return {
         "ok": True,
         "active": target,
         "model": sel.get("model"),
-        "provider": sel.get("provider"),
+        "provider": conn.get("provider") or sel.get("provider"),
         "thinking_effort": llm.get("thinking_effort") or "",
-        "backup": backup.name,
-        "coerced": coerced,
+        "backup": written["backup"],
+        "coerced": written["coerced"],
     }
 
 
@@ -2532,6 +2756,12 @@ ROUTES_POST = {
     # 图库打标面板里直接选模型（不打发去设置页；方式和模型一次定下来）
     "/api/gallery/tag/model": api_gallery_tag_model,
     "/api/models/activate": api_models_activate,
+    # 2026-10-28：模型目录的写入口（增删改 + 当前档位）。不走 /api/config——
+    # 设置页的配置快照会把它覆盖回旧值。
+    "/api/models/save": api_models_save,
+    # 2026-10-28：provider 组表——组级连接（地址/协议/密钥）的唯一写入点。
+    # 保存时会顺手把引用它的档位里那份过期副本清掉（教训 #54：组级只留一份）。
+    "/api/providers/save": api_providers_save,
     "/api/gallery/tags": api_gallery_tags,
     "/api/gallery/trash": api_gallery_trash,
     "/api/gallery/reveal": api_gallery_reveal,
