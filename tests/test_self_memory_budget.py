@@ -104,8 +104,8 @@ def test_noise_fields_do_not_come_back():
 
 def test_group_scope_still_visible_and_empty_timestamp_safe():
     """群聊作用域仍然逐条可见；时间戳缺失时不产生 `[5:10]` 切片垃圾。"""
-    row = dict(FIVE[0], source_group_id="833475319", timestamp="")
+    row = dict(FIVE[0], source_group_id="30001", timestamp="")
     text = _block([row])
-    assert "群833475319" in text
+    assert "群30001" in text
     assert "日期未知" in text
     assert text.count("\n") == 1

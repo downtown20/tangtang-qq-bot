@@ -62,7 +62,7 @@ class TestRobocopyVerdict:
     def test_robocopy_returns_false_on_bad_destination(self):
         m = _load()
         src = ROOT / 'tests'
-        dst = Path('Z:/nonexistent_t11_probe')
+        dst = Path('Z:/不存在/t11_probe')
         assert m._robocopy(src, dst) is False, (
             'robocopy to an unreachable destination must be reported as failure')
 
@@ -97,7 +97,7 @@ class TestEndToEndExitCode:
         idx = next(i for i, ln in enumerate(lines)
                    if ln.startswith('    (Path.home()') and '.claude' in ln)
         old = lines[idx]
-        new = old.split(',')[0] + ", Path('Z:/nonexistent_t11_e2e')),"
+        new = old.split(',')[0] + ", Path('Z:/不存在/t11_e2e')),"
         try:
             TOOL.write_bytes(text.replace(old, new, 1).encode('utf-8'))
             r = subprocess.run(

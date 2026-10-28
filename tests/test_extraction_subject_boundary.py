@@ -2,7 +2,7 @@
 
 ## 事故现场
 
-`mem#18121`（属于主人 2524950083）：
+`mem#18121`（属于主人 10001）：
 
 > 「今年7月刚靠指标生名额考上一中，是高一新生」
 > trust=verified conf=0.95，证据 `chat#199048`
@@ -13,8 +13,8 @@
 > **他**实际是今年7月刚靠指标生名额考上一中的高一新生，8月19号要去军训。
 > 用 correct_memory 工具修正一下。」
 
-**主人在让糖糖去修正另一个人的记忆**（「穷到吃外卖」= 2377255095），
-句中「他」指的是那个人。同一时刻 `mem#17485` 也正确地写进了 **2377255095**
+**主人在让糖糖去修正另一个人的记忆**（「穷到吃外卖」= 40005），
+句中「他」指的是那个人。同一时刻 `mem#17485` 也正确地写进了 **40005**
 名下（`origin=corrected`）。
 
 **但第二天提取器把这句话提取成了主人自己的身份记忆**，而且因为它有逐字证据
@@ -118,7 +118,8 @@ class TestSubjectBoundaryDocs:
         """
         import sqlite3
         from pathlib import Path
-        db = Path(__file__).resolve().parents[1] / "memory.db"
+        root = Path(__file__).resolve().parents[1]
+        db = root / "memory.db"
         if not db.is_file():
             pytest.skip("没有生产库（CI 环境）")
         conn = sqlite3.connect(str(db))
@@ -131,5 +132,14 @@ class TestSubjectBoundaryDocs:
             conn.close()
         if row is None:
             pytest.skip("mem#18121 已不在（可能被清理）")
-        assert str(row[0]) == "2524950083"
+        # 归属人从配置读——测试文件里不留真实账号
+        import yaml
+        cfg_path = root / "config.yaml"
+        if not cfg_path.is_file():
+            pytest.skip("没有 config.yaml（clone 出来的仓库里没有它）")
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        owner = str(((cfg.get("bot") or {}).get("owner_qq") or "")).strip()
+        if not owner.isdigit():
+            pytest.skip("config.yaml 里没有可用的 owner_qq")
+        assert str(row[0]) == owner
         assert "高一" in str(row[1])

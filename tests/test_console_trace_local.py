@@ -56,7 +56,7 @@ def test_meta_projects_to_console_trace_summary():
         "ms": 12601, "model": "deepseek-v4.1-flash", "provider": "custom",
         "tokens": 9371, "tools": [], "finish_reason": "tool_calls",
         "reasoning_chars": 476,
-        "event_key": "v2:private:2524950083:1792909686:2524950083:-6",
+        "event_key": "v2:private:10001:10000:10001:-6",
     }
     got = _local_trace_from_meta(meta)
     assert got is not None
@@ -113,7 +113,7 @@ def _api_with_store(tmp_path):
 def test_desktop_feed_projects_trace(tmp_path):
     api = _api_with_store(tmp_path)
     sid = api.store.create_session("自检")["id"]
-    key = "v2:private:10001:1792909686:10001:-6"
+    key = "v2:private:10001:10000:10001:-6"
     api.store.append_message(sid, "user", "在吗？", None)
     api.store.append_message(sid, "tangtang", "在的。", {
         "ms": 4200, "reasoning_chars": 96, "tools": [], "event_key": key})

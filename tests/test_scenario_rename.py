@@ -3,7 +3,7 @@
 
 ## 防的是什么
 
-`config.yaml` 里 `scenario_targets: {'2524950083': 亲密模式}` 存的是 **display 名**
+`config.yaml` 里 `scenario_targets: {'10001': 亲密模式}` 存的是 **display 名**
 （`agent/scenario.py:138-150` 用 display 匹配）。改 display 不改这里 → **静默失效**：
 场景不再生效，没有任何报错，只有「她怎么不像那个模式了」。
 
@@ -27,7 +27,7 @@ personality:
   core: 猫娘
 
 scenario_targets:
-  '2524950083': 亲密模式
+  '10001': 亲密模式
   '999999': 亲密模式
 
 # 这里也有一个「亲密模式」，但它不是挂载点——不能动
@@ -54,8 +54,8 @@ def test_display_key_strips_emoji():
 def test_rename_updates_mounts(proj):
     hits = sr.sync_rename(proj, "❤️ 亲密模式", "❤️ 深夜档")
     text = (proj / "config.yaml").read_text(encoding="utf-8")
-    assert sorted(hits) == ["2524950083", "999999"]
-    assert "'2524950083': 深夜档" in text
+    assert sorted(hits) == ["10001", "999999"]
+    assert "'10001': 深夜档" in text
     assert "'999999': 深夜档" in text
 
 

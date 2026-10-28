@@ -36,7 +36,7 @@ from agent.console_store import ConsoleStore  # noqa: E402
 from agent.store import Store  # noqa: E402
 
 QQ = "10001"
-TRIGGER_KEY = f"v2:private:{QQ}:1792900000:{QQ}:-500"
+TRIGGER_KEY = f"v2:private:{QQ}:10000:{QQ}:-500"
 TRIGGER_TS = "2026-10-25 15:00:00"
 
 

@@ -10808,7 +10808,7 @@ class Store:
                 "空集会被误读成「没有记忆」")
         # key（2026-10-12 M3）：按 key 过滤必须**下推到 SQL**。
         # 承诺结算的候选查询原先取 limit=20 的混合行再在 Python 里筛 promise，
-        # 而 active 的 said(=5) 有 300+ 条、importance 相近——实测 target=2180254043
+        # 而 active 的 said(=5) 有 300+ 条、importance 相近——实测 target=<uid>
         # 的 20 行里 only 5 条是 promise（该对象共 25 条 active promise）。
         # 候选被截断，LLM 就无从点名结算。
         """查询记忆（按 importance DESC, timestamp DESC），可限定 qq_id。
@@ -13327,7 +13327,7 @@ class Store:
         col = "c.group_id" if kind == "group" else "c.qq_id"
         # ⚠ 私聊口径的第二半（2026-10-25 第 17 轮修，与 list_chat_scopes 同源）：
         # 只按 `c.qq_id=?` 取，会把该 QQ 在**所有群**里的发言都塞进他的「私聊」——
-        # 实测 `private:2959482956` 最近 8 条全是 `群833475319` 的消息。
+        # 实测 `private:<uid>` 最近 8 条全是 `群<group_id>` 的消息。
         # 私聊 = `group_id` 为空串（全库 21,435 条；糖糖的私聊回复同样挂空串，
         # 实测 bot 回复 10,505 条在空串 9,669 条在群，所以加这条不会误伤她的回复）。
         scope_cond = (f"{col} = ?" if kind == "group"

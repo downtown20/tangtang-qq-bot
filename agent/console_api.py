@@ -485,7 +485,7 @@ def _build_turn_flow(*, message: dict | None, digest: dict | None,              
     # ⚠ 历史 trace 只有 `user_bg_labels`、没有 `backgrounds.blocks`（逐块命运
     # 是 2026-10-25 当天才落库的）。这种数据下 `in_prompt` 会算成 0，而同一站
     # 下面又列着 6 个「注入了哪些背景」——界面自相矛盾。
-    # 2026-10-25 视觉验收实测发现（`v2:private:…1792899595` 那轮）。
+    # 2026-10-25 视觉验收实测发现（`v2:private:…<ts>` 那轮）。
     # 有标签就用标签数兜底，并在文案里标明这是按标签统计的估算。
     blocks_measured = bool(bg_blocks)
     if not blocks_measured and labels:
@@ -2589,7 +2589,7 @@ class ConsoleApi:
           · 全局 `scenario_targets` 存 display（`亲密模式`，**不带 emoji**）
           · 群级 `groups.<gid>.scenario` 存 name（`seductive`）
           · 而 `scenarios/*.yaml` 的 display 带 emoji 前缀（`❤️ 亲密模式`）
-        实测：配置里 `2524950083: 亲密模式` 在界面上被标成「未在场景清单中」，
+        实测：配置里 `<owner_qq>: 亲密模式` 在界面上被标成「未在场景清单中」，
         而那个场景其实好好的。用 `ScenarioManager.get()` 的匹配能力（name /
         display / 去 emoji 都认）统一换成清单里的 display。
 

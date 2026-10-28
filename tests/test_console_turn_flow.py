@@ -103,8 +103,8 @@ def _full_payload():
     return dict(
         message={
             "id": 301785, "content": "（桌面端自检）你在吗",
-            "timestamp": "2026-10-25 15:28:38", "speaker": "2524950083",
-            "scope": "private:2524950083",
+            "timestamp": "2026-10-25 15:28:38", "speaker": "10001",
+            "scope": "private:10001",
         },
         digest=_digest(),
         prompt_chars=5235,

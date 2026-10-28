@@ -150,7 +150,7 @@ def test_config_save_cannot_overwrite_providers_or_active_model(bridge):
 def test_config_save_still_saves_other_fields(bridge):
     snap = _stale_snapshot(bridge)
     snap["behavior"]["interjection_thirst"] = 0.77
-    snap["scenario_targets"] = {"2524950083": "亲密模式"}
+    snap["scenario_targets"] = {"10001": "亲密模式"}
     snap["tuning"] = {"context_soft_limit": 40000}
 
     out = bridge.api_config_save({"config": snap})
@@ -158,7 +158,7 @@ def test_config_save_still_saves_other_fields(bridge):
     assert out["ok"] is True
     cfg = _cfg(bridge)
     assert cfg["behavior"]["interjection_thirst"] == 0.77, "设置页的字段必须还能存"
-    assert cfg["scenario_targets"] == {"2524950083": "亲密模式"}
+    assert cfg["scenario_targets"] == {"10001": "亲密模式"}
     assert cfg["tuning"] == {"context_soft_limit": 40000}
     # 顺手复查：这次保存没有把模型目录弄丢
     assert cfg["llm"]["models"][0]["context_window"] == 65536

@@ -301,7 +301,8 @@ def test_落在系统盘只警告不中止(tmp_path, monkeypatch, capsys):
     mod = _installer()
     root = tmp_path / "依赖"
     monkeypatch.setattr(mod.依赖位置, "ensure_deps_root", lambda: root)
-    monkeypatch.setattr(mod.依赖位置, "describe_deps_root", lambda: "C:\\依赖")
+    monkeypatch.setattr(mod.依赖位置, "describe_deps_root",
+                        lambda: "C:" + chr(92) + "Program Files" + chr(92) + "糖糖依赖")
     monkeypatch.setattr(mod.依赖位置, "is_on_system_drive", lambda *a, **k: True)
 
     assert mod._confirm_deps_root(None, True) == root

@@ -10,7 +10,7 @@
     python tools/安装糖糖.py 检查              # 环境 + 快照状态
     python tools/安装糖糖.py 体检              # 换机功能对比
     python tools/安装糖糖.py --dry-run ...     # 预览，不实际执行
-    python tools/安装糖糖.py 安装 --deps-root D:\糖糖依赖   # 指定安装位置（不弹对话框）
+    python tools/安装糖糖.py 安装 --deps-root <你选的目录>   # 指定安装位置（不弹对话框）
     python tools/安装糖糖.py 安装 --yes        # 非交互：不弹目录选择框，用已配置的位置
     python tools/安装糖糖.py 安装 --torch-variant xpu   # 人工指定 torch 档位（默认 auto：探测本机设备）
 
@@ -575,7 +575,7 @@ def _plan(groups: list[str], variant: str | None = None) -> list[tuple[list[str]
 
 
 def _install(pkgs: list[str], kwargs: dict) -> bool:
-    # pip 的 wheel/http 缓存默认堆在 C:\Users\...\AppData\Local\pip——装 torch 全家桶
+    # pip 的 wheel/http 缓存默认堆在用户目录下的 pip 缓存——装 torch 全家桶
     # 就是好几个 G。缓存是纯落盘位置，直接跟依赖根走。
     # （包本身装哪儿由 Python 前缀决定：**不要**改用 `pip --target`——那会让 import
     #   全部失效；要挪整份 site-packages 得用 tools/依赖迁移.py 的目录联接方案。）

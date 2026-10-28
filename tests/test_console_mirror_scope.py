@@ -52,8 +52,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.store import Store  # noqa: E402
 
-GROUP_A = "833475319"
-GROUP_B = "854939448"
+GROUP_A = "30001"
+GROUP_B = "30002"
 QQ_MIXED = "10001"    # 群里说过话，也真私聊过
 QQ_GROUP_ONLY = "10002"  # **只在群里**说过话，从没私聊
 QQ_PRIVATE_ONLY = "10003"

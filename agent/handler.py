@@ -3805,7 +3805,7 @@ class MessageHandler(AutonomyMixin):
         buffer_text = _protocols.normalize_image_placeholder(text)
         # 2026-10-25 自查修正：历史消息里的 @ 一直是裸数字 `@QQ<号>`。
         # buffer 是 LLM 历史消息的**直接来源**，而她**不认识任何 QQ 号——包括自己的**：
-        # person 表里 2693914170 就是她（昵称「小糖糖」），但 system prompt 从不告诉她
+        # person 表里 <bot_qq> 就是她（昵称「小糖糖」），但 system prompt 从不告诉她
         # 这串数字；`chat_log#300159` 存的是 `……😢@QQ2693914170`，同一回合
         # `turn_traces#41` 她的原话是「大狗在@QQ2693914170，不是我（我是3947736714）」
         # ——把自己的号推给别人，把对方的号（绝望的小奈203）认成自己。

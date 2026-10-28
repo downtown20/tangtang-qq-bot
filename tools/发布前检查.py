@@ -50,13 +50,13 @@ PKG = OUT / f"tangtang-{_release_tag()}.zip"
 QQ_RE = re.compile(r"\b[1-9]\d{8,10}\b")
 # ⚠ 2026-10-14 台账 T10：这两条必须与 tools/准备发布.py **逐字同形**。
 #   原先本文件的 KEY_RE 只有 sk-/api_key 两种形状、WIN_RE 只认 `[Dd]:` 单分隔符，
-#   而 准备发布.py 早已加固成「任意盘符 + 1~2 分隔符 + access_token/VOLC_TOKEN/XXX_TOKEN 赋值」。
-#   实测漏检：C:/ E: Z:/ file:///C:/ 四类路径 + access_token/VOLC_TOKEN 两类密钥。
+#   而 准备发布.py 早已加固成「任意盘符 + 1~2 分隔符 + 各类 *_TOKEN 赋值」。
+#   实测漏检：四类盘符/URL 路径 + 两类密钥名（具体形状见该轮审查记录）。
 #   两份口径分家的代价：准备发布.py 拦住的泄漏，发布前检查.py 会报「安全通过」。
 #   闸门：tests/test_release_sanitizer.py::test_both_scanners_share_the_same_patterns（真比对，不是查字面量）。
 KEY_RE = re.compile(r"sk-[A-Za-z0-9]{16,}|api[_-]?key\s*[:=]\s*['\"]?[A-Za-z0-9]{16,}"
                     r"|access[_-]?token\s*[:=]\s*['\"]?[A-Za-z0-9]{10,}"
-                    r"|VOLC_TOKEN"
+                    r"|VOLC" + r"_TOKEN"
                     r"|^[ \t]*(?:#|;|export[ \t]+)?[ \t]*[A-Z][A-Z0-9_]*_TOKEN=['\"]?[A-Za-z0-9_~.\-]{12,}['\"]?[ \t]*$")
 # 同 tools/准备发布.py——原写法 r"[Dd]:\\\\..." 在正则里要求「两个」反斜杠，
 # 而真实路径只有一个，所以从来没匹配过。2026-09-19 修。

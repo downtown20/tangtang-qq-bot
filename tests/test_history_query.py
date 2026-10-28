@@ -984,7 +984,7 @@ def test_query_memories_key_filter_survives_crowding(store):
     """M3 回归：key 过滤必须**下推 SQL**——否则承诺候选会被 said 挤掉。
 
     结算候选原先是「取 limit=20 的混合行、再在 Python 里筛 promise」。实测
-    target=2180254043 的 20 行里只有 5 条是 promise（该对象共 25 条 active），
+    target=40006 的 20 行里只有 5 条是 promise（该对象共 25 条 active），
     而 active 的 said 有 300+ 条——候选被截断，LLM 无从点名结算。
     """
     for i in range(3):

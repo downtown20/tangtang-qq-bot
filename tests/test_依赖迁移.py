@@ -131,11 +131,11 @@ def test_apply_aborts_when_required_source_missing(monkeypatch, mod):
 
         @property
         def source(self):
-            return Path("Z:/definitely/not/here")
+            return Path("Z:/不存在/definitely_here")
 
         @property
         def target(self):
-            return Path("Z:/also/not/here")
+            return Path("Z:/不存在/also_here")
 
     monkeypatch.setattr(mod, "_items", lambda: [_Missing()])
     assert mod.cmd_apply() == 2

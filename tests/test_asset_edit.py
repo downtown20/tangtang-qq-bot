@@ -671,14 +671,14 @@ class TestScenarioRenameWiring:
         (root / "config.yaml").write_text(body, encoding="utf-8")
 
     def test_rename_display_syncs_mounts(self, root):
-        self._config(root, "scenario_targets:\n  '2524950083': 心理陪伴\n")
+        self._config(root, "scenario_targets:\n  '10001': 心理陪伴\n")
         out = asset_edit.write_asset(
             "scenarios/psychology.yaml",
             "name: psychology\ntype: overlay\ndisplay: 深度陪伴\ndescription: 通用\n",
         )
-        assert out["renamed_mounts"] == ["2524950083"], out
+        assert out["renamed_mounts"] == ["10001"], out
         text = (root / "config.yaml").read_text(encoding="utf-8")
-        assert "'2524950083': 深度陪伴" in text
+        assert "'10001': 深度陪伴" in text
 
     def test_unchanged_display_does_not_touch_config(self, root):
         self._config(root, "scenario_targets:\n  '1': 心理陪伴\n")

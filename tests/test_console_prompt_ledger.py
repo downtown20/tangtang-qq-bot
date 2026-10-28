@@ -439,7 +439,7 @@ def test_tools_phase_carries_effects():
 
 # ── 老 trace（有标签、没逐块命运）不能自相矛盾 ──────────────────
 #
-# 2026-10-25 视觉验收实测发现的两个自相矛盾（`v2:private:…1792899595` 那轮）：
+# 2026-10-25 视觉验收实测发现的两个自相矛盾（`v2:private:…<ts>` 那轮）：
 #   ① 第 4 站写「0 块进了 prompt」，同一站下面又列着 6 个注入过的标签；
 #   ② 第 5 站 items 写「记忆块：已注入」，did 却写「记忆块没进 prompt」。
 # 原因都是 `backgrounds.blocks` 当天才落库，老 trace 只有 `user_bg_labels`。

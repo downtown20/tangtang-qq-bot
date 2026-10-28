@@ -3,12 +3,12 @@
 ## 缺陷 A（S-1）：历史消息里的 @ 是裸数字，她不认识——包括指向她自己的那个
 
 取证链：
-1. `chat_log#300159`（群 833475319，2026-10-24 23:03:09）存的是
-   `……😢@QQ2693914170`，raw 是 `[CQ:at,qq=2693914170]`；
-   `people` 表里 2693914170 的昵称**就是「小糖糖」**（她自己）。
+1. `chat_log#300159`（群 30001，2026-10-24 23:03:09）存的是
+   `……😢@QQ10002`，raw 是 `[CQ:at,qq=10002]`；
+   `people` 表里 10002 的昵称**就是「小糖糖」**（她自己）。
 2. 同一回合 `turn_traces#41` 她的 reasoning 原话：
-   「大狗在@QQ2693914170，不是我（我是3947736714）」
-   —— 把自己的号推给别人，把 3947736714（people 表里是「绝望的小奈203」）
+   「大狗在@QQ10002，不是我（我是40007）」
+   —— 把自己的号推给别人，把 40007（people 表里是「绝望的小奈203」）
    认成自己。
 3. 会客厅直接问她「你自己的 QQ 号是多少」，她答：
    「我自己的号？这我还真没记住。」
@@ -131,7 +131,7 @@ class TestAtQQParsedBeforeBuffer:
 
 
 class TestSelfQQResolvesToName:
-    def _handler(self, memory, bot_qq: str = "2693914170"):
+    def _handler(self, memory, bot_qq: str = "10002"):
         from agent.handler import MessageHandler
         h = object.__new__(MessageHandler)
         h.memory = memory
@@ -141,19 +141,19 @@ class TestSelfQQResolvesToName:
     def test_self_qq_resolves_to_own_nickname(self, memory):
         """她自己的号必须解析成她的名字——不是一串数字（缺陷 A 的身份侧）"""
         h = self._handler(memory)
-        memory.store.get_or_create_person("2693914170", "小糖糖")
-        assert h._nick_for_qq("2693914170", "833475319") == "小糖糖"
+        memory.store.get_or_create_person("10002", "小糖糖")
+        assert h._nick_for_qq("10002", "30001") == "小糖糖"
 
     def test_other_qq_resolves_to_their_nickname(self, memory):
         """别人也一样——「绝望的小奈203」不能在她的历史里退化成一个号"""
         h = self._handler(memory)
-        memory.store.get_or_create_person("3947736714", "绝望的小奈203")
-        assert h._nick_for_qq("3947736714", "833475319") == "绝望的小奈203"
+        memory.store.get_or_create_person("40007", "绝望的小奈203")
+        assert h._nick_for_qq("40007", "30001") == "绝望的小奈203"
 
     def test_unknown_qq_keeps_old_fallback(self, memory):
         """没建档的号仍按号码原样返回——本次改动不比原来更差"""
         h = self._handler(memory)
-        assert h._nick_for_qq("1234567", "833475319") == "1234567"
+        assert h._nick_for_qq("1234567", "30001") == "1234567"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -229,7 +229,7 @@ class TestPromptBudgetKeepsWholeManual:
         cb = ContextBuilder(self_state=None)
         limit = cb.BUDGET_CORE + cb.BUDGET_RELEVANT + cb.BUDGET_SUPPLEMENTARY
         res = cb.build(
-            user_id="2524950083", nickname="主人", message="在吗",
+            user_id="10001", nickname="主人", message="在吗",
             system_prompt_base=base, history_messages=[],
         )
         return cb, limit, res

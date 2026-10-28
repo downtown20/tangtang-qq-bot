@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-BOT = "2693914170"
+BOT = "10002"
 
 
 @pytest.fixture
