@@ -397,33 +397,21 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     ATTACH.mkdir(parents=True, exist_ok=True)
 
-    print("🍬 小糖糖 发布打包（一个包 + 语音分卷附件）")
+    print("🍬 小糖糖 发布打包（单包：主程序 + 桌面端 + 私有语音资产）")
     print(f"   快照: {SNAPSHOT}")
     print(f"   输出: {OUT}")
 
     pkg = build_package()
 
-    skip_voice = "--no-voice" in sys.argv
-    if skip_voice:
-        # 复用上一版的分卷：它们只装 gpt-sovits/（第三方引擎+模型），
-        # 与代码/文档改动无关。补发小版本时不必重新压 6 GB。
-        parts = sorted(ATTACH.glob("tangtang-voice-*of*.zip"))
-        print(f"\n{'─' * 50}")
-        if parts:
-            print(f"[>] --no-voice：沿用现有分卷 {len(parts)} 卷，不重新打包")
-        else:
-            print("[!] --no-voice 但没找到现成分卷——上一版的分卷在哪？")
-    else:
-        print(f"\n{'─' * 50}")
-        parts = build_voice_parts()
+    # 2026-10-28：不再出语音分卷。私有声线已随包（准备发布.py 的 4b 步），
+    # 公开底模 3.7G 由用户按 docs/用户手册/语音模型自行配置.md 自行放置。
+    # build_voice_parts() 保留但不再调用——将来若改回「分卷托管」，直接接回这里。
 
     print(f"\n{'─' * 50}")
     print("✅ 全部产物")
     print(f"   安装包   {pkg.name}  {pkg.stat().st_size / 2**20:.0f} MB")
-    for p in parts:
-        print(f"   语音分卷 {p.name}  {p.stat().st_size / 2**30:.2f} GB")
-    if skip_voice:
-        print("\n   ⚠ 分卷未重新生成——上传时可直接复用上一版的附件")
+    print("   ⚠ 语音公开底模（约 3.7 GB）不随包——用户按"
+          " docs/用户手册/语音模型自行配置.md 自行放置")
     return 0
 
 

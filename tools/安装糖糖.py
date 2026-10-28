@@ -496,7 +496,9 @@ GROUPS = {
 # 功能 → (名称, 说明, 依赖组列表)
 FEATURES = [
     ("聊天+高质量记忆", "核心——LLM、记忆、知识库、BGE 向量（必须）", ["核心", "记忆"]),
-    ("发语音+听懂语音消息", "听懂别人的语音消息 + GPT-SoVITS 发声；模型约 6G，自动下载", ["语音"]),
+    ("发语音+听懂语音消息",
+     "听懂别人的语音消息 + GPT-SoVITS 发声。米雪儿声线随包自带；"
+     "公开底模约 3.7G 需自行下载（见 docs/用户手册/语音模型自行配置.md）", ["语音"]),
     ("本地识图", "本地 MiniCPM-V 识图（约 2.5G，需 Ollama）；不选则用云端 qwen-vl", ["识图"]),
     # [!] 这句原来只写「已随包自带，本项无需下载」，让用户以为勾了它就有全部唱歌能力；
     #   2026-09-19 主人在笔记本上正是被这句话误导，去点了「模型」按钮来问「是不是我这个
@@ -522,7 +524,9 @@ DIR_CHECKS = {
          "models/BAAI/bge-reranker-v2-m3", True, True),
         ("StructBERT 情绪模型（可选，390M；心理陪伴场景用）",
          "models/iic/nlp_structbert_sentiment-classification_chinese-base", True, True)],
-    1: [("gpt-sovits/（语音引擎 + 模型）", "gpt-sovits", False, True),
+    1: [("gpt-sovits/（语音引擎 + 私有声线）", "gpt-sovits", False, True),
+        ("GPT-SoVITS 公开底模（约 3.7G，需自行配置）",
+         "gpt-sovits/GPT_SoVITS/pretrained_models/s1v3.ckpt", False, True),
         ("asr_models/（语音识别模型，勾了语音就已自动下好）", "asr_models", False, True)],
     # 本地识图走 Ollama（agent/vision_local.py 连 127.0.0.1:11434），
     # 不读 models/minicpm-v/——那个目录是早期路线遗留，已不再使用（2026-09-18 核实）
@@ -825,9 +829,11 @@ MODELS = {
          {"repo": "iic/nlp_structbert_sentiment-classification_chinese-base"}, "390M", "ask"),
     ],
     1: [
-        ("GPT-SoVITS 语音推理集——引擎底模 + 糖糖声线 + 情绪参考音频",
-         "gpt-sovits", "release_parts",
-         {"prefix": "tangtang-voice"}, "6.4G", "auto"),
+        # 2026-10-28 主人拍板：GPT-SoVITS **不再自动下载**。
+        #   · 私有部分（米雪儿声线 229M + 情绪参考音 8M）随发布包自带，见 准备发布.py 的 4b 步
+        #   · 公开底模 3.7G 由用户按 docs/用户手册/语音模型自行配置.md 自行放置
+        # 为什么不做自动下载：第三方仓库的版本我们锁不死，装到一半对不上会得到
+        # 「看起来装好了但起不来」的语音服务——比明确要用户自己下更糟。
         ("语音识别模型——听懂别人发的语音消息",
          "asr_models", "tarbz2",
          {"url": ASR_MODEL_URL, "expect": ASR_MODEL_NAME}, "233M", "auto"),

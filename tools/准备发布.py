@@ -266,12 +266,11 @@ SCAFFOLD_NOTES = {
     "也可以换用任意其他 OneBot 11 反向 WebSocket 实现，糖糖不绑定 SnowLuma。\n\n"
     "⚠️ 注意别和项目根目录的 onebot/ 搞混：那个是糖糖**自己**的 OneBot 适配层代码，\n"
     "   是程序的一部分；本目录放的是**第三方**的 SnowLuma 程序本体。\n",
-    "gpt-sovits/摆放说明.txt": "📦 语音推理集（自动获取，无需手动解压）\n\n"
-    "本目录已自带引擎代码；模型（底模 + 糖糖声线 + 情绪参考音频，约 6G）由安装程序自动下载。\n\n"
-    "获取方式：双击项目根目录的「安装糖糖.bat」→ 功能选择里勾上「发语音+听懂语音消息」\n"
-    "下载中断可直接重跑，已下好的不会重复下载。\n\n"
-    "装好后重启控制台——糖糖能发语音、各情绪参考音频齐全。\n"
-    "不装语音也不影响聊天——糖糖自动以文字回复。\n",
+    "gpt-sovits/摆放说明.txt": "📦 语音推理集\n\n"
+    "本目录**自带**：引擎代码 + 米雪儿声线（models/michele）+ 各情绪参考音（speakers）。\n"
+    "还缺 GPT-SoVITS **公开底模约 3.7 GB** —— 按 docs/用户手册/语音模型自行配置.md 自行下载放置。\n\n"
+    "不配语音也能用：糖糖照常聊天，只是不发语音。\n"
+    "切到「米雪儿」角色时程序会自动把权重换成 models/michele 下那两个（详见上面那份文档）。\n",
     "songs/摆放说明.txt": "🎵 预录歌曲（已随安装包自带，装好就能点歌）\n\n"
     "本目录的音频是糖糖唱好的成品——点歌时直接播放，不是实时生成，也不需要额外模型。\n\n"
     "想自己加歌：把音频命名为 歌名.wav 放进 audio/（糖糖声线）；原声放 covers/separated/歌名_FINAL.wav。\n"
@@ -640,6 +639,27 @@ def _scan_bytes(p: Path, rel: str) -> list[str]:
 # ⚠ 但它里面躺着**历史提交的旧版本文件**，那些旧版本含清理前的本地路径。
 #   本扫描器管的是"这次要发出去的字节"，管不了历史——历史要不要洗是另一个决定。
 SCAN_SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "temp_files"}
+
+# 整个 vendored 第三方目录的豁免（2026-10-28 加，理由不是"图省事"）：
+#
+#   `gpt-sovits/` 是 GPT-SoVITS 的**第三方副本**（上游 RVC-Boss/GPT-SoVITS，
+#   本地是 git clone），它自带 42 处「敏感形状」——全是上游作者自己机器上的痕迹：
+#     · 盘符开头的示例占位路径（上游 README 与 webui 里的输入框默认值，
+#       不是我们的盘符结构，也不指向这台机器上的任何东西）
+#     · 上游 changelog 里的贡献者数字 ID
+#     · 上游调试注释里的重复数字与 unix 时间戳
+#   它们既不是本项目用户的隐私，也不可能"改干净"（一换版本就回来）。
+#   2026-09-18 的原始决定就写过这条（见 打包发布版本.py 的 GPT_MODEL_PREFIXES 注释）：
+#   「进主仓会让敏感扫描被上游自带内容永久污染」。
+#
+#   ⚠ 豁免的是**上游文件**，我们改过/写过的两个文件仍要扫（下面 EXCEPTIONS）——
+#     否则将来谁往 tts_infer.yaml 里写本机路径，这条闸门就瞎了。
+#   ⚠ 阳性对照：tests/test_release_sanitizer.py::test_vendored_engine_exemption_has_bite
+SCAN_EXEMPT_PREFIXES = ("gpt-sovits/",)
+SCAN_EXEMPT_PREFIX_EXCEPTIONS = {
+    "gpt-sovits/GPT_SoVITS/configs/tts_infer.yaml",   # 我们加的 custom profile
+    "gpt-sovits/start_api_patched.py",                # 我们写的启动包装
+}
 # `.env` 真值扫描的单文件上限：真值只会出现在文本里，超大文件（模型/音频）跳过
 SCAN_ENV_MAX_BYTES = 8 * 1024 * 1024
 
@@ -713,6 +733,9 @@ def scan_sensitive(root: Path) -> list[str]:
             continue
         posix = rel.as_posix()
         if posix in SCAN_EXEMPT_FILES:
+            continue
+        if (posix.startswith(SCAN_EXEMPT_PREFIXES)
+                and posix not in SCAN_EXEMPT_PREFIX_EXCEPTIONS):
             continue
         if p.suffix.lower() in TEXT_SUFFIXES or p.name in TEXT_NAMES:
             hits.extend(_scan_text(p, posix))
@@ -825,6 +848,46 @@ def main() -> None:
             if s.is_file():
                 shutil.copy2(s, graph_dst / s.name)
     print(f"  ✅ docs/（用户手册 + decisions + 发布 + 开发规划顶层 {n} 篇 + 架构图谱 html）")
+
+    # 4b. 语音私有资产（2026-10-28 主人拍板）：米雪儿模型与情绪参考音**没有公开下载源**，
+    #     是我们自己微调的，必须随包；公开底模（3.7 GB）走「自行配置」，见
+    #     docs/用户手册/语音模型自行配置.md。
+    #
+    #     · gpt-sovits/models/michele/ = 米雪儿的 GPT + SoVITS 权重（229 MB）
+    #       agent/voice.py 的 MODEL_PROFILES["michele"] 指向它——**切到米雪儿角色时**
+    #       switch_model() 调 GPT-SoVITS 的 /set_gpt_weights + /set_sovits_weights 换过去，
+    #       所以这一份缺了，米雪儿就只能纯文字。
+    #     · gpt-sovits/speakers/ = 各情绪的中文/日文参考音频（8 MB）——缺了 TTS 拿不到
+    #       ref_audio_path，任何角色都合成不出来。
+    #     ⚠ 刻意不含 GPT_SoVITS/pretrained_models（公开底模），那是第三方开源模型。
+    _voice_src = BASE / "gpt-sovits"
+    _VOICE_SKIP_PREFIX = (
+        "GPT_SoVITS/pretrained_models/",     # 3.1 GB 公开底模——用户按文档自备
+        "GPT_SoVITS/text/G2PWModel/",        # 608 MB 中文注音——同上
+    )
+    _VOICE_SKIP_DIRS = {".git", "__pycache__", ".pytest_cache"}
+    # G2PWModel 的**源压缩包**（562 MB）——解压后的 G2PWModel/ 已被上面排除，
+    # 这个 zip 不在那个前缀下，会白背一整份重复内容（打包发布版本.py 的
+    # VOICE_EXCLUDE_NAMES 早就在防同一件事，2026-09-18）。
+    _VOICE_SKIP_FILES = {"GPT_SoVITS/text/G2PWModel_1.1.zip"}
+    voice_n = 0
+    if _voice_src.is_dir():
+        for vp in sorted(_voice_src.rglob("*")):
+            if not vp.is_file():
+                continue
+            rel = vp.relative_to(_voice_src).as_posix()
+            if rel.startswith(_VOICE_SKIP_PREFIX) or rel in _VOICE_SKIP_FILES:
+                continue
+            if _VOICE_SKIP_DIRS & set(vp.parts) or vp.suffix == ".pyc":
+                continue
+            target = OUT / "gpt-sovits" / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(vp, target)
+            voice_n += 1
+        print(f"  ✅ gpt-sovits/（引擎代码 + 米雪儿声线 + 情绪参考音，共 {voice_n} 个文件；"
+              f"公开底模 3.7 GB 由用户按 docs/用户手册/语音模型自行配置.md 自备）")
+    else:
+        print("  ⚠ 没有 gpt-sovits/ 目录——语音功能不会随包")
 
     # 5. config.example.yaml（真 config 脱敏）
     import yaml

@@ -571,3 +571,32 @@ def test_scanner_regexes_compile_cleanly_no_inline_flags():
                     f"  多半是片段里带了内联标志（如 `(?m)`）而它不在表达式开头——"
                     f"Python ≥3.12 会直接让 准备发布.py 导入失败。\n"
                     f"  当前模式：{rx.pattern[:160]!r}")
+
+def test_vendored_engine_exemption_has_bite(tmp_path):
+    """`gpt-sovits/` 的扫描豁免必须**有限**：上游文件不报，我们改过的文件仍要报。
+
+    豁免理由写在 `tools/准备发布.py` 的 `SCAN_EXEMPT_PREFIXES` 注释里：
+    那是第三方 vendored 副本，自带上游作者机器的示例路径与贡献者数字 ID，
+    既不是本项目隐私、也改不干净（换版本就回来）。
+
+    这个测试是它的**阳性对照**（教训 #37）：如果哪天有人把 EXCEPTIONS 删了、
+    或者把豁免写成无条件前缀匹配，这里必须红。
+    """
+    # ① 上游文件：种一个 9 位数字 → 被豁免，不报
+    upstream = tmp_path / "gpt-sovits" / "docs" / "cn" / "README.md"
+    upstream.parent.mkdir(parents=True, exist_ok=True)
+    upstream.write_text("贡献者 2409324124\n", encoding="utf-8")
+    assert _prep.scan_sensitive(tmp_path) == []
+
+    # ② 我们加的 profile 文件：同一个数字 → 必须报
+    ours = tmp_path / "gpt-sovits" / "GPT_SoVITS" / "configs" / "tts_infer.yaml"
+    ours.parent.mkdir(parents=True, exist_ok=True)
+    ours.write_text("device: cuda  # 2409324124\n", encoding="utf-8")
+    hits = _prep.scan_sensitive(tmp_path)
+    assert any("tts_infer.yaml" in h for h in hits), hits
+
+    # ③ 我们自己写的启动包装同样不能被豁免
+    mine = tmp_path / "gpt-sovits" / "start_api_patched.py"
+    mine.write_text("# 2409324124\n", encoding="utf-8")
+    hits = _prep.scan_sensitive(tmp_path)
+    assert any("start_api_patched.py" in h for h in hits), hits
