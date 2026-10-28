@@ -1319,8 +1319,33 @@ def api_models_fetch(body: dict) -> dict:
     items = data.get("data") if isinstance(data, dict) else None
     if not isinstance(items, list):
         raise ValueError("返回里没有 data 列表（不是 OpenAI 兼容格式）")
-    ids = [str(it.get("id")) for it in items if isinstance(it, dict) and it.get("id")]
-    return {"models": ids, "count": len(ids), "endpoint": url}
+
+    # 2026-10-28：顺手把「窗口多大」带回去。DeepSeek 的 `/models` 就返回
+    # `context_window: 1048576` / `max_output_tokens`（实测），而主人在「AI 模型」
+    # 页最烦的一件事就是要自己去查窗口该填多少。这里只做**原样搬运**：
+    # 拿不到就不填（不同中转站的字段名不一样，猜错比空着更糟）。
+    details: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        mid = str(it.get("id") or "").strip()
+        if not mid:
+            continue
+        entry: dict = {"id": mid}
+        for src in ("context_window", "context_length"):
+            val = it.get(src)
+            if isinstance(val, int) and val > 0:
+                entry["context_window"] = val
+                break
+        for src in ("max_output_tokens", "max_tokens"):
+            val = it.get(src)
+            if isinstance(val, int) and val > 0:
+                entry["max_tokens"] = val
+                break
+        details.append(entry)
+
+    ids = [e["id"] for e in details]
+    return {"models": ids, "count": len(ids), "endpoint": url, "details": details}
 
 
 #: 名字里带这些片段的 Ollama 模型基本都能看图（`/api/show` 拿不到时的降级判据）

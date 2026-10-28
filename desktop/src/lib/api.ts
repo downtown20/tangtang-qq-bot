@@ -1790,7 +1790,17 @@ export const api = {
     base_url?: string
     api_key?: string
   }) =>
-    request<{ models: string[]; count: number; endpoint: string }>('/api/models/fetch', {
+    request<{
+      models: string[]
+      count: number
+      endpoint: string
+      /**
+       * 端点顺带报的容量（2026-10-28）。DeepSeek 的 `/models` 会返回
+       * `context_window` / `max_output_tokens`；只有 id 的端点这里就没有。
+       * 前端用它把窗口/最大输出自动填进新档位，省掉「自己去查窗口多大」。
+       */
+      details?: { id: string; context_window?: number; max_tokens?: number }[]
+    }>('/api/models/fetch', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

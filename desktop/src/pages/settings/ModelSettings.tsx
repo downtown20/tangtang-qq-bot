@@ -197,7 +197,12 @@ export default function ModelSettings({
   const [models, setModels] = useState<ModelDraft[]>([])
   const [providers, setProviders] = useState<ProviderDraft[]>([])
   const [secrets, setSecrets] = useState<Record<string, boolean>>({})
-  const [fetched, setFetched] = useState<{ pid: string; names: string[] } | null>(null)
+  const [fetched, setFetched] = useState<{
+    pid: string
+    names: string[]
+    // 端点顺带告诉我们的容量（DeepSeek 的 /models 就带 context_window）
+    details?: { id: string; context_window?: number; max_tokens?: number }[]
+  } | null>(null)
   const [fetchErr, setFetchErr] = useState('')
 
   const load = async () => {
@@ -361,7 +366,7 @@ export default function ModelSettings({
     setFetched(null)
     try {
       const res = await api.fetchModels({ provider_id: pid })
-      setFetched({ pid, names: res.models })
+      setFetched({ pid, names: res.models, details: res.details })
     } catch (e) {
       setFetchErr((e as Error).message)
     } finally {
@@ -411,13 +416,24 @@ export default function ModelSettings({
     await saveModels(next, activeNext)
   }
 
-  /** 从「获取可用模型」里点一个 → 追加到该 provider 的目录（同名不重复加） */
+  /** 从「获取可用模型」里点一个 → 追加到该 provider 的目录（同名不重复加）。
+   *
+   * 2026-10-28：端点**顺带报了容量**就把窗口/最大输出自动填上（DeepSeek 的
+   * `/models` 带 `context_window: 1048576`）。拿不到就留空，不猜——猜错比空着糟。
+   * 这省掉的是主人最烦的一步：自己去查「这个模型窗口多大」。 */
   const addFetched = async (pid: string, name: string) => {
     if (models.some((m) => m.provider === pid && m.model === name)) {
       setTip(`${name} 已经在目录里了`)
       return
     }
-    const d = { ...emptyModel(pid), model: name, label: name }
+    const meta = fetched?.details?.find((x) => x.id === name)
+    const d = {
+      ...emptyModel(pid),
+      model: name,
+      label: name,
+      context_window: meta?.context_window ? String(meta.context_window) : '',
+      max_tokens: meta?.max_tokens ? String(meta.max_tokens) : '64000',
+    }
     const next = [...models, d]
     setModels(next)
     await saveModels(next, active || d.id)
