@@ -1332,7 +1332,7 @@ def cmd_install(dry_run: bool, deps_root: str | None = None,
         report_ready(choices)
     print("\n━━━ 完成 ━━━")
     print("  接下来：")
-    print("    1. 双击 启动桌面端.bat → 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key")
+    print("    1. 双击 desktop\\release\\小糖糖桌面端\\小糖糖桌面端.exe → 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key")
     print("    2. 桌面端里启动 SnowLuma → 面板里注入并配好连接 → 启动糖糖")
     print("  （换机搬家：本工具菜单 2/3 打包/解包记忆快照）")
     return 0
@@ -1515,7 +1515,7 @@ def main() -> int:
         while True:
             print("小糖糖 安装/维护工具")
             print("   第一次用 → 选 1「安装依赖」：勾需要的功能，模型会自动下载并放到正确位置")
-            print("   已经装过 → 直接双击 启动桌面端.bat")
+            print("   已经装过 → 直接双击 desktop\\release\\小糖糖桌面端\\小糖糖桌面端.exe")
             print()
             print("  1. 安装依赖 — 功能选择安装（含环境/目录检测、配置调整）")
             print("  2. 打包记忆 — 手动导出快照（自动打包失败/想立即切机时用；平时自动进行）")

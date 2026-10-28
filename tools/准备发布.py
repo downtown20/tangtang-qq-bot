@@ -31,7 +31,7 @@ IGNORE_ALWAYS = shutil.ignore_patterns(
 )
 
 # 桌面端源码随发布包走（2026-10-28）。
-# ⚠ 以前只拷了 `启动桌面端.bat`，快照里根本没有 `desktop/` —— bat 的 `cd desktop`
+# ⚠ 曾经只拷了根目录的桌面端启动脚本，快照里根本没有 `desktop/` —— 脚本的 `cd desktop`
 #   必然失败（双击只会闪一下），用户以为「桌面端坏了」。
 #   这里放**源码**：够 clone 的人 `pnpm install && pnpm build` 自己构建。
 #   构建产物、依赖与绿色版 exe 都不进快照：
@@ -162,8 +162,6 @@ COPY_FILES = [
     # 改由 TOOLS_KEEP_NAMES 放行（否则随包会缺这三个文件）。
     "main.py",
     "安装糖糖.bat", "start.py",
-    # 2026-10-26：桌面端是主入口，手册/README 都指路它——必须随源码发布包走。
-    "启动桌面端.bat",  # start.py: ASCII 启动桥（bat 纯 ASCII 不能写中文文件名）
     "requirements.txt",
     # 人格角色卡（主人拍板公开）
     "role_card.md", "role_card_michele.md", "role_card_murasame.md",

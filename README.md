@@ -129,7 +129,7 @@ python -m pytest tests/ -q
 | **Python 3.10** | 糖糖本体是 Python 程序，包里不带解释器 | [python.org 的 3.10.11 下载页](https://www.python.org/downloads/release/python-31011/) 拉到底，选 **Windows installer (64-bit)**；安装时**务必勾上 `Add Python to PATH`** |
 | **QQ 客户端** | SnowLuma **不是自己登录 QQ 的**——它要注入到**已经在运行的 QQ 进程**里工作 | QQ 官网下 NT 版 9.x。装完**登录机器人那个 QQ 号，并且一直让 QQ 开着** |
 
-没装 Python 的话，双击 `安装糖糖.bat` / `启动桌面端.bat` 只会得到一行
+没装 Python 的话，双击 `安装糖糖.bat` 只会得到一行
 `[ERROR] Python 3.10 not found.` 然后窗口自己关掉。
 
 > **登录 QQ 这件事发生在 QQ 客户端里，不在 SnowLuma 里。** SnowLuma 没有二维码登录，
@@ -143,7 +143,7 @@ python -m pytest tests/ -q
 
 3. **装 SnowLuma** —— 它是连接 QQ 所需的协议端，属于第三方项目，其许可协议不允许随本项目分发，**只能你自己下载一次**：从 [官方发布页](https://github.com/SnowLuma/SnowLuma/releases) 下载 **Windows x64** 版（**认准不带 `-lite` 的那个**——精简包不带 Node.js，下错了点启动只会看到「'node' 不是内部或外部命令」），解压到项目根目录的 `SnowLuma/` 下，解压完应是 `SnowLuma/SnowLuma-vX.Y.Z-win-x64/` 这样的文件夹。安装程序会提醒你；也可以用任意其他 OneBot 11 反向 WebSocket 实现替代。（**别放进 `onebot/`**，那是糖糖自己的代码，见下方「目录结构」。）
 
-4. **双击 `启动桌面端.bat`，填基本信息** —— 左侧「设置」里填机器人 QQ、你自己的 QQ；模型 API Key 在「连接与任务 → 连接密钥」里填（那一格写进 `.env`，不是 `config.yaml`），填完点该行右侧的「保存」。
+4. **双击 `desktop\release\小糖糖桌面端\小糖糖桌面端.exe`，填基本信息** —— 左侧「设置」里填机器人 QQ、你自己的 QQ；模型 API Key 在「连接与任务 → 连接密钥」里填（那一格写进 `.env`，不是 `config.yaml`），填完点该行右侧的「保存」。
 
 5. **确保 QQ 客户端开着、登录着机器人账号，然后在桌面端「概览」页找到 `SnowLuma` 那一行、点右侧的「启动」** —— 首次启动，SnowLuma 的窗口里会打印**一行**、**只有这一次**：
 
@@ -188,7 +188,7 @@ songs/                预录歌曲（仓库只随带 4 首示例；完整曲库�
 gpt-sovits/           语音引擎与声线模型落点（勾选语音后由安装程序自动获取）
 docs/                 架构图谱、决策记录、用户手册、技术报告
 tools/                安装、诊断、维护与通用辅助脚本
-desktop/              桌面端（React + Electron）——主入口，双击 启动桌面端.bat 打开
+desktop/              桌面端（React + Electron）——主入口，双击 desktop/release/小糖糖桌面端/小糖糖桌面端.exe
 运维/                 运维脚本（Qt 图形控制台等；日常请用 desktop/ 桌面端）
 role_card.md          人格定义第一来源（另有 michele / murasame 两张）
 config.example.yaml   配置模板（首次运行或安装时复制为 config.yaml；密钥写成 ${VAR} 引用）
@@ -229,7 +229,7 @@ main.py               服务启动入口
 **先看你手里是什么：**
 
 - **发布压缩包**（解压后存在 `desktop/release/小糖糖桌面端/小糖糖桌面端.exe`）
-  → 双击根目录的 `启动桌面端.bat`，它直接启动绿色版 exe，不需要 Node。
+  → 直接双击那个 exe，不需要 Node，也不需要再解压任何东西。
 - **只有源码**（clone 仓库——`desktop/dist/`、`desktop/dist-electron/`、`desktop/release/`
   都在 ignore 里，构建产物不进仓库）→ 按下文自己构建一遍。
 
