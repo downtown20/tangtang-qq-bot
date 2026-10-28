@@ -1032,7 +1032,7 @@ def api_models() -> dict:
     和扁平 `llm.*` 推出来的（带 `derived: True`）。**读的时候不写盘**——界面
     第一次打开不该改用户的 config。
     """
-    from agent.model_refs import virtual_providers
+    from agent.model_refs import provider_conn, virtual_providers
 
     raw = _load_raw_config()
     llm = raw.get("llm") or {}
@@ -1048,8 +1048,19 @@ def api_models() -> dict:
         # 档位里的 `api_key` 不出网关（2026-10-28）：连接信息已经归 provider 组，
         # 界面也不再编辑档位级 Key。留着它就是一条没人用、但会把明文 Key
         # 塞进浏览器 network 面板的路径。
-        clean = [{k: v for k, v in p.items() if k != "api_key"}
-                 if isinstance(p, dict) else p for p in profiles]
+        #
+        # 同时补 `provider_label`（2026-10-28 主人：「预览界面的模型名字没有和
+        # AI 模型设置的名字同步」）：模型切换器原来显示 `provider`（组 **id**，
+        # 例如 `pmvro2c5y`），人看不出那是「官方Deepseek」。人话名在这一层拼好，
+        # 前端不用自己再翻一遍 providers（教训 #38：单一换算点）。
+        clean = []
+        for p in profiles:
+            if not isinstance(p, dict):
+                clean.append(p)
+                continue
+            item = {k: v for k, v in p.items() if k != "api_key"}
+            item["provider_label"] = provider_conn(raw, p)["label"]
+            clean.append(item)
         return {"profiles": clean, "active": active, "legacy": False,
                 "providers": providers}
     # 兼容旧扁平结构：合成一个「默认」档

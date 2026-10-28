@@ -207,10 +207,15 @@ export default function ModelSwitcher({ onOpenSettings }: { onOpenSettings: () =
                       disabled={busy}
                     >
                       <span className="msw-option-copy">
-                        <span className="msw-model-name">{p.model || p.label}</span>
+                        {/* 主行 = 你在「AI 模型」页起的显示名（label）。
+                            2026-10-28 主人：「预览界面的模型名字没有和 AI 模型设置的名字
+                            同步」——原来这里写的是 `p.model || p.label`，优先显示模型 ID，
+                            你起的名字只在副行当附注，等于没同步。 */}
+                        <span className="msw-model-name">{p.label || p.model}</span>
                         <span className="msw-model-meta">
-                          {p.provider}
-                          {p.label && p.label !== p.model ? ` · ${p.label}` : ''}
+                          {/* 副行 = provider 的人话名（不是组 id），后面跟模型 ID 以便对账 */}
+                          {p.provider_label || p.provider}
+                          {p.model && p.model !== p.label ? ` · ${p.model}` : ''}
                         </span>
                       </span>
                       <span className="msw-check">{isActive && <Check size={14} />}</span>
