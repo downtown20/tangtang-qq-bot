@@ -19,6 +19,7 @@
 产出（默认放在项目同级目录「小糖糖-发布版/」）：
     tangtang-v1.06.00.zip       约 700M（单文件，GitHub 上限 2G）
     附件/tangtang-voice-1ofN.zip  语音推理集分卷（仅勾了语音的用户下载）
+    附件/tangtang-desktop-X.zip  桌面端绿色版（解压到项目根，双击 启动桌面端.bat）
 
 `--no-voice`：语音分卷只从 `gpt-sovits/` 取内容（第三方引擎 + 模型），
 改代码 / 文档 / 安装器都不会影响它。补发小版本时加这个旗标，省掉
@@ -26,6 +27,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -357,6 +359,45 @@ def build_voice_parts() -> list[Path]:
 
 # ─────────────────────────────────────────
 
+# 桌面端绿色版 → Release 附件（2026-10-28）。
+#
+# 为什么不塞进主包：Electron 运行时约 180 MB，主包已经约 1 GB——每次改一行前端
+# 都要重传 180 MB，而附件可以跨版本复用（只有前端真变了才重出）。
+# 附件名必须纯 ASCII —— GitHub Releases 会吞掉附件名里的中文（同上面 PKG_NAME 的注释）。
+DESKTOP_RELEASE = BASE / "desktop" / "release" / "小糖糖桌面端"
+
+
+def _desktop_version() -> str:
+    try:
+        data = json.loads((BASE / "desktop" / "package.json").read_text(encoding="utf-8"))
+        return str(data.get("version") or "0.1.0")
+    except Exception:
+        return "0.1.0"
+
+
+def build_desktop_zip() -> Path | None:
+    """把 desktop/release/小糖糖桌面端/ 压成一个附件。
+
+    包内路径相对**项目根**（`desktop/release/小糖糖桌面端/...`），
+    所以用户「解压到项目根」之后，`启动桌面端.bat` 的第一级查找就能命中，
+    不需要任何额外配置。
+    """
+    exe = DESKTOP_RELEASE / "小糖糖桌面端.exe"
+    if not exe.is_file():
+        print("\n[!] 没找到桌面端绿色版 —— 跳过桌面端附件")
+        print("    先 `cd desktop && pnpm build`，再 `python tools/打包桌面端.py`")
+        return None
+    out = ATTACH / f"tangtang-desktop-{_desktop_version()}.zip"
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        for p in sorted(DESKTOP_RELEASE.rglob("*")):
+            if p.is_file():
+                zf.write(p, p.relative_to(BASE).as_posix())
+                n += 1
+    print(f"   ✅ {out.name}  {out.stat().st_size / 2**20:.0f} MB（{n} 个文件）")
+    return out
+
+
 def main() -> int:
     if not SNAPSHOT.is_dir():
         print(f"❌ 未找到快照 {SNAPSHOT}")
@@ -386,10 +427,15 @@ def main() -> int:
         parts = build_voice_parts()
 
     print(f"\n{'─' * 50}")
+    desktop = build_desktop_zip()
+
+    print(f"\n{'─' * 50}")
     print("✅ 全部产物")
     print(f"   安装包   {pkg.name}  {pkg.stat().st_size / 2**20:.0f} MB")
     for p in parts:
         print(f"   语音分卷 {p.name}  {p.stat().st_size / 2**30:.2f} GB")
+    if desktop:
+        print(f"   桌面端   {desktop.name}  {desktop.stat().st_size / 2**20:.0f} MB")
     if skip_voice:
         print("\n   ⚠ 分卷未重新生成——上传时可直接复用上一版的附件")
     return 0
