@@ -1296,7 +1296,20 @@ def api_models_fetch(body: dict) -> dict:
     except Exception as e:
         raise ValueError(f"连接失败: {type(e).__name__}: {e}")
     if r.status_code == 401:
-        raise ValueError("401 鉴权失败：这个 Key 与该接口地址不匹配")
+        # 2026-10-28：原来的文案是「这个 Key 与该接口地址不匹配」——把主人引向了
+        # 「是不是协议/地址选错了」的方向。但 401 是**鉴权**层的事，协议决定的是
+        # 请求体/响应体格式，在鉴权之前就死了。实测：同一把 Key 打 `api.deepseek.com/models`
+        # 和 `/v1/models`（同一套协议、两个地址）都是 401，DeepSeek 原文是
+        # `Your api key: ****0665 is invalid` —— 就是 Key 本身无效。
+        # 所以文案要把「Key 无效」和「Key 不属于这家」两种可能都说清，并附上服务商原文。
+        detail = ""
+        try:
+            detail = r.text[:180]
+        except Exception:
+            pass
+        raise ValueError(
+            f"401 鉴权失败：这把 Key 无效或不属于这家服务商（不是协议/地址问题——"
+            f"鉴权在协议解析之前）。服务商原文：{detail or '(无)'}")
     if r.status_code >= 400:
         raise ValueError(f"HTTP {r.status_code}: {r.text[:200]}")
     try:
@@ -1766,7 +1779,9 @@ def api_chat(body: dict) -> dict:
     except Exception as e:
         raise ValueError(f"连接失败: {type(e).__name__}: {e}")
     if r.status_code == 401:
-        raise ValueError("401：这个 Key 与该接口地址不匹配")
+        raise ValueError(
+            "401：这把 Key 无效或不属于这家服务商（不是协议/地址问题）。"
+            f"服务商原文：{(r.text or '')[:180] or '(无)'}")
     if r.status_code >= 400:
         raise ValueError(f"HTTP {r.status_code}: {r.text[:200]}")
     data = r.json()
