@@ -484,10 +484,6 @@ class VoiceEngine:
         "angry": ("zh", "可恶，我竟然会被你这种家伙干掉。"),
         "disgust": ("zh", "哇，好疼！"),
         "murasame": ("ja", "今は寝かせておいてやれ 徹夜でご主人の看病をしておったのだ"),
-        "xueli": ("ja", "いや、現実に魔法があるっていうので、私はもうびっくりなんですけどね"),
-        "xueli_gentle": ("ja", "すごいすごいすごい、ノアさん、サインください!"),
-        "xueli_happy": ("ja", "あなたからは面白そうな匂いがぷんぷんしているので"),
-        "xueli_tsundere": ("ja", "なんかすごいことが起こっているのを感じます"),
     }
 
     def _resolve_speaker(self, emotion_tag: str) -> str:

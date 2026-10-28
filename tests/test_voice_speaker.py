@@ -297,6 +297,20 @@ class TestMicheleAssetMigration:
             assert "michele" in source
             assert "xueli" not in source
 
+        # 2026-10-28：雪莉的 4 个参考音（xueli / xueli_gentle / xueli_happy /
+        # xueli_tsundere，共 3.6 MB）与 _SPEAKER_PROMPT 里的 4 条日语 prompt
+        # 一起下线——它们是「雪莉并入米雪儿」之后的遗留：`/角色 雪莉` 走的是
+        # 米雪儿分支（current_speaker=""），代码里**没有任何地方**把这 4 个名字
+        # 设成 current_speaker，所以它们永远选不到，只是白占体积。
+        # 删代码就要补该路径的回归测试（教训 #25：删了不测，下次有人加回来没人管）。
+        voice_source = (root / "agent" / "voice.py").read_text(encoding="utf-8")
+        assert "xueli" not in voice_source, "voice.py 里又出现 xueli 了"
+        speaker_dir = root / "gpt-sovits" / "speakers"
+        if speaker_dir.is_dir():
+            leftover = [d.name for d in speaker_dir.iterdir()
+                        if d.is_dir() and d.name.startswith("xueli")]
+            assert not leftover, f"speakers/ 里还有已下线的参考音：{leftover}"
+
 
 class TestServiceHealthPromptContract:
     def test_health_check_uses_same_normal_prompt_as_voice_engine(self):
