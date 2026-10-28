@@ -188,6 +188,7 @@ songs/                预录歌曲（仓库只随带 4 首示例；完整曲库�
 gpt-sovits/           语音引擎与声线模型落点（勾选语音后由安装程序自动获取）
 docs/                 架构图谱、决策记录、用户手册、技术报告
 tools/                安装、诊断、维护与通用辅助脚本
+desktop/              桌面端（React + Electron）——主入口，双击 启动桌面端.bat 打开
 运维/                 运维脚本（Qt 图形控制台等；日常请用 desktop/ 桌面端）
 role_card.md          人格定义第一来源（另有 michele / murasame 两张）
 config.example.yaml   配置模板（首次运行或安装时复制为 config.yaml；密钥写成 ${VAR} 引用）
@@ -224,8 +225,13 @@ main.py               服务启动入口
 ## 桌面端（可选）
 
 `desktop/` 是 React + Electron 的图形控制台（替代旧 Qt 控制台，旧版移入 `运维/`，功能保留）。
-**构建产物不进仓库**（`desktop/dist/`、`desktop/dist-electron/`、`desktop/release/` 都在 ignore 里），
-所以从 clone 到窗口出现，要自己构建一遍。
+
+**先看你手里是什么：**
+
+- **发布压缩包**（解压后存在 `desktop/release/小糖糖桌面端/小糖糖桌面端.exe`）
+  → 双击根目录的 `启动桌面端.bat`，它直接启动绿色版 exe，不需要 Node。
+- **只有源码**（clone 仓库——`desktop/dist/`、`desktop/dist-electron/`、`desktop/release/`
+  都在 ignore 里，构建产物不进仓库）→ 按下文自己构建一遍。
 
 前置：Node.js 20 LTS 或更高 + pnpm 9 或更高（`npm i -g pnpm`；依赖由 `pnpm-lock.yaml` 锁定）。
 
@@ -243,6 +249,9 @@ pnpm build       # tsc 类型检查 + vite 构建 → dist/（渲染进程）+ d
 cd ..
 python tools/打包桌面端.py    # 组装绿色版、建快捷方式
 ```
+
+> ⚠ 打包前先关掉正在运行的桌面端。Windows 会锁住 `release/` 里的 `.pak` / `.dll`，
+> 脚本清理旧产物时会抛 `PermissionError: [WinError 5]`，并停在半清理状态。
 
 产物位置：渲染进程 `desktop/dist/index.html`、主进程 `desktop/dist-electron/main.js`
 （`desktop/package.json` 的 `main` 指向它）。也可以构建完直接

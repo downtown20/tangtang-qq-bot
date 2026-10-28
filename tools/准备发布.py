@@ -30,13 +30,28 @@ IGNORE_ALWAYS = shutil.ignore_patterns(
     "*.bak*", "*.log", "*.db", "*.db-shm", "*.db-wal", ".DS_Store",
 )
 
+# 桌面端源码随发布包走（2026-10-28）。
+# ⚠ 以前只拷了 `启动桌面端.bat`，快照里根本没有 `desktop/` —— bat 的 `cd desktop`
+#   必然失败（双击只会闪一下），用户以为「桌面端坏了」。
+#   这里放**源码**：够 clone 的人 `pnpm install && pnpm build` 自己构建。
+#   构建产物、依赖与绿色版 exe 都不进快照：
+#     · dist/ dist-electron/ 由 pnpm build 生成，跟着工具链版本变，不该固化
+#     · node_modules/ 110 MB，由 pnpm-lock.yaml 锁版本
+#     · release/ 是 180 MB 的绿色版，走 Release 附件（GitHub 单文件 2G 上限内）
+DESKTOP_IGNORE = shutil.ignore_patterns(
+    "node_modules", "dist", "dist-electron", "release", ".vite", "*.log",
+)
+
 # ═══════════════════════════════════════
 # 主仓白名单（发布清单 v1 冻结）
 # ═══════════════════════════════════════
 
 COPY_DIRS = ["agent", "onebot", "tests", "scenarios", "stickers", "stickers_cg", "knowledge",
              # 2026-10-26：Qt 运维控制台从根目录移入 运维/（不再冒充启动入口）——整目录随发布。
-             "运维"]
+             "运维",
+             # 2026-10-28：桌面端源码（React + Electron）是 main 启动入口，
+             # 详见 DESKTOP_IGNORE 的注释（构建产物与绿色版不进快照）。
+             "desktop"]
 # knowledge/ 整目录拷时额外剔除（2026-09-05 主人裁决 v2）：
 #
 # ⚠ 2026-10-23 主人定案**取代**上面那条「只发软色情 2 篇」：
@@ -742,7 +757,12 @@ def main() -> None:
     for d in COPY_DIRS:
         src = BASE / d
         if src.is_dir():
-            ign = _merged_ignore(IGNORE_ALWAYS, KNOWLEDGE_IGNORE) if d == "knowledge" else IGNORE_ALWAYS
+            if d == "knowledge":
+                ign = _merged_ignore(IGNORE_ALWAYS, KNOWLEDGE_IGNORE)
+            elif d == "desktop":
+                ign = _merged_ignore(IGNORE_ALWAYS, DESKTOP_IGNORE)
+            else:
+                ign = IGNORE_ALWAYS
             shutil.copytree(src, OUT / d, ignore=ign)
             print(f"  ✅ {d}/")
 
