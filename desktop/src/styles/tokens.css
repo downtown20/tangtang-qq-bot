@@ -100,6 +100,32 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 
   --focus-ring: 0 0 0 2px var(--accent);
+
+  /* ── 补漏区（2026-10-28）────────────────────────────────────────
+     这几个名字被页面引用过、却从来没在 token 表里定义：共 51 处悬空引用，
+     其中 36 处**没有 fallback** → 整条声明静默失效（`--bg-layer-4` 一处就 24 处，
+     进度条槽和小标签底完全没有背景色）。
+     用户立的规矩：「不得引用不存在的变量名（变量名写错不会报错，只会静默回退
+     到错误颜色）」。补齐比改 51 处引用更小，也一次把所有主题修好。
+     闸门：`tests/test_desktop_css_tokens_contract.py`。 */
+
+  /* 层级：layer-1 = 最底（等同 base）；layer-4 = 比 layer-3 再深一档，
+     用于「嵌在卡片里的中性填充」（进度条槽、小圆标签底） */
+  --bg-layer-1: var(--bg-base);
+  --bg-layer-4: #eceef0;
+
+  /* 兼容别名：老页面用过的名字，统一指向语义 token，主题切换自动跟随 */
+  --line: var(--border-l2);
+  --bg-elevated: var(--bg-layer-2);
+  --surface-2: var(--bg-layer-2);
+
+  /* 状态底色（与已有的 --error-soft 配对） */
+  --warning: var(--warn);
+  --warning-soft: rgba(245, 158, 11, 0.1);
+  --success-soft: rgba(34, 197, 94, 0.1);
+
+  --fs-10: 10px;
+  --sidebar-inline-padding: 12px;
 }
 
 /* 深色主题（DSH dark alias） */
@@ -138,4 +164,11 @@
 
   --elevation-prominent: 0 0 0 0.5px var(--border-l4), 0 3px 8px #0000000a,
     0 0 20px #0000000d;
+
+  /* 深色下只需覆盖「需要换值」的那几个；别名的几个（--line / --bg-elevated /
+     --surface-2 / --warning）内部引用的是会随主题变的 token，自动跟随。 */
+  --bg-layer-1: var(--bg-base);
+  --bg-layer-4: #3d3f42;
+  --warning-soft: rgba(245, 158, 11, 0.16);
+  --success-soft: rgba(34, 197, 94, 0.16);
 }

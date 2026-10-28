@@ -320,7 +320,8 @@
         "path": "voice.provider",
         "label": "语音引擎",
         "type": "label",
-        "hint": "GPT-SoVITS（固定）"
+        "hint": "GPT-SoVITS（固定）",
+        "always": true
       },
       {
         "path": "voice.cache_dir",
@@ -512,7 +513,8 @@
         "path": "_img_gen_note",
         "label": "功能状态",
         "type": "label",
-        "hint": "🔒 AI画图功能已暂时关闭。\n"
+        "hint": "🔒 AI画图功能已暂时关闭。\n",
+        "always": true
       }
     ]
   },

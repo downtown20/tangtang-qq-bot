@@ -123,7 +123,7 @@ export default function ModelPicker({
         {error && <div className="model-picker-err">拉不到模型清单：{error}</div>}
         {!error && groups === null && (
           <div className="model-picker-hint">
-            <Loader2 size={12} className="spin" /> 正在拉模型清单…
+            <Loader2 size={12} className="spin" /> 正在拉模型清单…（本机 Ollama 没在跑时会多等一会儿）
           </div>
         )}
         {!error && filtered && filtered.length === 0 && (

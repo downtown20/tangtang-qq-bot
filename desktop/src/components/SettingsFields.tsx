@@ -13,6 +13,12 @@ export type FieldDef = {
   hint?: string
   /** 仅 `secret` 类型：要写进 .env 的变量名。`auto` = 跟着当前 provider 走。 */
   secret_env?: string
+  /**
+   * 仅 `label` 类型：这块说明是**数据/状态**而不是解释，讲解模式关掉时也要显示。
+   * 例：「语音引擎：GPT-SoVITS（固定）」「AI 画图功能已暂时关闭」——藏掉会让人
+   * 以为功能没了。默认（不写）算解释，讲解关了跟着隐藏。
+   */
+  always?: boolean
 }
 
 /** 用途的中文名（与 `agent/model_refs.KIND_LABELS` 同一套词） */
@@ -78,8 +84,13 @@ export default function SettingsFields({
         const value = getAt(config, f.path)
 
         if (f.type === 'label') {
+          // 说明块默认算「解释」，讲解模式关掉时一起隐藏（`explain-only` 由
+          // `html[data-explain='off'] [class*='explain-only']` 统一收口）。
+          // 但有些 label 是**数据/状态**而不是解释——比如「语音引擎：GPT-SoVITS（固定）」
+          // 和「AI 画图功能已暂时关闭」。把状态一起藏掉会让人以为功能没了，
+          // 所以那几条在 schema 里标 `always: true`（2026-10-28）。
           return (
-            <div className="dsl-note" key={f.path}>
+            <div className={'dsl-note' + (f.always ? '' : ' explain-only')} key={f.path}>
               {f.hint || f.label}
             </div>
           )

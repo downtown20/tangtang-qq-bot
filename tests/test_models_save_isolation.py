@@ -346,3 +346,45 @@ def test_models_save_restores_effort_when_thinking_back_on(bridge):
     }]})
     llm = _cfg(bridge)["llm"]
     assert (llm["thinking"], llm["thinking_effort"]) == ("on", "high")
+
+
+# ── 8. 保存时按 id 合并：前端不认识的键不许被抹掉 ────────────────────
+def test_models_save_keeps_unknown_keys_from_disk(bridge):
+    """`llm.models` 原来是全量覆盖：请求体里没有的键会被从 config 里删掉。
+
+    2026-10-28 的实际影响：前端为了让老档位的 `kinds` 不丢，只能「不显示但原样
+    透传」——那是治表。按 id 合并之后，前端没发的键一律保留（字段的拥有者是
+    「这一条档位」，那就只改前端送来的那几个键）。
+    """
+    import yaml
+    cfg = yaml.safe_load(bridge.CONFIG_PATH.read_text(encoding="utf-8"))
+    model = cfg["llm"]["models"][0]
+    model["kinds"] = ["chat", "tag"]          # 老档位的用途标注
+    model["future_field"] = {"nested": 1}     # 以后才会有的字段
+    bridge.CONFIG_PATH.write_text(
+        yaml.dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    # 模拟「前端只发了它认识的键」
+    bridge.api_models_save({"models": [{
+        "id": model["id"],
+        "label": "改过的名字",
+        "provider": model.get("provider") or "custom",
+        "model": model.get("model") or "chat-model",
+    }]})
+
+    after = _cfg(bridge)["llm"]["models"][0]
+    assert after["label"] == "改过的名字", "请求体里的键要生效"
+    assert after["kinds"] == ["chat", "tag"], "前端没发的键被抹掉了"
+    assert after["future_field"] == {"nested": 1}, "未知字段被抹掉了"
+
+
+def test_models_save_still_strips_connection_fields(bridge):
+    """合并不能把 base_url / api_key 又带回来（那俩归 provider 组表）。"""
+    bridge.api_models_save({"models": [{
+        "id": "chat", "label": "聊天档", "provider": "custom", "model": "chat-model",
+        "base_url": "https://should-not-persist.example/v1",
+        "api_key": "sk-should-not-persist",
+    }]})
+    model = _cfg(bridge)["llm"]["models"][0]
+    assert "base_url" not in model
+    assert "api_key" not in model

@@ -1157,6 +1157,16 @@ def api_models_save(body: dict) -> dict:
     if not isinstance(models, list):
         raise ValueError("models 必须是数组")
 
+    # 以磁盘上同 id 的档位为底、用请求体覆盖 —— 这样**前端不认识的键会保留**。
+    # 2026-10-28：原来是 `entry = dict(item)` 全量覆盖，任何一次保存都会把条目里
+    # 没有的键（老档位的 `kinds`、以后加的新字段）从 config.yaml 里抹掉。
+    # 前端当时的规避是「不显示但原样透传」，那是治表；这里按 id 合并才是治根
+    # （教训 #54 的反面用法：字段的拥有者是「这一条档位」，那就只改前端送来的那些键）。
+    disk_by_id: dict[str, dict] = {}
+    for p in llm.get("models") or []:
+        if isinstance(p, dict) and str(p.get("id") or "").strip():
+            disk_by_id[str(p["id"]).strip()] = p
+
     clean: list[dict] = []
     seen: set[str] = set()
     for item in models:
@@ -1168,7 +1178,9 @@ def api_models_save(body: dict) -> dict:
         if mid in seen:
             raise ValueError(f"模型档位 id 重复: {mid}")
         seen.add(mid)
-        entry = dict(item)
+        entry = dict(disk_by_id.get(mid) or {})
+        entry.update(item)
+        entry["id"] = mid
         entry.pop("base_url", None)
         entry.pop("api_key", None)
         clean.append(entry)
@@ -1308,8 +1320,28 @@ def api_ollama_models(body: dict) -> dict:
     import httpx
 
     root = _ollama_root(body.get("host", ""))
+
+    # 2026-10-28（主人在界面上当场遇到）：「不启动 ollama，下拉选择模型就一直不显示
+    # 模型列表」。原因不是列表坏了，而是这一步是 `/api/models/picker` 里的**串行前置**：
+    # 真机上 Ollama 没启动时多半是 ConnectionRefused（很快），但「端口被占 / 正在启动 /
+    # 防火墙 DROP」会把 HTTP 超时吃满，于是**云端档位也一起被拖住**——用户看到的就是
+    # 一个小转圈，6 秒以上。
+    #
+    # 先做 TCP 预检：连不上就别发 HTTP 了，立刻返回可读的话。只在指向本机时预检
+    # （内网 Ollama 的 0.4s 探测会把慢一点的机器误判成「没启动」）。
+    parsed = urlparse(root)
+    if parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+        if not _port_open(parsed.port or 11434):
+            return {
+                "ok": False,
+                "host": root,
+                "models": [],
+                "error": f"Ollama 没在跑（{root} 连不上）。启动它之后点右上角刷新。",
+            }
+
     try:
-        r = httpx.get(root + "/api/tags", timeout=8.0)
+        # 2.5s：本机端点要么秒回要么就是有问题，等 8 秒只会让界面转圈
+        r = httpx.get(root + "/api/tags", timeout=2.5)
         r.raise_for_status()
         payload = r.json()
     except Exception as exc:
@@ -1333,7 +1365,7 @@ def api_ollama_models(body: dict) -> dict:
         info["input"] = ["text"]
         info["context_window"] = 0
         try:
-            sr = httpx.post(root + "/api/show", json={"model": name}, timeout=12.0)
+            sr = httpx.post(root + "/api/show", json={"model": name}, timeout=1.5)
             if sr.status_code < 400:
                 shown = sr.json() if isinstance(sr.json(), dict) else {}
                 caps = shown.get("capabilities") or []
