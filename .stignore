@@ -52,3 +52,10 @@ _tmp_shots/
 .pytest_cache/
 *.bak
 *.bak-*
+
+// ── git 目录（2026-10-28 重写历史后加）──────────────────────
+// 两机 hash 全变了，Syncthing 若继续同步 .git/ 会把对端的旧 objects/refs/index
+// 和本机混在一起（典型症状：refs/heads/main.sync-conflict-*、index 损坏、
+// 「fatal: bad object」）。这类冲突没有安全的自动合并方式。
+// 以后两机各自由 git 自己对齐（fetch / reset --hard / push），文件同步器不碰它。
+.git/

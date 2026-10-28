@@ -269,7 +269,7 @@ class KnowledgeBase:
 
     def _load(self):
         """加载所有 .md/.txt 文件并切块，构建搜词扩展索引。
-        2026-08-15：千恋万花_丛林.txt 因扩展名被 rglob("*.md") 忽略，从未加载——已修。"""
+        2026-08-15：某个本地 .txt 因扩展名被 rglob("*.md") 忽略，从未加载——已修。"""
         self.chunks = []
         self._semantic_segments = []
         self._semantic_segments_fingerprint = ""

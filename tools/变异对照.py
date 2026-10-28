@@ -15,7 +15,8 @@
     python tools/变异对照.py --target agent/foo.py --tests tests/test_foo.py \
         --mut "M1:旧串=>新串" --mut "M2:旧串=>新串"
 
-或写一份 spec（推荐；串里有换行时只能这样；spec 都放在仓库根的 `变异/` 目录下）：
+或写一份 spec（推荐；串里有换行时只能这样；spec 都放在仓库根的 `变异/` 目录下——
+该目录 2026-10-28 起不进公开仓库，只在本机开发时使用，clone 下来没有它是正常的）：
 
     python tools/变异对照.py --spec 变异/变异.json
 

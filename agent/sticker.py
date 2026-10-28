@@ -247,8 +247,8 @@ class StickerManager:
     def _filename_scene_text(filename: str) -> str:
         """CG 图库的名字 fallback：按 `场景_场景_hash.ext` 命名时取场景段。
 
-        与情绪版同一条纪律（命名即标签）：CG 素材按
-        `tools/抓取CG素材.py` 的规范落库后，即使 metadata.json 丢了，
+        与情绪版同一条纪律（命名即标签）：CG 素材按本机的抓取脚本命名落库
+        （该脚本含本机专用信息，2026-10-28 起不进公开仓库），即使 metadata.json 丢了，
         只靠文件名也能被 `[贴图:后入]` 检索到。词表以 cg_scenes 为唯一来源
         （缺省时本函数返回空串，绝不影响默认图库）。
         """

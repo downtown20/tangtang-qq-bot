@@ -178,7 +178,6 @@ SnowLuma/             QQ 协议端落点——第三方程序，要你自己下�
 knowledge/            知识库——糖糖可检索的背景知识，递归扫描 .md / .txt
 scenarios/            场景包——心理陪伴、亲密等，桌面端可挂载到任何人身上
 prompts/              协议文本覆盖层——放同名 .md 覆盖 protocols.py 的某条协议，删掉即回落内置默认
-变异/                 变异测试规格（变异×.json：一次行为改动对应的对照样本）
 stickers/             默认表情包库落点（表情包不在仓库里，按「素材准备」自备）
 stickers_cg/          特殊 CG 表情落点（同上）
 stickers_michele/     米雪儿角色专属表情落点（同上）
