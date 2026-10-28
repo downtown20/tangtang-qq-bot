@@ -356,6 +356,33 @@ _EXTRA_ENV_NAMES = {
 }
 
 
+def _referenced_env_names() -> dict[str, str]:
+    """配置里**已经被引用到**的 `${VAR}` 名 → 人话标签。
+
+    2026-10-28 主人报的 bug：在 AI 模型页新建一个 provider、粘 Key 回车 → 输入框
+    被清空、界面仍显示「没填」。根因就是这里：白名单原来只认 `PROVIDER_KEY_ENV`
+    那 5 个固定 provider（deepseek/openai/anthropic/xai/custom），而新建组自动生成
+    的引用是 `${PMVRO2C5Y_KEY}` 这种 —— 不在白名单 → 写入被 400 拒绝；前端又已经
+    先把输入框清空了，于是看起来就是「清空 + 没填」。
+
+    放行范围仍然是**白名单**：只认「配置里真的写了 `${VAR}` 引用」的名字，不是任意键。
+    """
+    out: dict[str, str] = {}
+    try:
+        raw = _load_raw_config()
+    except Exception:
+        return out
+    pattern = re.compile(r"^\$\{([A-Z_][A-Z0-9_]*)\}$")
+    for group in ((raw.get("llm") or {}).get("providers") or []):
+        if not isinstance(group, dict):
+            continue
+        match = pattern.match(str(group.get("api_key") or "").strip())
+        if match:
+            who = group.get("label") or group.get("id") or "自定义"
+            out[match.group(1)] = f"LLM API Key（{who}）"
+    return out
+
+
 def _secret_env_names() -> dict[str, str]:
     """{环境变量名: 人话标签}——只含「新用户最先要填的两个值」。
 
@@ -370,6 +397,9 @@ def _secret_env_names() -> dict[str, str]:
     # 仍然是白名单：只有 PROVIDER_KEY_ENV 表里有的键 + 三个固定项。
     out = {env: f"LLM API Key（{prov}）" for prov, env in PROVIDER_KEY_ENV.items()}
     out.update(_EXTRA_ENV_NAMES)
+    # 2026-10-28：再加上「配置里已经引用到的」——新建 provider 组自动生成的
+    # `${PMVRO2C5Y_KEY}` 这类名字靠这行才进得来（不改它，新组的 Key 永远存不进去）。
+    out.update(_referenced_env_names())
     return out
 
 

@@ -130,11 +130,25 @@ def test_env_example_covers_every_reference_in_template():
     text = yaml.dump(mod.scrub_cfg(_real_config()), allow_unicode=True,
                      default_flow_style=False, sort_keys=False)
     refs = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)\}", text))
+
+    # 2026-10-28：排除「provider 组自动生成的 KEY」。
+    # 前端在新建 provider 时会落一个 `${<组id大写>_KEY}` 引用（例如组 id 是
+    # `pmvro2c5y` → `${PMVRO2C5Y_KEY}`），那个名字**每次新建都变**，写进
+    # `.env.example` 毫无意义（用户照着抄下一行，代码里也没有对应读取点）。
+    # 判据按前端生成规则精确匹配，不是「凡是 _KEY 结尾都放过」——
+    # 用户手写的 `${MY_API_KEY}` 仍然要求出现在模板里。
+    providers = ((_real_config().get("llm") or {}).get("providers") or [])
+    auto = {
+        f"{str(p.get('id', '')).upper()}_KEY".replace("-", "_")
+        for p in providers
+        if isinstance(p, dict) and str(p.get("id") or "").strip()
+    }
+
     gen = re.search(r'\(OUT / "\.env\.example"\)\.write_text\((.*?)\n\s+encoding="utf-8"\)',
                     PUBLISH_TOOL.read_text(encoding="utf-8"), re.S)
     assert gen, "找不到 .env.example 的生成处——本闸门失去了锚点"
     example = gen.group(1)
-    missing = sorted(r for r in refs if f"{r}=" not in example)
+    missing = sorted(r for r in refs - auto if f"{r}=" not in example)
     assert not missing, (
         f".env.example 缺这些键：{missing}——模板引用了它们，"
         f"用户却不知道变量该叫什么名字")

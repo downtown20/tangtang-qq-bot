@@ -291,12 +291,16 @@ export default function ModelSettings({
     }
   }
 
-  /** 写 Key：引用形态写 `.env`（真值不进 config.yaml），否则先落引用再写值 */
-  const saveProviderKey = async (pid: string, rawValue: string) => {
+  /** 写 Key：引用形态写 `.env`（真值不进 config.yaml），否则先落引用再写值。
+   *
+   * 返回**是否成功**：调用方据此决定要不要清空输入框。2026-10-28 主人报的
+   * 「粘 Key 回车后输入框清空、界面仍显示没填」就是这里没返回值 —— 失败也清空，
+   * 用户手里那串 key 直接丢了（而且没有任何可重试的痕迹）。 */
+  const saveProviderKey = async (pid: string, rawValue: string): Promise<boolean> => {
     const v = rawValue.trim()
-    if (!v) return
+    if (!v) return false
     const group = providerList.find((p) => p.id === pid)
-    if (!group) return
+    if (!group) return false
     setBusy(pid)
     setError('')
     try {
@@ -310,8 +314,10 @@ export default function ModelSettings({
       await api.saveSecret(env, v)
       setTip(`已写进 .env 的 ${env} —— 重启糖糖后生效`)
       await load()
+      return true
     } catch (e) {
       setError((e as Error).message)
+      return false
     } finally {
       setBusy('')
     }
@@ -573,11 +579,13 @@ export default function ModelSettings({
                       ? `粘贴新值（写进 .env 的 ${env}）`
                       : '粘贴 API Key（会写进 .env，不回显）'}
                     spellCheck={false}
-                    onKeyDown={(e) => {
+                    onKeyDown={async (e) => {
                       if (e.key !== 'Enter') return
                       const el = e.currentTarget
-                      void saveProviderKey(group.id, el.value)
-                      el.value = ''
+                      // 只有写成功了才清空：失败时把用户粘的那串留在框里，
+                      // 否则他连重试的机会都没有（2026-10-28 主人报的 bug）。
+                      const ok = await saveProviderKey(group.id, el.value)
+                      if (ok) el.value = ''
                     }}
                   />
                   <span className="form-hint">回车保存</span>
