@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import warnings
 from pathlib import Path
 
@@ -223,3 +224,84 @@ class TestPositiveControl:
     def test_intact_text_reports_nothing(self):
         """阴性对照：完好的文本必须干净，否则闸门会被当噪音忽略。"""
         assert _missing(REQUIREMENTS.read_text(encoding="utf-8")) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-11-14 追加：torchaudio 的归属
+#
+# 用户实机报障（v1.08.01 包内复现确认）：功能选择里**只勾第 1 项**（聊天+高质量记忆），
+# 安装清单里却挂着 `torchaudio==...+cu130`——那是第 2 项（发语音 / GPT-SoVITS）的库。
+#
+# 机制：`install_groups` 原先用 `wants_torch` 决定要不要装 torchaudio，而「记忆」组
+# 也声明了 torch（BGE 向量/精排要它）。于是「记忆」把语音侧的库一起带走；
+# xpu / cpu 两档更直接，torchaudio 就写在 `pkgs`（主清单）里。
+#
+# torchaudio 的真实消费者只有 GPT-SoVITS（gpt-sovits/api_v2.py:122 顶层 import），
+# 所以判据是：**只有声明了 `audio: True` 的组装它**。
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PKG_NAME = re.compile(r"^\s*([A-Za-z0-9._-]+)")
+
+
+def _pkg_name(spec: str) -> str:
+    m = _PKG_NAME.match(spec)
+    return (m.group(1) if m else spec).lower()
+
+
+def _installer_literal(name: str):
+    """解析 安装糖糖.py 里名为 name 的模块级字面量赋值（AST 读文本，**不执行文件**）。"""
+    tree = ast.parse(INSTALLER.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    return ast.literal_eval(node.value)
+    raise AssertionError(f"安装糖糖.py 里找不到模块级赋值 {name}——解析锚点没了")
+
+
+def _torchaudio_in_main_pkgs(variants: dict) -> list[str]:
+    """哪些档位把 torchaudio 写进了**主** pkgs（`soft_pkgs` 允许，那是按需安装的）。"""
+    bad = []
+    for name, spec in variants.items():
+        if any(_pkg_name(p) == "torchaudio" for p in spec.get("pkgs", ())):
+            bad.append(name)
+    return sorted(bad)
+
+
+class TestTorchaudioBelongsToVoiceOnly:
+    """torchaudio 随「语音」组，不随「记忆」组——用户看到的「选 1 顺带选 2」就是它。"""
+
+    def test_variants_are_all_present(self):
+        """覆盖面自证：档位表读空了的话，下面两条会对着空气绿。"""
+        variants = _installer_literal("TORCH_VARIANTS")
+        assert {"cuda", "xpu", "cpu"} <= set(variants), (
+            f"只解析到档位 {sorted(variants)}——torch 档位表被改名或结构变了")
+
+    def test_no_variant_puts_torchaudio_in_main_pkgs(self):
+        variants = _installer_literal("TORCH_VARIANTS")
+        bad = _torchaudio_in_main_pkgs(variants)
+        assert bad == [], (
+            f"档位 {bad} 把 torchaudio 写进了主 pkgs——只勾第 1 项的用户会跟着装上语音侧的库。"
+            "\n改成 soft_pkgs，并让 install_groups 用 wants_audio 控制。")
+
+    def test_only_the_voice_group_declares_audio(self):
+        groups = _installer_literal("GROUPS")
+        audio = sorted(g for g, spec in groups.items() if spec.get("audio"))
+        assert audio == ["语音"], (
+            f"声明 audio 的组是 {audio}，应当只有「语音」。"
+            "\n多一个组 = 多一批用户被顺带装上 torchaudio；少一个 = 勾了语音却不装它。")
+
+    def test_soft_torch_is_gated_by_wants_audio(self):
+        """接线断言：soft 增补的条件必须问「有没有语音」，而不是「有没有 torch」。"""
+        src = INSTALLER.read_text(encoding="utf-8")
+        assert 'wants_audio = any(GROUPS[g].get("audio") for g in groups)' in src, (
+            "install_groups 里找不到 wants_audio 的判定——torchaudio 又会被 wants_torch 带走")
+        assert "torch_soft_spec(vname) if (wants_torch and wants_audio) else None" in src, (
+            "soft_torch 的门条件变了——请确认它仍然要求 wants_audio")
+
+    def test_gate_reports_a_planted_regression(self):
+        """阳性对照（教训 #30）：把旧形态喂进判定，它必须报红。"""
+        planted = {"cuda": {"pkgs": ["torch==2.13.0+cu130"]},
+                   "cpu": {"pkgs": ["torch", "torchaudio"]}}
+        assert _torchaudio_in_main_pkgs(planted) == ["cpu"], (
+            "旧形态（cpu 档 pkgs 里带 torchaudio）没被判定抓住——闸门认不出真样本")

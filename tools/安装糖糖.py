@@ -123,7 +123,14 @@ TORCH_VARIANTS = {
     "xpu": {
         "label": "XPU（Intel 核显 / Arc）",
         "needs": "Intel Arc / Iris Xe 核显（AMD 的核显不算，见下一档）",
-        "pkgs": ["torch==2.9.1+xpu", "torchaudio==2.9.1+xpu"],
+        # [!] 2026-11-14：torchaudio 原是 `pkgs` 里的第二项，于是**任何**要 torch 的组
+        #   （包括「记忆」，BGE 只要 torch）都会把它装进来。用户报告"只勾第 1 项却连
+        #   第 2 项（语音）的库一起装了"。torchaudio 只有 GPT-SoVITS 用
+        #   （gpt-sovits/api_v2.py:122 顶层 import torchaudio），改成 soft——由
+        #   install_groups 按「是否勾了语音」决定装不装。
+        "pkgs": ["torch==2.9.1+xpu"],
+        "soft_pkgs": ["torchaudio==2.9.1+xpu"],
+        "soft_kwargs": {"index-url": "https://download.pytorch.org/whl/xpu", "no-deps": True},
         "kwargs": {"index-url": "https://download.pytorch.org/whl/xpu", "no-deps": True},
         "cost": "比 CPU 快得多；装成后自动走 XPU，否则回落 CPU",
         "verdict": "可用（beta）——功能与 CUDA 档相同",
@@ -131,7 +138,10 @@ TORCH_VARIANTS = {
     "cpu": {
         "label": "CPU（无可用加速器）",
         "needs": "任何机器都能装；AMD 核显/独显也走这一档",
-        "pkgs": ["torch", "torchaudio"],
+        # 同上：torchaudio 走 soft，只随「语音」组装。
+        "pkgs": ["torch"],
+        "soft_pkgs": ["torchaudio"],
+        "soft_kwargs": {"index-url": "https://download.pytorch.org/whl/cpu"},
         "kwargs": {"index-url": "https://download.pytorch.org/whl/cpu"},
         "cost": "语音 100 字 198.2 秒（长语音要等三分钟）",
         "verdict": "能用但很慢——识图建议走云端、语音长句要等",
@@ -293,7 +303,12 @@ def torch_pip_spec(variant: str) -> tuple[list[str], dict]:
 
 
 def torch_soft_spec(variant: str) -> tuple[list[str], dict] | None:
-    """档位的「软增补」（目前只有 CUDA 档有：dev 轮子的 torchaudio）。没有 → None。"""
+    """档位的「软增补」→ 目前是 torchaudio（三档都有）。
+
+    [!] 2026-11-14：原来只有 CUDA 档声明 soft_pkgs，xpu / cpu 两档把 torchaudio
+    写进了 `pkgs`（主清单）——于是"只勾第 1 项"的用户也会装上语音侧的库。
+    现在三档统一：torchaudio 一律 soft，装不装由 install_groups 按
+    `GROUPS[g].get("audio")` 决定。"""
     v = TORCH_VARIANTS[variant]
     if not v.get("soft_pkgs"):
         return None
@@ -463,6 +478,10 @@ GROUPS = {
         # soft：失败仅警告不中断——jieba-fast 是 GPT-SoVITS 分词加速（需 MSVC 源码编译），
         # 装不上时 start_api_patched.py 自动回退纯 Python jieba，语音仍可启动
         "soft": ["jieba-fast>=0.39"],
+        # [!] 2026-11-14：本组是**唯一**需要 torchaudio 的组（GPT-SoVITS 顶层 import
+        #   torchaudio）。这个键存在的理由，就是别让「记忆」组（只要 torch 跑 BGE）
+        #   把语音侧的库一起装进来——用户 2026-11-14 报的就是这个："只勾 1，顺带装了 2"。
+        "audio": True,
     },
     "识图": {
         "desc": "L3 本地识图——需另装 Ollama+minicpm-v；不装自动用云端 qwen-vl（效果几乎一样）",
@@ -616,11 +635,16 @@ def install_groups(groups: list[str], dry_run: bool = False,
         print("没有选择任何组")
         return False
     wants_torch = any(GROUPS[g].get("torch") for g in groups)
+    # [!] torchaudio ≠ torch 的同义词：它是**语音侧**的库（gpt-sovits/api_v2.py 顶层
+    #   import torchaudio），而「记忆」组只要 torch 跑 BGE 向量/精排。
+    #   原先这里用 wants_torch 判，于是只勾第 1 项的用户也被装上语音侧的 torchaudio
+    #   ——2026-11-14 用户实机报告"选择只 1 好像顺带也选择 2"，复现确认。
+    wants_audio = any(GROUPS[g].get("audio") for g in groups)
     info = detect_torch_variant(variant) if wants_torch else None
     vname = info["variant"] if info else None
     plan = _plan(groups, vname)
     soft = [p for g in groups for p in GROUPS[g].get("soft", [])]
-    soft_torch = torch_soft_spec(vname) if wants_torch else None
+    soft_torch = torch_soft_spec(vname) if (wants_torch and wants_audio) else None
     if info:
         print(f"\n[·] torch 档位：{info['label']}")
         for line in info["evidence"]:
@@ -634,7 +658,7 @@ def install_groups(groups: list[str], dry_run: bool = False,
         print(f"  - {' '.join(soft)}（可选——失败仅警告，GPT-SoVITS 自动回退纯 jieba）")
     if soft_torch:
         print(f"  - {' '.join(soft_torch[0])}{_render_pip_flags(soft_torch[1])}"
-              "（可选——cu 档的 torchaudio 是 dev 轮子，失败仅警告）")
+              "（可选——只有「发语音」用得到；失败仅警告）")
     if dry_run:
         print("\n（--dry-run 预览模式，未实际安装）")
         return True
@@ -648,7 +672,7 @@ def install_groups(groups: list[str], dry_run: bool = False,
             print("  [i] jieba-fast 未装成功——如需加速请先装 VS2022 Build Tools（C++ 桌面开发）后重试；"
                   "不装也能用（语音自动回退纯 Python jieba，见 gpt-sovits/start_api_patched.py）")
     if soft_torch and not _install(*soft_torch):
-        print("  [i] torchaudio 未装成功（cu 档用的是 dev 轮子，上游可能已删除）——"
+        print("  [i] torchaudio 未装成功（cu 档是 dev 轮子，上游可能已删除）——"
               "GPT-SoVITS / 降噪缺 import torchaudio；torch 本体不受影响，糖糖照常启动。")
     print("\n[√] 依赖安装完成" if ok else "\n[!] 部分安装失败，请检查上方输出")
     return ok
