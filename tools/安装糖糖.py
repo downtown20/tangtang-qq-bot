@@ -115,7 +115,13 @@ TORCH_VARIANTS = {
         #   dev 轮子（requirements.txt:51-54）。dev 轮子随时可能被上游删掉，所以它只算
         #   **软增补**：失败仅警告不中断——torch 本体已可用，缺 torchaudio 只影响
         #   GPT-SoVITS / 降噪这两条 import torchaudio 的路径。
-        "soft_pkgs": ["torchaudio==2.11.0.dev20260727+cu130"],
+        # [!] 2026-11-14 用户实机：这里原钉的是 dev 轮子
+        #   `torchaudio==2.11.0.dev20260727+cu130`，而上游**已经删掉它**了——
+        #   `pip install` 直接 "Could not find a version"，语音功能静默降级。
+        #   实测 cu130 索引现存版本：2.11.0 / 2.10.0 / 2.9.1 / 2.9.0（都带 +cu130）。
+        #   本机实测 `torchaudio==2.11.0+cu130` 在 torch 2.13.0+cu130 下 import 正常，
+        #   故改钉稳定版。以后上游再变，这条会以「失败仅警告」的方式降级，不会崩。
+        "soft_pkgs": ["torchaudio==2.11.0+cu130"],
         "soft_kwargs": {"index-url": "https://download.pytorch.org/whl/cu130", "no-deps": True},
         "cost": "语音 100 字 5.4 秒（RTX 5070 实测）",
         "verdict": "推荐——语音 / 本地识图 / 记忆精排全部可用",
@@ -647,7 +653,7 @@ GROUPS = {
         "pkgs": ["python-docx>=0.8", "pdfplumber>=0.10", "PyPDF2>=3.0"],
     },
     "控制台": {
-        "desc": "PySide6 旧式 Qt 控制台 + 图标/外观预览（桌面端不需要它，约 100MB）",
+        "desc": "PySide6 旧式 Qt 控制台 + 图标/外观预览（桌面端不需要它，约 260MB）",
         "pkgs": ["pyside6>=6.5"],
     },
     "测试": {
@@ -678,7 +684,7 @@ FEATURES = [
     #   FEATURES 的下标整体错位（已装机器 `状态/安装清单` 记的是下标），
     #   也会让想用 Qt 控制台的人无从勾选。改成「可选、不推荐、说清代价」。
     ("图形控制台",
-     "旧式 Qt 控制台（python start.py console）+ 图标/外观预览，PySide6 约 100MB。"
+     "旧式 Qt 控制台（python start.py console）+ 图标/外观预览，PySide6 约 260MB（含 WebEngine）。"
      "日常请用桌面端，桌面端不需要它",
      ["控制台"]),
     ("测试工具", "pytest 开发测试", ["测试"]),
@@ -847,6 +853,14 @@ def _install(pkgs: list[str], kwargs: dict) -> bool:
     # 就是好几个 G。缓存是纯落盘位置，直接跟依赖根走。
     # （包本身装哪儿由 Python 前缀决定：**不要**改用 `pip --target`——那会让 import
     #   全部失效；要挪整份 site-packages 得用 tools/依赖迁移.py 的目录联接方案。）
+    #
+    # [!] 2026-11-14 用户实机（`9 组、31 个包` 那次）：soft 组传进来的是**字符串**，
+    #   而 `*pkgs` 对字符串是**逐字符展开**，于是命令行成了
+    #       pip install j i e b a - f a s t > = 0 . 3 9
+    #   pip 报 `ERROR: Invalid requirement: '-'`，而失败提示把它归因为"缺 VS2022
+    #   编译工具链"——用户跑去装 VS，白折腾。这里加一道防御：字符串按单个包处理。
+    if isinstance(pkgs, str):
+        pkgs = [pkgs]
     cmd = [sys.executable, "-m", "pip", "install", *pkgs,
            "--cache-dir", str(_deps_target("cache/pip"))]
     for flag, val in kwargs.items():
@@ -923,13 +937,16 @@ def install_groups(groups: list[str], dry_run: bool = False,
         if not _install(pkgs, kw):
             ok = False
             print(f"  [!] 安装失败: {pkgs}——请手动重试")
-    for pkgs in soft:
-        if not _install(pkgs, {}):
-            print("  [i] jieba-fast 未装成功——如需加速请先装 VS2022 Build Tools（C++ 桌面开发）后重试；"
-                  "不装也能用（语音自动回退纯 Python jieba，见 gpt-sovits/start_api_patched.py）")
+    for pkg in soft:
+        # 逐个包一条 pip 命令（**不要**把 str 直接丢给 _install：那是逐字符展开）
+        if not _install([pkg], {}):
+            print(f"  [i] {pkg} 未装成功（可选的加速组件）——"
+                  "语音会自动回退纯 Python jieba，不影响使用。")
+            print("      想装它需要 VS2022 C++ 工具链（它没有预编译轮子）；也可以直接忽略。")
     if soft_torch and not _install(*soft_torch):
-        print("  [i] torchaudio 未装成功（cu 档是 dev 轮子，上游可能已删除）——"
-              "GPT-SoVITS / 降噪缺 import torchaudio；torch 本体不受影响，糖糖照常启动。")
+        print("  [i] torchaudio 未装成功——GPT-SoVITS / 降噪缺 import torchaudio；"
+              "torch 本体不受影响，糖糖照常启动。")
+        print("      常见原因：上游删了这个轮子，或 index 上该版本已下架。")
     print("\n[√] 依赖安装完成" if ok else "\n[!] 部分安装失败，请检查上方输出")
     return ok
 
