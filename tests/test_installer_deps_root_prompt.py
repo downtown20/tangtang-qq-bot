@@ -60,6 +60,11 @@ def wired(tmp_path, monkeypatch):
     rec = _Recorder(chosen=str(tmp_path / "picked-by-dialog"))
 
     monkeypatch.setattr(_依赖位置, "CONFIG_PATH", cfg)
+    # [!] 必须把**全局**配置也指走：`_confirm_deps_root()` 结尾会调 sync_global()，
+    #   不隔离的话测试会往真实的 %LOCALAPPDATA%/tangtang/依赖位置.json 里写一个
+    #   pytest 临时目录（2026-11-14 当场踩到，把本机配置写成了 tmp 路径）。
+    monkeypatch.setattr(_依赖位置, "GLOBAL_CONFIG_PATH",
+                        tmp_path / "globalappdata" / "tangtang" / "依赖位置.json")
     monkeypatch.setattr(_依赖位置, "get_deps_root", lambda: configured)
     monkeypatch.setattr(_依赖位置, "ensure_deps_root", lambda: configured)
     monkeypatch.setattr(_依赖位置, "describe_deps_root", lambda: f"{configured}（来自 依赖位置.json）")

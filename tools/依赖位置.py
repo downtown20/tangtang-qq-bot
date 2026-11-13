@@ -15,7 +15,18 @@
 ────────────────
 1. 环境变量 TANGTANG_DEPS_ROOT
 2. 项目根目录下的 依赖位置.json（由安装器 / 控制台的目录选择对话框写入）
-3. 项目根目录下的 依赖/
+3. **全局配置** `%LOCALAPPDATA%/tangtang/依赖位置.json`（2026-11-14 新增）
+4. 项目根目录下的 依赖/
+
+为什么要有第 3 级
+──────────────────
+用户升级的方式是「解压一个新版本的包到新目录」。新目录里没有 依赖位置.json，
+于是安装器把它当「第一次安装」，默认依赖根变成 `<新版本>/依赖`——而 2.6G 模型、
+1.9G torch 与 pip 缓存全在上一版目录里，安装器**看不见它们**，用户看到的是
+「又要重新下载」。用户 2026-11-14 实测：新包在 `...\tangtang-v1.08.07`，
+依赖却指回旧的 `...\tangtang-v1.08.05\依赖`——他这次是手动在目录框里选回去的，
+没选的人就得重下 4.5G。
+全局配置把「依赖装哪儿」从**单个包目录**提升到**这台机器**，升级/换包自动继承。
 
 纪律
 ────
@@ -32,6 +43,7 @@ from pathlib import Path
 __all__ = [
     "PROJECT_ROOT",
     "CONFIG_PATH",
+    "GLOBAL_CONFIG_PATH",
     "DEFAULT_DEPS_ROOT",
     "get_deps_root",
     "set_deps_root",
@@ -40,6 +52,7 @@ __all__ = [
     "is_on_system_drive",
     "choose_directory",
     "subdir",
+    "has_local_config",
 ]
 
 # ── 项目根：本文件在 <root>/tools/ 下 ──────────────────────────────────
@@ -48,6 +61,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 #: 位置配置文件名（写在项目根，便于随项目一起搬走）
 CONFIG_PATH = PROJECT_ROOT / "依赖位置.json"
 
+#: 全局配置：跨版本、跨包目录共享（升级到新解压目录时仍然认得旧依赖根）
+GLOBAL_CONFIG_PATH = (
+    Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+    / "tangtang" / "依赖位置.json"
+)
+
 #: 默认依赖根——**项目内**，不是 C 盘
 DEFAULT_DEPS_ROOT = PROJECT_ROOT / "依赖"
 
@@ -55,10 +74,10 @@ _ENV_KEY = "TANGTANG_DEPS_ROOT"
 
 
 # ── 读写配置 ──────────────────────────────────────────────────────────
-def _read_config() -> str | None:
-    """读 依赖位置.json 里的依赖根。任何异常都降级为 None（不阻断安装）。"""
+def _read_json_root(path: Path) -> str | None:
+    """读某个配置文件里的「依赖根」。任何异常都降级为 None（不阻断安装）。"""
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
@@ -69,10 +88,39 @@ def _read_config() -> str | None:
     return None
 
 
+def _read_config() -> str | None:
+    """项目内 依赖位置.json 里的依赖根（不再回退全局——分开更好读）。"""
+    return _read_json_root(CONFIG_PATH)
+
+
+def has_local_config() -> bool:
+    """本项目目录里是否已有位置配置（决定「是不是第一次安装」）。"""
+    return _read_config() is not None
+
+
+def sync_global() -> None:
+    """把当前生效的依赖根同步到全局配置。失败静默（全局不是必要条件）。
+
+    用途：老用户的项目内 `依赖位置.json` 是这次改动之前写的，全局那份还不存在。
+    安装器跑一次就把全局补齐，**下一个版本的包目录**才继承得到。
+    """
+    try:
+        p = get_deps_root()
+        GLOBAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        GLOBAL_CONFIG_PATH.write_text(
+            json.dumps({"依赖根": str(p)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 def set_deps_root(path: str | os.PathLike[str]) -> Path:
-    """把依赖根写进 依赖位置.json。返回规范化后的 Path。
+    """把依赖根写进**项目内 + 全局**两份 依赖位置.json，返回规范化后的 Path。
 
     写盘前会先建目录——对话框选完立刻落盘，避免「选了但没生效」。
+    全局那份是升级的关键：下一个版本的包目录里没有配置，靠它继承旧依赖根
+    （否则整包重下 4.5G）。全局写失败只忽略——它不是必要条件。
     """
     p = Path(path).expanduser()
     try:
@@ -84,14 +132,18 @@ def set_deps_root(path: str | os.PathLike[str]) -> Path:
         "依赖根": str(p),
         "说明": "所有依赖/模型/缓存统一落在这里；由 tools/依赖位置.py 读写，不要手改别的键。",
     }
-    CONFIG_PATH.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    CONFIG_PATH.write_text(text, encoding="utf-8")
+    try:
+        GLOBAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        GLOBAL_CONFIG_PATH.write_text(text, encoding="utf-8")
+    except OSError:
+        pass
     return p
 
 
 def get_deps_root() -> Path:
-    """当前依赖根。三级回退：环境变量 → 配置文件 → 项目内 依赖/。
+    """当前依赖根。四级回退：环境变量 → 项目内配置 → 全局配置 → 项目内 依赖/。
 
     **永不返回 C 盘的系统路径**——除非项目本身就装在 C 盘。
     """
@@ -101,6 +153,9 @@ def get_deps_root() -> Path:
     cfg = _read_config()
     if cfg:
         return Path(cfg).expanduser()
+    glob = _read_json_root(GLOBAL_CONFIG_PATH)
+    if glob:
+        return Path(glob).expanduser()
     return DEFAULT_DEPS_ROOT
 
 
@@ -109,9 +164,10 @@ def describe_deps_root() -> str:
     env = os.environ.get(_ENV_KEY, "").strip()
     if env:
         return f"{get_deps_root()}（来自环境变量 {_ENV_KEY}）"
-    cfg = _read_config()
-    if cfg:
+    if _read_config():
         return f"{get_deps_root()}（来自 {CONFIG_PATH.name}）"
+    if _read_json_root(GLOBAL_CONFIG_PATH):
+        return f"{get_deps_root()}（来自全局配置 {GLOBAL_CONFIG_PATH}）"
     return f"{get_deps_root()}（默认：项目内 依赖/）"
 
 

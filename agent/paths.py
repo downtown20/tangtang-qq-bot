@@ -277,8 +277,13 @@ def deps_roots() -> list[Path]:
     """依赖根的候选，按优先级。
 
     与 tools/依赖位置.py **同一份规则**（环境变量 TANGTANG_DEPS_ROOT →
-    项目根下的 依赖位置.json → 项目内 依赖/）。这里不 import tools/
-    （agent 层不依赖 tools 层），只读同一个键。
+    项目内的 依赖位置.json → **全局配置** `%LOCALAPPDATA%/tangtang/依赖位置.json`
+    → 项目内 依赖/）。这里不 import tools/（agent 层不依赖 tools 层），
+    只读同样的键。
+
+    [!] 2026-11-14 新增全局那一级：用户升级的方式是「解压新版本到新目录」，
+    新目录里没有 依赖位置.json，而模型/缓存全在旧目录下。没有全局继承的话，
+    运行期在**新包目录**里跑起来就找不到模型（安装器那边同理）。
     """
     roots: list[Path] = []
     env = os.environ.get("TANGTANG_DEPS_ROOT", "").strip()
@@ -292,10 +297,24 @@ def deps_roots() -> list[Path]:
             raw = json.loads(cfg.read_text(encoding="utf-8")).get("依赖根")
             if isinstance(raw, str) and raw.strip():
                 roots.append(Path(raw.strip()).expanduser())
+        gcfg = (Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+                / "tangtang" / "依赖位置.json")
+        if gcfg.exists():
+            raw = json.loads(gcfg.read_text(encoding="utf-8")).get("依赖根")
+            if isinstance(raw, str) and raw.strip():
+                roots.append(Path(raw.strip()).expanduser())
     except Exception:
         pass
     roots.append(PROJECT_ROOT / "依赖")
-    return roots
+    # 去重但保序
+    seen: set[str] = set()
+    out: list[Path] = []
+    for r in roots:
+        key = str(r)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
 
 
 def find_model_dir(repo: str, extra: tuple[str, ...] = ()) -> Path | None:

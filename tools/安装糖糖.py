@@ -415,6 +415,65 @@ def _display(path: Path) -> str:
         return str(path)
 
 
+def _detect_sibling_deps() -> list[Path]:
+    """在本包目录**附近**找已经存在的依赖根（升级场景的关键一步）。
+
+    [!] 2026-11-14 用户实机：升级的做法是把新版本解压成一个新文件夹，旧文件夹
+    还躺在一旁。新文件夹里没有 `依赖位置.json`，安装器就当「第一次安装」——
+    而 2.6G 模型、1.9G torch、pip 缓存全在旧文件夹的 `依赖/` 下。找不到它们，
+    用户看到的就是「又从头下 4.5G」。
+
+    判据不用「目录存在」：`依赖/` 空目录满地都是。只有真的带
+    `models/`（模型）或 `cache/pip`（pip 缓存）或 `site-packages/` 才算有货。
+    """
+    out: list[Path] = []
+    seen: set[str] = set()
+
+    def _has_payload(d: Path) -> bool:
+        try:
+            return any((d / sub).is_dir() for sub in ("models", "site-packages", "cache"))
+        except OSError:
+            return False
+
+    try:
+        base = BASE.resolve()
+    except OSError:
+        return out
+    for root in (base.parent, base.parent.parent):
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            continue
+        for cand in children:
+            try:
+                if not cand.is_dir() or cand.resolve() == base:
+                    continue
+            except OSError:
+                continue
+            # ① 同级目录自己的 依赖/
+            # ② 用户常把新包解压**进**旧包目录里（...\tangtang-v1.08.00\tangtang-v1.08.05\），
+            #    于是依赖在一层子目录里——这一层必须也扫，否则"升级不重下"照样落空。
+            layer1 = [cand / "依赖"]
+            try:
+                layer1 += list(cand.glob("*/依赖"))
+            except OSError:
+                pass
+            for d in layer1:
+                # [!] 别处的目录会抛 OSError（实测某个系统保留目录 →
+                #   WinError 1337 安全 ID 结构无效）。探测是"尽力而为"，不是必需品，
+                #   一个陌生目录读不了不能把整个安装流程打断。
+                try:
+                    if not d.is_dir() or not _has_payload(d):
+                        continue
+                except OSError:
+                    continue
+                key = str(d).casefold()
+                if key not in seen:
+                    seen.add(key)
+                    out.append(d)
+    return out
+
+
 def _confirm_deps_root(deps_root: str | None, assume_yes: bool) -> Path:
     """开始装之前，把「装到哪儿」定下来（唯一入口）。
 
@@ -440,42 +499,78 @@ def _confirm_deps_root(deps_root: str | None, assume_yes: bool) -> Path:
         print(f"\n[·] 安装位置：{依赖位置.describe_deps_root()}")
     else:
         cur = 依赖位置.get_deps_root()
-        configured = 依赖位置.CONFIG_PATH.exists() and bool(依赖位置._read_config())
+        local_cfg = 依赖位置.has_local_config()
+        global_cur = 依赖位置._read_json_root(依赖位置.GLOBAL_CONFIG_PATH)
+        # 「已配置」= 本项目有配置，或**这台机器**有全局配置（升级到新包目录时就是后者）
+        configured = local_cfg or bool(global_cur)
         if configured and cur.is_dir():
-            print("\n━━━ 安装位置 ━━━")
-            print(f"  当前：{依赖位置.describe_deps_root()}")
-            try:
-                raw = input("  回车=沿用；要换就直接输入新目录（别的盘也行，粘贴完整路径）> ").strip()
-            except (EOFError, KeyboardInterrupt):
-                raw = ""
-            raw = raw.strip('"').strip("'").strip()
-            if raw:
-                p = 依赖位置.set_deps_root(raw)
-                print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+            if not local_cfg:
+                # 新包目录里没有配置，但全局有——把上一版选的依赖根继承下来。
+                # 这一步专门修「升级后又重下 4.5G」：用户把新版本解压到新目录时，
+                # 依赖根必须还是上一版那个，否则模型/pip 缓存全部"看不见"。
+                try:
+                    依赖位置.set_deps_root(cur)
+                except OSError:
+                    pass
+                print("\n━━━ 安装位置 ━━━")
+                print(f"  [i] 沿用上一版配置的依赖位置（全局配置继承）：{cur}")
+                print("      模型与缓存都在这里，不会重新下载。要换：重跑并输入新目录。")
+                p = cur
             else:
-                p = 依赖位置.ensure_deps_root()
-                print(f"  [i] 沿用：{p}")
+                print("\n━━━ 安装位置 ━━━")
+                print(f"  当前：{依赖位置.describe_deps_root()}")
+                try:
+                    raw = input("  回车=沿用；要换就直接输入新目录（别的盘也行，粘贴完整路径）> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    raw = ""
+                raw = raw.strip('"').strip("'").strip()
+                if raw:
+                    p = 依赖位置.set_deps_root(raw)
+                    print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+                else:
+                    p = 依赖位置.ensure_deps_root()
+                    print(f"  [i] 沿用：{p}")
         else:
             print("\n━━━ 安装位置 ━━━")
             print(f"  当前：{依赖位置.describe_deps_root()}")
+            adopted = False
             if configured:
                 print("  [!] 已配置的目录不在了（换盘/被删）——请重新选；点「取消」→ 用默认位置。")
             else:
-                print("  第一次安装：接下来弹系统目录选择框；点「取消」就用默认（项目内 依赖/）。")
-            chosen = 依赖位置.choose_directory("选择安装位置（模型 / 缓存 / 依赖）",
-                                              initial=cur)
-            if chosen:
-                p = 依赖位置.set_deps_root(chosen)
-                print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
-            else:
-                p = 依赖位置.ensure_deps_root()
-                print(f"  [i] 未选/已取消——继续用：{p}")
+                # 首次装：先看附近有没有上一版留下的依赖目录（升级最常见的形态）
+                found = _detect_sibling_deps()
+                if found:
+                    print("  检测到附近已有依赖目录（里面是模型/缓存，用它就不用重下）：")
+                    for d in found[:5]:
+                        print(f"    · {d}")
+                    try:
+                        ans = input("  回车=用第一个；输入 n=改成另选目录 > ").strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        ans = ""
+                    if ans not in ("n", "no"):
+                        p = 依赖位置.set_deps_root(found[0])
+                        print(f"  [√] 已沿用：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+                        adopted = True
+                if not adopted:
+                    print("  第一次安装：接下来弹系统目录选择框；点「取消」就用默认（项目内 依赖/）。")
+            if not adopted:
+                chosen = 依赖位置.choose_directory("选择安装位置（模型 / 缓存 / 依赖）",
+                                                  initial=cur)
+                if chosen:
+                    p = 依赖位置.set_deps_root(chosen)
+                    print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+                else:
+                    p = 依赖位置.ensure_deps_root()
+                    print(f"  [i] 未选/已取消——继续用：{p}")
     if 依赖位置.is_on_system_drive(p):
         print(f"  [!] 警告：{p} 在系统盘 {p.drive} 上——模型 + pip 缓存能到十几 G，")
         print("      建议换到别的盘（重跑本工具，或加 --deps-root PATH 指定）。")
     if p.resolve() != 依赖位置.DEFAULT_DEPS_ROOT.resolve():
         print("  [i] pip 装的包仍在 Python 自己的 site-packages。要连带挪到依赖根下，")
         print("      跑 python tools/依赖迁移.py（它建目录联接，sys.path 一个字不变）。")
+    # 把最终选择同步到全局配置：下一个版本的包目录（新解压目录里没有 依赖位置.json）
+    # 靠它继承这里的依赖根，否则升级后模型/pip 缓存全部"看不见"，等于整包重下。
+    依赖位置.sync_global()
     return p
 
 # ─────────────────────────────────────────
