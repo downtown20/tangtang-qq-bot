@@ -54,7 +54,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.08.02"
+TAG = "v1.08.03"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -451,6 +451,20 @@ def main() -> int:
     if not SNAPSHOT.is_dir():
         print(f"❌ 未找到快照 {SNAPSHOT}")
         print("   请先运行: python tools/准备发布.py")
+        return 1
+    # ⚠ 2026-11-14：准备发布.py 的敏感扫描是在**快照写完**之后才跑的，而打包是
+    #   另一条命令——它原先只看快照目录在不在。当天实测：扫描报命中并 SystemExit(1)
+    #   之后，手工跑本脚本，zip 照样产出、名字照样是最终名（同 v1.08.01 曲库事故的
+    #   形状：闸门红了，下游照跑）。阻断标记由准备发布.py 写在快照根上。
+    block = SNAPSHOT / ".release-blocked"
+    if block.is_file():
+        print("❌ 快照被标记为「敏感扫描未通过」，拒绝打包：")
+        print("   " + str(block))
+        try:
+            print("   " + block.read_text(encoding="utf-8").strip().replace("\n", "\n   "))
+        except OSError:
+            pass
+        print("   清干净后重跑 python tools/准备发布.py（通过时它会删掉这个标记）")
         return 1
     OUT.mkdir(parents=True, exist_ok=True)
     ATTACH.mkdir(parents=True, exist_ok=True)

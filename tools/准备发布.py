@@ -210,8 +210,22 @@ TOOLS_KEEP_NAMES = {
 # `tools/<名>.py` 的，一律随包。这样规则不再依赖人手维护一份清单，
 # 新增调用点会自动带进包；测试里种的假模块（`__planted_*`）因为磁盘上没有，自然排除。
 _REF_TOOLS_RE = re.compile(r"tools[/\\]([A-Za-z_][A-Za-z0-9_]*\.py|[\u4e00-\u9fa5][^\s\"'()\[\]:,，。；;|]*?\.py)")
+# ⚠ 2026-11-14 二次事故（同一根因的第二个面）：上面那条正则只认**路径字面量**
+#   `tools/xxx.py`，而 Python 里更常见的引用是 `from tools.scenario_rename import ...`。
+#   `tools/asset_edit.py:37` 就是这么写的，于是 `scenario_rename.py` 没被带进包，
+#   而 `desktop_bridge.py` 顶层 import asset_edit → 桌面端「后端桥退出（code=2）」
+#   在用户机器上表现为装上就废（bridge 一行都没跑起来）。
+#   所以还要扫模块引用形式，并对随包模块做**闭包**（见 tools_to_pack）。
+_REF_TOOLS_MOD_RE = re.compile(r"^\s*(?:from|import)\s+tools\.([A-Za-z_][A-Za-z0-9_]*)", re.M)
 _REF_TOOLS_SCAN_DIRS = ("agent", "onebot", "运维", "desktop", "tests")
 _REF_TOOLS_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".md", ".bat", ".json"}
+
+
+def _refs_in_text(text: str) -> set[str]:
+    """一段文本里指向 tools 模块的引用名（两种写法都算）。"""
+    names = {m for m in _REF_TOOLS_RE.findall(text)}
+    names |= {f"{m}.py" for m in _REF_TOOLS_MOD_RE.findall(text)}
+    return names
 
 
 def referenced_tool_modules() -> set[str]:
@@ -228,15 +242,41 @@ def referenced_tool_modules() -> set[str]:
                 text = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            for m in _REF_TOOLS_RE.findall(text):
+            for m in _refs_in_text(text):
                 if (BASE / "tools" / m).is_file():
                     names.add(m)
     return names
 
 
+def closure(files: set[str]) -> set[str]:
+    """把随包集合补到闭包：包里每个模块自己 `from tools.X import` 的也要带上。
+
+    ⚠ 闭包不可省。反例就在仓库里：`desktop_bridge.py`（被 Electron 引用，进包）
+    → `asset_edit.py`（import，进包）→ `scenario_rename.py`（import，**原先没进包**）。
+    只看"谁被外部提到"看不到第二跳，而用户崩在第二跳上。
+    """
+    seen = set(files)
+    queue = list(files)
+    while queue:
+        name = queue.pop()
+        p = BASE / "tools" / name
+        if not p.is_file():
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in _refs_in_text(text):
+            if m in seen or not (BASE / "tools" / m).is_file():
+                continue
+            seen.add(m)
+            queue.append(m)
+    return seen
+
+
 def tools_to_pack() -> set[str]:
-    """实际随包的 tools 集合 = 人工白名单 ∪ 被引用集合。"""
-    return TOOLS_KEEP_NAMES | referenced_tool_modules()
+    """实际随包的 tools 集合 = 人工白名单 ∪ 被引用集合，再取闭包。"""
+    return closure(TOOLS_KEEP_NAMES | referenced_tool_modules())
 
 
 def _sticker_note(title: str, dirname: str, role_line: str) -> str:
@@ -1052,9 +1092,24 @@ def main() -> None:
         # **命中即中止**（2026-09-20 独立复核建议）。原先只打印一行提示就继续往下走，
         # 最后还以「该目录可 git init 后推送 GitHub」收尾——真正的红线只靠人读 stdout。
         # 这个项目一天里两次把真 token 带进发布物，都是靠人眼漏过去的。
+        #
+        # ⚠ 2026-11-14 追加：中止还不够——扫描跑在**快照已写完**之后，
+        #   而打包脚本是另一条命令、不读这里的退出码。当天实测就撞上了：
+        #   扫描报命中（scenario_rename.py 里一个真 QQ），`SystemExit(1)` 之后
+        #   手工再跑 打包发布版本.py，zip 照样产出，名字照样是最终的。
+        #   所以留一个阻断标记，让下游**主动拒绝**打包。
+        block = OUT / ".release-blocked"
+        try:
+            block.write_text("敏感扫描命中，禁止打包：\n" + "\n".join(hits[:20]) + "\n",
+                             encoding="utf-8")
+        except OSError:
+            pass
         print("\n[×] 扫描命中，已中止（快照已生成但**不要推送**——先清干净再重跑）")
+        print(f"    已写阻断标记 {block.name}：打包脚本会据此拒绝出包")
         raise SystemExit(1)
     print("  ✅ 敏感扫描：零命中（形状 + .env 真值，两道都过）")
+    # 扫描通过 → 清掉上次留下的阻断标记（否则一次命中会永久卡住打包）
+    (OUT / ".release-blocked").unlink(missing_ok=True)
 
     # 9. 附件清单（只报告，不打包）
     audio_dir = BASE / "songs" / "audio"

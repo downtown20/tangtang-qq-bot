@@ -9,7 +9,7 @@
     display_no_emoji = s.display.split(" ", 1)[-1]   # 「❤️ 亲密模式」→「亲密模式」
     if display_no_emoji == name:                # 匹配 2
 
-而 `config.yaml` 里 `scenario_targets: {'2524950083': 亲密模式}` 存的就是那个名字。
+而 `config.yaml` 里 `scenario_targets: {'<QQ号>': 亲密模式}` 存的就是那个名字。
 **改 display = 所有已挂载的群/人静默失效**——没有报错，场景就是不再生效。
 
 ## 为什么用文本级替换而不是 yaml.safe_dump

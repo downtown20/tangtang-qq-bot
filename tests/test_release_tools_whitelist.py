@@ -79,3 +79,52 @@ def test_nonexistent_module_is_not_treated_as_reference():
     assert not (_prep.BASE / "tools" / planted).is_file()
     assert planted not in _prep.referenced_tool_modules()
     assert planted not in _prep.tools_to_pack()
+
+
+# ═══════════════════════════════════════════════════════
+# 4. 第二跳：随包模块自己 import 的 tools 模块（2026-11-14 二次事故）
+#
+#     desktop_bridge.py → asset_edit.py → scenario_rename.py
+#     前两个被外部提到、进了包；第三跳只在 asset_edit 的 import 行里，
+#     于是包内 bridge 一启动就 ModuleNotFoundError，用户看到「后端桥退出」。
+# ═══════════════════════════════════════════════════════
+
+def test_scan_sees_python_module_import_form():
+    """`from tools.X import` 这种写法必须被算作引用（原先只认路径字面量）。"""
+    got = _prep._refs_in_text(
+        "from tools.scenario_rename import sync_rename\nimport tools.asset_edit\n"
+        "python tools/依赖位置.py")
+    assert got == {"scenario_rename.py", "asset_edit.py", "依赖位置.py"}, got
+
+
+def test_pack_set_is_closed_under_imports():
+    """闭合性：包里每个模块 `from tools.X` 引用的模块，也必须在包里。"""
+    pack = _prep.tools_to_pack()
+    holes = {}
+    for name in sorted(pack):
+        p = _prep.BASE / "tools" / name
+        if not p.is_file():
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for ref in _prep._refs_in_text(text):
+            if (_prep.BASE / "tools" / ref).is_file() and ref not in pack:
+                holes.setdefault(ref, []).append(name)
+    assert not holes, (
+        "这些模块被包内模块 import，却不在随包集合里（用户会在第二跳崩）：\n"
+        + "\n".join(f"  {k} ← {v}" for k, v in sorted(holes.items())))
+
+
+def test_second_hop_incident_module_is_packed():
+    """事故回归钉死：asset_edit 的 import 目标必须随包。"""
+    assert "asset_edit.py" in _prep.tools_to_pack()
+    assert "scenario_rename.py" in _prep.tools_to_pack(), (
+        "scenario_rename.py 不在随包集合里——desktop_bridge → asset_edit 的 import 链会断，"
+        "桌面端一启动就「后端桥退出」")
+
+
+def test_closure_is_actually_doing_something():
+    """覆盖面自证：闭包若被人删成恒等函数，上面那条会假绿。"""
+    extra = _prep.tools_to_pack() - (_prep.TOOLS_KEEP_NAMES | _prep.referenced_tool_modules())
+    assert extra, ("闭包没有带进任何模块——要么判据失效，要么真的没有第二跳依赖"
+                   "（后者请先确认 desktop_bridge → asset_edit → scenario_rename 这条链还在）")
+    assert "scenario_rename.py" in extra, f"闭包带进的是 {sorted(extra)}，没有 scenario_rename"
