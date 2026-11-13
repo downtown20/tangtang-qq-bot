@@ -54,7 +54,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.08.05"
+TAG = "v1.08.06"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。

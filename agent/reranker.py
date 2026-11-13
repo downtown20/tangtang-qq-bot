@@ -60,12 +60,12 @@ class RerankerEngine:
         """加载 Reranker 模型——按需调用，不阻塞启动。幂等：重复调用不重复加载。"""
         if self._ready:
             return
-        import os
-        local = None
-        for d in RERANKER_PATHS:
-            if os.path.isdir(d) and os.path.exists(os.path.join(d, "config.json")):
-                local = d
-                break
+        from . import paths as _paths
+        # [!] 2026-11-14：候选顺序交给 paths.find_model_dir()（认依赖根与 modelscope
+        #   的 `models/models/<ns>--<name>/snapshots/<rev>` 缓存布局）。原先只找
+        #   `models/BAAI/bge-reranker-v2-m3` 这个**相对当前工作目录**的路径——
+        #   依赖根被改到别的盘、或安装器按 modelscope 缓存落盘时，全都找不到。
+        local = _paths.find_model_dir("BAAI/bge-reranker-v2-m3", tuple(RERANKER_PATHS))
 
         if not local:
             # 与 embeddings.py 同款改法（2026-09-20）：不甩命令、按安装清单说话。

@@ -42,11 +42,12 @@ class MoodTracker:
             logger.warning("⚠ transformers 未安装，心情追踪不可用")
             return
 
-        local = None
-        for d in self.MODEL_DIRS:
-            if os.path.isdir(d) and os.path.exists(os.path.join(d, "config.json")):
-                local = d
-                break
+        from . import paths as _paths
+        # [!] 2026-11-14：同 embeddings / reranker——候选顺序交给
+        #   paths.find_model_dir()，认依赖根与 modelscope 的缓存布局。
+        local = _paths.find_model_dir(
+            "iic/nlp_structbert_sentiment-classification_chinese-base",
+            tuple(self.MODEL_DIRS))
         if not local:
             # 这条警告曾经**永远修不好**：它说的模型 2026-09-20 之前根本不在
             # tools/安装糖糖.py 的下载表里，也没有任何目录检测项——用户看到

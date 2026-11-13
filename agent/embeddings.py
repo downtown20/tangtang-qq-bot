@@ -10,6 +10,8 @@ import numpy as np
 import os
 from typing import Optional
 
+from . import paths
+
 logger = logging.getLogger("糖糖.Embeddings")
 
 
@@ -19,6 +21,9 @@ class EmbeddingEngine:
     MODEL_FINGERPRINT = "BAAI/bge-small-zh-v1.5"
 
     # ModelScope 下载路径（可能因系统不同而变化）
+    # [!] 2026-11-14：候选顺序交给 agent/paths.find_model_dir() 统一决定——
+    #   它认依赖根（依赖位置.json）、认 modelscope 的 `models/models/<ns>--<name>/
+    #   snapshots/<rev>` 缓存布局。这里只保留「历史手工放置」的额外候选。
     MODEL_PATHS = [
         os.path.expanduser("~/models/BAAI/bge-small-zh-v1___5"),
         "./models/BAAI/bge-small-zh-v1.5",
@@ -38,11 +43,7 @@ class EmbeddingEngine:
             logger.warning("⚠ transformers 未安装，语义搜索不可用")
             return
 
-        local = None
-        for d in self.MODEL_PATHS:
-            if os.path.isdir(d) and os.path.exists(os.path.join(d, "config.json")):
-                local = d
-                break
+        local = paths.find_model_dir(self.MODEL_FINGERPRINT, tuple(self.MODEL_PATHS))
 
         if not local:
             # 原先这里甩给用户一条 `python -c "from modelscope import ..."`——

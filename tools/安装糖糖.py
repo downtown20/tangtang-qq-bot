@@ -149,6 +149,23 @@ TORCH_VARIANTS = {
 }
 DEFAULT_TORCH_VARIANT = "auto"
 
+# torch 走 `--no-deps` 装（见 TORCH_VARIANTS 的 kwargs：不让 cu130 轮子把 numpy 拖到
+# 2.x，而「核心」组把 numpy 钉在 <1.24），于是它自己的**运行期依赖**必须显式补。
+#
+# [!] 2026-11-14 用户实机（安装器全程 [√]、pip 全绿，却用不了）：
+#   上方注释原来写「[取证 2026-10-14] 把 fsspec/networkx/sympy 全 block 掉再
+#   import torch 仍然成功（torch 把这三个都做成了懒加载）」——**这句只对了半句**：
+#   裸 `import torch` 确实成功，但真实使用路径 `import transformers` 会拉 torch 的
+#   完整初始化链
+#       transformers → torch.distributed.tensor → torch.fx.experimental.symbolic_shapes
+#                   → import sympy
+#   当场 `ModuleNotFoundError: No module named 'sympy'`，
+#   而 agent/embeddings.py 用 `except ImportError` 接住它，只打一行
+#   「⚠ transformers 未安装，语义搜索不可用」——**用户看到的是"没装"，
+#   实际是"装了但缺一个 8MB 的 sympy"**，BGE 语义检索、精排、情绪模型全废。
+#   那次的取证面只到 `import torch`，没有测到 transformers 这一跳。
+TORCH_RUNTIME_DEPS = ["sympy>=1.13", "networkx>=3.0", "fsspec>=2023.5.0"]
+
 
 def _run_capture(cmd: list[str], timeout: int = 25) -> str | None:
     """跑一条探测命令；失败 / 超时一律返回 None——探测不许把安装流程打断。"""
@@ -445,7 +462,14 @@ GROUPS = {
         #   numba 0.56.4 的元数据硬要求 numpy<1.24，而 librosa 0.10.2 依赖 numba，
         #   librosa 又被在跑的 GPT-SoVITS 推理链顶层 import。动上界要有实测证据。
         "pkgs": ["websockets>=12.0", "httpx>=0.27.0", "pyyaml>=6.0",
-                 "python-dotenv>=1.0", "jinja2>=3.0", "numpy>=1.23.5,<1.24"],
+                 "python-dotenv>=1.0", "jinja2>=3.0", "numpy>=1.23.5,<1.24",
+                 # [!] 2026-11-14 用户日志：`DEPRECATION: jieba is being installed
+                 #   using the legacy 'setup.py install' method, because ... the
+                 #   'wheel' package is not installed`。ensurepip 只装 pip+setuptools，
+                 #   不带 wheel；pip 23.1 起对无 wheel 的 sdist 会强制 PEP517，
+                 #   届时 jieba 这类无 pyproject.toml 的包可能直接装不上。
+                 #   wheel 只有几百 KB，显式带上。
+                 "wheel>=0.41"],
     },
     "记忆": {
         "desc": "L1 高质量记忆——强烈建议（含 torch，按本机设备自动选档）",
@@ -596,6 +620,10 @@ def _plan(groups: list[str], variant: str | None = None) -> list[tuple[list[str]
         items = ([(g["pkgs"], {})] if g["pkgs"] else []) + list(g.get("extra", []))
         if g.get("torch") and spec:
             items.append(spec)
+            # torch 用 --no-deps 装，它自己的运行期依赖得单独补一条
+            # （sympy/networkx/fsspec；缺 sympy 时 transformers 直接导不进来，
+            #  见 TORCH_RUNTIME_DEPS 上的事故注释）
+            items.append((list(TORCH_RUNTIME_DEPS), {}))
         for pkgs, kw in items:
             key = (tuple(pkgs), tuple(sorted(kw.items())))
             if key in seen:
@@ -891,13 +919,24 @@ def _model_ready(path: Path, is_model: bool) -> bool:
     顺带一提，那个"父目录"判据也认不下 `bge-small-zh-v1___5` 这种 modelscope
     把点号转义后的落点，而 `_fetch_modelscope` 是认的。
     """
-    if not path.exists():
-        return False
     if not is_model:
-        return True
+        return path.exists()
     if path.is_file():
         return True
-    return (path / "config.json").exists() or any(path.glob("*/config.json"))
+    if path.is_dir():
+        if (path / "config.json").exists():
+            return True
+        if any(path.glob("*/config.json")):
+            return True
+    # [!] 2026-11-14：modelscope 1.x 把模型落进自己的缓存布局
+    #   `<models>/models/<ns>--<name>/snapshots/<rev>/config.json`，
+    #   旧判据只看 `<path>` 存不存在、里面有没有 config.json，
+    #   于是「文件全在、进度条 100%」也报「尚未就位」。运行期现在也认这套布局
+    #   （agent/paths.find_model_dir），判据必须跟上，否则两条口径又分家。
+    #   注意：这一条不能放在 `path.exists()` 之后——缓存布局下 path 本身就不存在。
+    ns, name = path.parent.name, path.name
+    cached_snaps = path.parent.parent / "models" / f"{ns}--{name}" / "snapshots"
+    return cached_snaps.is_dir() and any(cached_snaps.glob("*/config.json"))
 
 
 def check_directories(choices: list[int]) -> None:
@@ -988,10 +1027,22 @@ MODELS = {
 }
 
 # 子进程执行 modelscope 下载——刚 pip 装上的包当前解释器看不见，必须新起进程
+#
+# [!] 2026-11-14 用户实机：旧版只传 cache_dir，于是 modelscope 按**它自己的缓存布局**
+#   落盘：
+#       <cache_dir>/models/<命名空间>--<模型名>/snapshots/<rev>/config.json
+#   而代码期望 `<依赖根>/models/<命名空间>/<模型名>/`，判据与运行期双双落空 →
+#   三个模型都下到 100%，安装器仍报「下载未完成」，程序也读不到（2.6G 白下）。
+#   现在优先用 local_dir 直接下到目标目录；不支持（老 modelscope）再退回 cache_dir，
+#   此时由 _fetch_modelscope 的「缓存布局兜底判据」接住，不会误报。
 _MODELSCOPE_SNIPPET = (
     "import sys\n"
     "from modelscope import snapshot_download\n"
-    "snapshot_download(sys.argv[1], cache_dir=sys.argv[2])\n"
+    "repo, cache, local = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+    "try:\n"
+    "    snapshot_download(repo, local_dir=local)\n"
+    "except TypeError:\n"
+    "    snapshot_download(repo, cache_dir=cache)\n"
 )
 
 
@@ -1039,25 +1090,64 @@ def _download_file(url: str, dest: Path, label: str) -> bool:
     return True
 
 
+def _modelscope_cached_dir(cache_root: Path, repo: str) -> Path | None:
+    """modelscope 1.x 的缓存布局：`<cache_root>/models/<ns>--<name>/snapshots/<rev>/`。"""
+    ns, _, name = repo.partition("/")
+    snaps = cache_root / "models" / f"{ns}--{name}" / "snapshots"
+    if not snaps.is_dir():
+        return None
+    try:
+        for d in sorted((p for p in snaps.iterdir() if p.is_dir()), reverse=True):
+            if (d / "config.json").is_file():
+                return d
+    except OSError:
+        return None
+    return None
+
+
 def _fetch_modelscope(repo: str, target: Path, label: str) -> bool:
-    """modelscope 下载。cache_dir 的 <命名空间>/<模型名> 布局天然就是代码期望的落点，无需搬运。"""
+    """modelscope 下载：**下到 target**（local_dir），而不是让它落进自己的缓存布局。
+
+    [!] 2026-11-14 用户实机复现：旧实现的 docstring 断言「cache_dir 的
+    <命名空间>/<模型名> 布局天然就是代码期望的落点，无需搬运」——**这条是错的**。
+    modelscope 1.40 实际落盘是
+        <cache_dir>/models/<ns>--<name>/snapshots/<rev>/
+    （多一层 models、用 `--` 而不是 `/`、还带 snapshots/<rev>），于是判据
+    `target/config.json` 与运行期路径同时落空：三个模型进度条 100%、
+    安装器却报「下载未完成」，程序也读不到。
+    现在：先按 local_dir 直下；不支持该参数的老版本退回 cache_dir，再用
+    `_modelscope_cached_dir()` 兜底判就位（并不搬运文件——运行期
+    agent/paths.find_model_dir() 认同一套布局）。
+    """
+    cache_root = _deps_target("models")
     if (target / "config.json").exists():
         print(f"    [√] 已就绪，跳过：{label}")
         return True
+    # 已经按 modelscope 缓存布局下过（老版本安装器/用户手动下的）——直接算就位
+    cached = _modelscope_cached_dir(cache_root, repo)
+    if cached is not None:
+        print(f"    [√] 已就绪（modelscope 缓存布局）：{_display(cached)}")
+        return True
     print(f"    [↓] {label}（modelscope）")
+    target.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
-        [sys.executable, "-c", _MODELSCOPE_SNIPPET, repo, str(_deps_target("models"))],
+        [sys.executable, "-c", _MODELSCOPE_SNIPPET, repo, str(cache_root), str(target)],
         cwd=str(BASE))
-    if proc.returncode != 0 or not (target / "config.json").exists():
-        # modelscope 某些版本把点号转义成 ___，embeddings.py 两种都认
-        alt = target.with_name(target.name.replace(".", "___"))
-        if (alt / "config.json").exists():
-            print(f"    [√] 已就绪：{_display(alt)}")
-            return True
-        print("    [!] 下载未完成——请检查网络后重跑；也可稍后手动补装")
-        return False
-    print(f"    [√] 已放置：{_display(target)}")
-    return True
+    if (target / "config.json").exists():
+        print(f"    [√] 已放置：{_display(target)}")
+        return True
+    cached = _modelscope_cached_dir(cache_root, repo)
+    if cached is not None:
+        print(f"    [√] 已就绪（modelscope 缓存布局）：{_display(cached)}")
+        return True
+    # 老落点：点号被转义成 ___
+    alt = target.with_name(target.name.replace(".", "___"))
+    if (alt / "config.json").exists():
+        print(f"    [√] 已就绪：{_display(alt)}")
+        return True
+    print("    [!] 下载未完成——请检查网络后重跑；也可稍后手动补装"
+          f"（modelscope 返回码 {proc.returncode}）")
+    return False
 
 
 def _release_assets() -> dict:

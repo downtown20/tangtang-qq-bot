@@ -273,12 +273,12 @@ def find_python310() -> Path | None:
 _FFMPEG_REL = Path("ffmpeg") / "bin"
 
 
-def find_ffmpeg_dir() -> Path | None:
-    """项目自带的 ffmpeg bin 目录；找不到返回 None。
+def deps_roots() -> list[Path]:
+    """依赖根的候选，按优先级。
 
-    位置策略与 tools/依赖位置.py **同一份配置**（环境变量 TANGTANG_DEPS_ROOT →
+    与 tools/依赖位置.py **同一份规则**（环境变量 TANGTANG_DEPS_ROOT →
     项目根下的 依赖位置.json → 项目内 依赖/）。这里不 import tools/
-    （agent 层不依赖 tools 层），只读同一个键，保持同一条规则。
+    （agent 层不依赖 tools 层），只读同一个键。
     """
     roots: list[Path] = []
     env = os.environ.get("TANGTANG_DEPS_ROOT", "").strip()
@@ -295,9 +295,64 @@ def find_ffmpeg_dir() -> Path | None:
     except Exception:
         pass
     roots.append(PROJECT_ROOT / "依赖")
+    return roots
 
+
+def find_model_dir(repo: str, extra: tuple[str, ...] = ()) -> Path | None:
+    """按 modelscope 的 repo id（`BAAI/bge-small-zh-v1.5`）找**已就位**的模型目录。
+
+    [!] 2026-11-14 用户实机（13 台机器级别的坑，实测复现）：安装器把三个模型
+    都下完了、进度条 100%，但它们落在 modelscope 自己的缓存布局里：
+
+        <依赖根>/models/models/BAAI--bge-small-zh-v1.5/snapshots/master/
+
+    而运行期只找 `./models/BAAI/bge-small-zh-v1.5`——**相对当前工作目录**，
+    既不是依赖根，也不认 `modelscope/model--name/snapshots/rev` 这一层。
+    结果：模型下完了 → 安装器判「未完成」→ 程序也读不到 → 2.6G 白下，
+    BGE 语义检索 / 精排 / 情绪模型全部静默降级。
+
+    所以定位只能有一处：这里。候选顺序
+      1. 依赖根 / models / <ns> / <name>           （安装器 local_dir 的正解落点）
+      2. 依赖根 / models / <ns> / <name 点号转义成 ___>（老落点）
+      3. 依赖根 / models / models / <ns>--<name> / snapshots/<rev>/（modelscope 缓存）
+      4. 项目根 / models / <ns> / <name>            （老行为，零回归）
+      5. ~/models/<ns>/<name>                      （历史手工放置）
+      6. extra：调用方自己的历史候选路径（保持兼容）
+    每条都要求目录里真有 config.json——空壳目录（下了一半的）不算。
+    """
+    ns, _, name = repo.partition("/")
+    cands: list[Path] = []
+    for root in deps_roots():
+        m = root / "models"
+        cands.append(m / ns / name)
+        cands.append(m / ns / name.replace(".", "___"))
+        snaps = m / "models" / f"{ns}--{name}" / "snapshots"
+        if snaps.is_dir():
+            try:
+                cands.extend(sorted((p for p in snaps.iterdir() if p.is_dir()), reverse=True))
+            except OSError:
+                pass
+    cands.append(PROJECT_ROOT / "models" / ns / name)
+    cands.append(PROJECT_ROOT / "models" / ns / name.replace(".", "___"))
+    cands.append(Path(os.path.expanduser(f"~/models/{ns}/{name}")))
+    for raw in extra:
+        cands.append(Path(os.path.expanduser(str(raw))))
+    for d in cands:
+        try:
+            if d.is_dir() and (d / "config.json").is_file():
+                return d
+        except OSError:
+            continue
+    return None
+
+
+def find_ffmpeg_dir() -> Path | None:
+    """项目自带的 ffmpeg bin 目录；找不到返回 None。
+
+    位置策略见 deps_roots()——与 tools/依赖位置.py 同一份规则。
+    """
     exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
-    for root in roots:
+    for root in deps_roots():
         d = root / _FFMPEG_REL
         if (d / exe).exists():
             return d
