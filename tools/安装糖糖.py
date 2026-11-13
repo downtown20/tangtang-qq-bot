@@ -499,7 +499,7 @@ GROUPS = {
         "pkgs": ["python-docx>=0.8", "pdfplumber>=0.10", "PyPDF2>=3.0"],
     },
     "控制台": {
-        "desc": "PySide6 图形界面——建议",
+        "desc": "PySide6 旧式 Qt 控制台 + 图标/外观预览（桌面端不需要它，约 100MB）",
         "pkgs": ["pyside6>=6.5"],
     },
     "测试": {
@@ -524,7 +524,15 @@ FEATURES = [
     #   模式没有」，所以描述要写清它到底给什么。翻唱制作侧已整体下线，这里只剩播放。
     ("唱歌", "点歌即播随包自带的预录录音成品；播放不需要任何依赖、也不需要下载任何模型", ["唱歌"]),
     ("读文档", "docx/pdf 解析", ["文档"]),
-    ("图形控制台", "PySide6 界面——强烈建议", ["控制台"]),
+    # [!] 2026-11-14：默认勾选里已去掉本项。主入口是 Electron 桌面端
+    #   （desktop/release/小糖糖桌面端/），PySide6 那 ~100MB 只服务旧式 Qt 控制台
+    #   （`python start.py console`）与图标/外观预览。条目**不删**——删了会让
+    #   FEATURES 的下标整体错位（已装机器 `状态/安装清单` 记的是下标），
+    #   也会让想用 Qt 控制台的人无从勾选。改成「可选、不推荐、说清代价」。
+    ("图形控制台",
+     "旧式 Qt 控制台（python start.py console）+ 图标/外观预览，PySide6 约 100MB。"
+     "日常请用桌面端，桌面端不需要它",
+     ["控制台"]),
     ("测试工具", "pytest 开发测试", ["测试"]),
     ("运维工具", "runtime_observer 观察器、体检/语音质检等脚本（选装）", ["运维"]),
 ]
@@ -597,6 +605,91 @@ def _plan(groups: list[str], variant: str | None = None) -> list[tuple[list[str]
     return plan
 
 
+def _purelib_path() -> Path:
+    import sysconfig
+    return Path(sysconfig.get_path("purelib"))
+
+
+def ensure_pip() -> bool:
+    r"""确保当前解释器能 `python -m pip`。
+
+    两道前置，都在 2026-11-14 的用户实机上真实踩到：
+
+    ① **解释器里没有 pip**：Python 3.10.11 装好了，但安装时没勾「pip」/ 用了精简
+       安装 —— `python -m pip` 直接 `No module named pip`。安装器此前从不检查，
+       三条 pip install 全失败，用户只看到「安装失败，请手动重试」，而重试同样失败。
+       修法：标准库 `ensurepip`（离线，自带 wheel，本机实测 `--version` → pip 23.0.1）。
+
+    ② **site-packages 是个失效的目录联接**：`<Python>\Lib\site-packages` 是指向
+       `<旧项目根>\依赖\site-packages` 的 junction（`tools/依赖迁移.py` 建的），
+       项目换盘、旧目标被删之后它悬空 —— `os.path.exists` 为 False、
+       `os.path.lexists` 为 True。此时 ensurepip 会崩在
+       `FileNotFoundError: ...\site-packages\distutils-precedence.pth`，
+       而且没有任何 Python 包（含 pip）能装进去。
+       判据：`lexists and not exists`（junction 在 Python 里 `islink` 仍为 False，
+       不能用 islink 判）。
+    """
+    def _pip_ok() -> bool:
+        r = subprocess.run([sys.executable, "-m", "pip", "--version"],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        return r.returncode == 0
+
+    # ① 先确保 site-packages 本身是真实可写的目录（否则下面两条都是空谈）
+    purelib = _purelib_path()
+    if not purelib.exists():
+        if os.path.lexists(purelib):
+            target = ""
+            try:
+                target = os.readlink(purelib)
+            except OSError:
+                pass
+            print(f"\n  [×] {purelib}")
+            print(f"      是一个**失效的目录联接**，指向：{target or '已不存在的位置'}")
+            print("      来源：以前跑过 tools/依赖迁移.py（把 site-packages 联接进项目依赖目录），")
+            print("      之后项目换盘/旧目录被删，联接就悬空了——pip 装不进去，Python 也读不到包。")
+            hint = (f'      rmdir "{purelib}"\n'
+                    f'      "{sys.executable}" -m ensurepip --upgrade')
+            if sys.stdin and sys.stdin.isatty():
+                ans = input("      现在删除这个失效联接（只删链接，不动目标）并重试？[y/N] ").strip().lower()
+                if ans in ("y", "yes"):
+                    try:
+                        os.rmdir(purelib)
+                        print("      [√] 已删除失效联接")
+                    except OSError as exc:
+                        print(f"      [×] 删除失败：{exc}\n{hint}")
+                        return False
+                else:
+                    print("      已跳过。手动修法（cmd 里跑）：\n" + hint)
+                    return False
+            else:
+                print("      非交互环境，不自动改系统目录。手动修法（cmd 里跑）：\n" + hint)
+                return False
+        try:
+            purelib.mkdir(parents=True, exist_ok=True)
+            print(f"\n  [!] site-packages 原不存在，已创建：{purelib}")
+        except OSError as exc:
+            print(f"\n  [×] 无法创建 {purelib}：{exc}")
+            return False
+
+    if _pip_ok():
+        return True
+    print("\n  [!] 当前 Python 没有可用 pip —— 用标准库 ensurepip 就地修复（离线）……")
+    r = subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"],
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    tail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+    if tail:
+        print("      " + tail[-1][:200])
+    if _pip_ok():
+        print("  [√] pip 已就绪（ensurepip 修复成功）")
+        return True
+    print("  [×] ensurepip 也没能修复。请先修这一条，再重跑本工具：")
+    print(f'      "{sys.executable}" -m ensurepip --upgrade')
+    print("      或重装 Python 3.10 时勾上「pip」与「Add python.exe to PATH」")
+    return False
+
+
 def _install(pkgs: list[str], kwargs: dict) -> bool:
     # pip 的 wheel/http 缓存默认堆在用户目录下的 pip 缓存——装 torch 全家桶
     # 就是好几个 G。缓存是纯落盘位置，直接跟依赖根走。
@@ -633,6 +726,17 @@ def install_groups(groups: list[str], dry_run: bool = False,
     """
     if not groups:
         print("没有选择任何组")
+        return False
+    # pip 是所有组的前置：本机 Python 3.10 实例就曾是「装好但没 pip」的状态
+    # （2026-11-14 用户报障），先自愈再说装谁。
+    if dry_run:
+        _r = subprocess.run([sys.executable, "-m", "pip", "--version"],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
+        if _r.returncode != 0:
+            print("\n  [!] 当前 Python 没有 pip —— 真实安装时安装器会先用 "
+                  "ensurepip 自动修复（离线），修不好会明确报错")
+    elif not ensure_pip():
         return False
     wants_torch = any(GROUPS[g].get("torch") for g in groups)
     # [!] torchaudio ≠ torch 的同义词：它是**语音侧**的库（gpt-sovits/api_v2.py 顶层
@@ -716,6 +820,17 @@ def check_environment() -> None:
     print(f"  磁盘剩余: {free_gb:.1f} GB")
     if free_gb < 10:
         print("  [!] 磁盘空间紧张（<10GB），安装语音可能失败")
+    # pip 可用性 —— 2026-11-14 用户实机：Python 3.10.11 装好了但没有 pip
+    # （安装时没勾 / 精简安装），三条 pip install 全失败而在此之前没有任何提示。
+    # 这里只报告；真正的修复在 install_groups() 里用 ensurepip 自动做。
+    _pip = subprocess.run([sys.executable, "-m", "pip", "--version"],
+                          capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if _pip.returncode == 0:
+        _ver = ((_pip.stdout or "").strip().splitlines() or [""])[0][:80]
+        print(f"  pip: [√] {_ver}")
+    else:
+        print("  pip: [×] 当前 Python 没有 pip —— 装依赖时会先用 ensurepip 自动修复")
 
 
 def check_prerequisites() -> None:
@@ -814,11 +929,13 @@ RELEASE_REPO = "downtown20/tangtang-qq-bot"
 # 只查 /releases/latest 会漏
 RELEASE_API = f"https://api.github.com/repos/{RELEASE_REPO}/releases?per_page=50"
 
-# 默认预勾选的功能（2026-09-18 主人拍板）：
-#   0 聊天+高质量记忆 · 3 唱歌 · 5 图形控制台
-# 相当于原来的「文字版」。重活（语音 6G / 识图 2.5G）默认不勾——
-# 别替用户决定下几个 G，让他自己选。
-DEFAULT_FEATURES = [0, 3, 5]
+# 默认预勾选的功能（2026-09-18 主人拍板，2026-11-14 调整）：
+#   0 聊天+高质量记忆 · 3 唱歌
+# [2026-11-14] 去掉 5 图形控制台：主入口已是 Electron 桌面端（desktop/release/
+#   小糖糖桌面端/小糖糖桌面端.exe，双击即用），PySide6 的 ~100MB 只服务旧式
+#   Qt 控制台与图标预览——不该替用户预勾一份用不上的重量级 GUI 框架。
+# 重活（语音 6G / 识图 2.5G）默认不勾——别替用户决定下几个 G，让他自己选。
+DEFAULT_FEATURES = [0, 3]
 
 # 语音识别模型（听懂别人的语音消息）。
 # [!] 与 agent/asr.py 的 _SENSE_VOICE_MODEL / _SENSE_VOICE_URL 必须一致——
