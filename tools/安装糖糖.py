@@ -1063,6 +1063,43 @@ def _model_ready(path: Path, is_model: bool) -> bool:
     return cached_snaps.is_dir() and any(cached_snaps.glob("*/config.json"))
 
 
+def check_runtime_imports(choices: list[int], dry_run: bool = False) -> list[str]:
+    """装完真的 import 一次——「勾了就一定能用」的落地检查。
+
+    [!] 2026-11-14 用户实机（安装器全程 [√]）：pip 全绿、transformers 也装了，
+    但 torch 是 `--no-deps` 装的、缺 sympy，于是运行期
+
+        import transformers → torch.distributed.tensor → torch.fx… → import sympy
+        ModuleNotFoundError: No module named 'sympy'
+
+    而 agent/embeddings.py 用 `except ImportError` 接住它，只打一行
+    「⚠ transformers 未安装，语义搜索不可用」——用户被指向"没装"，
+    实际缺一个 8MB 的包，BGE 语义检索 / 精排 / 情绪模型全部静默降级。
+    人眼看不出来，但安装器可以自己 import 一次。
+    返回「装了但用不了」的清单（空 = 没问题）。
+    """
+    if dry_run or 0 not in choices:
+        return []
+    print("\n━━━ 运行期检查（装完真的能不能 import）━━━")
+    code = ("import transformers, torch;"
+            "print('transformers', transformers.__version__, '| torch', torch.__version__)")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=300)
+    except Exception as exc:  # 超时/OSError 都不该把安装流程打断
+        print(f"  [!] 运行期检查没跑成：{exc}")
+        return []
+    if r.returncode == 0:
+        print(f"  [√] {r.stdout.strip()}")
+        return []
+    last = ((r.stderr or "").strip().splitlines() or ["(无输出)"])[-1]
+    print("  [!] 运行期检查失败——依赖装了但程序用不了：")
+    print(f"      {last[:240]}")
+    print("      常见原因：torch 用 --no-deps 装，缺 sympy/networkx/fsspec 之一；"
+          "重跑本工具会自动补。")
+    return [f"运行期 import 失败：{last[:120]}"]
+
+
 def check_directories(choices: list[int]) -> None:
     """在模型获取之后跑——所以「缺失」意味着下载没成功，而不是要用户自己摆"""
     print("\n━━━ 目录/服务检测 ━━━")
@@ -1214,6 +1251,30 @@ def _download_file(url: str, dest: Path, label: str) -> bool:
     return True
 
 
+_WEIGHT_GLOBS = ("*.safetensors", "*.bin", "*.onnx", "*.gguf", "*.pt")
+
+
+def _weights_present(d: Path) -> bool:
+    """目录里有没有**权重**文件（不只是 config.json）。
+
+    [!] 2026-11-14：安装器原先只判 `config.json` 存在。可 config.json 是
+    **第一个**落盘的文件——下载中断/磁盘满时，目录里恰好只有它，安装器照样
+    打 `[√] 已放置`，用户一启动就是「模型加载失败」。判"就位"必须看到权重。
+    """
+    try:
+        return any(any(d.glob(pat)) for pat in _WEIGHT_GLOBS)
+    except OSError:
+        return False
+
+
+def _model_ready_dir(d: Path) -> bool:
+    """一个模型目录算不算「真的就位」：config.json + 权重都在。"""
+    try:
+        return (d / "config.json").is_file() and _weights_present(d)
+    except OSError:
+        return False
+
+
 def _modelscope_cached_dir(cache_root: Path, repo: str) -> Path | None:
     """modelscope 1.x 的缓存布局：`<cache_root>/models/<ns>--<name>/snapshots/<rev>/`。"""
     ns, _, name = repo.partition("/")
@@ -1222,14 +1283,14 @@ def _modelscope_cached_dir(cache_root: Path, repo: str) -> Path | None:
         return None
     try:
         for d in sorted((p for p in snaps.iterdir() if p.is_dir()), reverse=True):
-            if (d / "config.json").is_file():
+            if _model_ready_dir(d):
                 return d
     except OSError:
         return None
     return None
 
 
-def _fetch_modelscope(repo: str, target: Path, label: str) -> bool:
+def _fetch_modelscope(repo: str, target: Path, label: str, size: str = "") -> bool:
     """modelscope 下载：**下到 target**（local_dir），而不是让它落进自己的缓存布局。
 
     [!] 2026-11-14 用户实机复现：旧实现的 docstring 断言「cache_dir 的
@@ -1244,20 +1305,22 @@ def _fetch_modelscope(repo: str, target: Path, label: str) -> bool:
     agent/paths.find_model_dir() 认同一套布局）。
     """
     cache_root = _deps_target("models")
-    if (target / "config.json").exists():
+    if _model_ready_dir(target):
         print(f"    [√] 已就绪，跳过：{label}")
         return True
+    if target.is_dir() and (target / "config.json").is_file() and not _weights_present(target):
+        print(f"    [!] {label}：目录里有 config.json 但没有权重——上次下载没完成，重下")
     # 已经按 modelscope 缓存布局下过（老版本安装器/用户手动下的）——直接算就位
     cached = _modelscope_cached_dir(cache_root, repo)
     if cached is not None:
         print(f"    [√] 已就绪（modelscope 缓存布局）：{_display(cached)}")
         return True
-    print(f"    [↓] {label}（modelscope）")
+    print(f"    [↓] {label}（modelscope{('，' + size) if size else ''}）")
     target.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         [sys.executable, "-c", _MODELSCOPE_SNIPPET, repo, str(cache_root), str(target)],
         cwd=str(BASE))
-    if (target / "config.json").exists():
+    if _model_ready_dir(target):
         print(f"    [√] 已放置：{_display(target)}")
         return True
     cached = _modelscope_cached_dir(cache_root, repo)
@@ -1266,11 +1329,14 @@ def _fetch_modelscope(repo: str, target: Path, label: str) -> bool:
         return True
     # 老落点：点号被转义成 ___
     alt = target.with_name(target.name.replace(".", "___"))
-    if (alt / "config.json").exists():
+    if _model_ready_dir(alt):
         print(f"    [√] 已就绪：{_display(alt)}")
         return True
-    print("    [!] 下载未完成——请检查网络后重跑；也可稍后手动补装"
-          f"（modelscope 返回码 {proc.returncode}）")
+    if (target / "config.json").is_file():
+        print("    [!] 只下到 config.json，权重缺失（网络中断/磁盘满？）——重跑可续传")
+    else:
+        print(f"    [!] 下载未完成——请检查网络后重跑；也可稍后手动补装"
+              f"（modelscope 返回码 {proc.returncode}）")
     return False
 
 
@@ -1405,23 +1471,43 @@ def _fetch_ollama(model: str, label: str) -> bool:
 def _ask_optional(specs: list) -> set[str]:
     """下载前先问可选大模型——别让用户等完 2.2G 才后悔。
 
+    [!] 2026-11-14 用户实机：旧措辞是「跳过它们以节省下载量？[y/N]」——
+    **反向提问**（答 y = 跳过、答 N = 下载）。用户输入 `N` 时看到「→ 一并下载」，
+    心里是懵的：N 到底是"不跳过"还是"不要"？这种"否定式提问 + 双重否定答案"
+    在任何语言里都会误答，而代价是 2.6G 流量。
+    改成**正向提问**：问"要不要现在下"，默认 Y，答 n 才跳过。
     非交互环境（无 stdin）按「不跳过」处理：宁可多下，也别静默删功能。
     """
     asks = [s for s in specs if s[5] == "ask"]
     if not asks:
         return set()
-    print("\n  [!] 以下模型体积较大，但缺了只影响质量、不影响能不能用：")
+    total = sum(_size_to_mb(s[4]) for s in asks)
+    print("\n  [!] 以下模型体积较大（合计约 "
+          f"{total / 1024:.1f}G），但缺了只影响质量、不影响能不能用：")
     for name, _t, _k, _p, size, _m in asks:
         print(f"      · {name}  [{size}]")
     try:
-        raw = input("    跳过它们以节省下载量？[y/N] ").strip().lower()
+        raw = input("    现在就一并下载？（选 n 跳过，以后重跑本工具可补装）[Y/n] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         raw = ""
-    if raw in ("y", "yes"):
+    if raw in ("n", "no"):
         print("    → 已跳过（以后想要：重跑本工具即可补装）")
         return {s[0] for s in asks}
-    print("    → 一并下载")
+    print("    → 现在下载")
     return set()
+
+
+def _size_to_mb(size: str) -> int:
+    """把 '184M' / '2.2G' 这样的尺寸串换成 MB（问体积合计用）。"""
+    text = (size or "").strip().upper()
+    try:
+        if text.endswith("G"):
+            return int(float(text[:-1]) * 1024)
+        if text.endswith("M"):
+            return int(float(text[:-1]))
+    except ValueError:
+        pass
+    return 0
 
 
 def fetch_models(choices: list[int], dry_run: bool = False) -> list[str]:
@@ -1443,7 +1529,7 @@ def fetch_models(choices: list[int], dry_run: bool = False) -> list[str]:
         # 落盘位置从依赖根取（_deps_path 按顶层目录建一次目录联接）
         target = _deps_path(target_rel, link_back=True) if target_rel else None
         if kind == "modelscope":
-            ok = _fetch_modelscope(params["repo"], target, name)
+            ok = _fetch_modelscope(params["repo"], target, name, size)
         elif kind == "release":
             ok = _fetch_release_asset(params["asset"], target, name)
         elif kind == "release_parts":
@@ -1687,6 +1773,8 @@ def cmd_install(dry_run: bool, deps_root: str | None = None,
     fresh = bootstrap_config(dry_run)
     missing = fetch_models(choices, dry_run)
     check_directories(choices)
+    # 装完 import 一次——把「装了但用不了」挡在安装阶段，而不是让用户启动后自己猜
+    bad_runtime = check_runtime_imports(choices, dry_run)
     wire_config(choices, fresh, dry_run)
     write_manifest(choices, dry_run)
     if missing:
@@ -1694,6 +1782,11 @@ def cmd_install(dry_run: bool, deps_root: str | None = None,
         for m in missing:
             print(f"    · {m}")
         print("   重跑本工具可自动续传（已下好的不会重复下载）")
+    if bad_runtime:
+        print("\n[!]  以下依赖装了但**用不了**（见上方「运行期检查」）：")
+        for m in bad_runtime:
+            print(f"    · {m}")
+        print("   重跑本工具会自动补装缺的包；仍失败请把上面那行报错发出来。")
     if not dry_run:
         report_ready(choices)
     print("\n━━━ 完成 ━━━")
