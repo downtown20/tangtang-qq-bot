@@ -48,6 +48,19 @@ UPLOAD_HOST = "uploads.github.com"
 CHUNK = 4 * 1024 * 1024          # 4 MB —— 实测 4 MB 块在 5.5 MB/s 下开销可忽略
 RETRIES = 3
 
+# ⚠ 2026-11-14 实测事故：Windows 控制台代码页是 GBK，而本脚本的成功/失败
+#   提示里带 ✅/✓。**1 GB 已经传完、asset 已经在 GitHub 上（sha256 一致）**，
+#   最后一行 print 却抛 UnicodeEncodeError('gbk' codec can't encode '\u2705')；
+#   紧随其后的 except 分支又打印 '✗'，于是二次崩在同一个地方——用户看到的是
+#   一整段 Traceback，会以为上传失败去重传 1 GB。
+#   守卫放在模块级：收尾打印和错误打印都覆盖到。
+for _s in (sys.stdout, sys.stderr):
+    if _s and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 
 def _run(args: list[str], **kw) -> str:
     r = subprocess.run(args, capture_output=True, text=True,
