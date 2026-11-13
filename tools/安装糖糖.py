@@ -419,9 +419,18 @@ def _confirm_deps_root(deps_root: str | None, assume_yes: bool) -> Path:
     """开始装之前，把「装到哪儿」定下来（唯一入口）。
 
     · `--deps-root PATH` → 直接用并落盘（自动化场景，不弹框）
-    · `--yes`            → 不弹框，用已配置的位置（默认 = 项目内 `依赖/`）
-    · 交互式             → 弹系统原生目录选择框；**取消 = 继续用默认，不算失败**
+    · `--yes` / 非交互     → 不弹框，用已配置的位置（默认 = 项目内 `依赖/`）
+    · 交互式：
+        - **已经配置过、且目录还在 → 默认沿用，不弹系统框**（2026-11-14 改）
+          只打印当前位置 + 一行「回车沿用 / 直接输入新目录」。理由见下。
+        - 第一次（没有 `依赖位置.json`）或配置的目录已不在 → 才弹系统目录选择框；
+          点「取消」= 用默认位置，不算失败。
     三条路都打印 describe_deps_root()；落在系统盘只警告，不中止。
+
+    [!] 2026-11-14 用户实机：旧行为是**每次**都弹系统目录选择框。一个装了三次的
+    用户要连点三次「取消」，而且系统框一误点就改了依赖根——模型、pip 缓存全在旧的
+    依赖根下，改完之后安装器看不见它们，用户看到的是「模型又要重下」。
+    安装位置属于「配一次就不动」的东西，不该每次装都问一遍；要改时给一条明路即可。
     """
     if deps_root:
         p = 依赖位置.set_deps_root(deps_root)
@@ -430,17 +439,37 @@ def _confirm_deps_root(deps_root: str | None, assume_yes: bool) -> Path:
         p = 依赖位置.ensure_deps_root()
         print(f"\n[·] 安装位置：{依赖位置.describe_deps_root()}")
     else:
-        print("\n━━━ 安装位置 ━━━")
-        print(f"  当前：{依赖位置.describe_deps_root()}")
-        print("  接下来弹系统目录选择框；点「取消」就用当前位置继续。")
-        chosen = 依赖位置.choose_directory("选择安装位置（模型 / 缓存 / 依赖）",
-                                          initial=依赖位置.get_deps_root())
-        if chosen:
-            p = 依赖位置.set_deps_root(chosen)
-            print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+        cur = 依赖位置.get_deps_root()
+        configured = 依赖位置.CONFIG_PATH.exists() and bool(依赖位置._read_config())
+        if configured and cur.is_dir():
+            print("\n━━━ 安装位置 ━━━")
+            print(f"  当前：{依赖位置.describe_deps_root()}")
+            try:
+                raw = input("  回车=沿用；要换就直接输入新目录（如 D:\\tangtang-依赖）> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                raw = ""
+            raw = raw.strip('"').strip("'").strip()
+            if raw:
+                p = 依赖位置.set_deps_root(raw)
+                print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+            else:
+                p = 依赖位置.ensure_deps_root()
+                print(f"  [i] 沿用：{p}")
         else:
-            p = 依赖位置.ensure_deps_root()
-            print(f"  [i] 未选/已取消——继续用：{p}")
+            print("\n━━━ 安装位置 ━━━")
+            print(f"  当前：{依赖位置.describe_deps_root()}")
+            if configured:
+                print("  [!] 已配置的目录不在了（换盘/被删）——请重新选；点「取消」→ 用默认位置。")
+            else:
+                print("  第一次安装：接下来弹系统目录选择框；点「取消」就用默认（项目内 依赖/）。")
+            chosen = 依赖位置.choose_directory("选择安装位置（模型 / 缓存 / 依赖）",
+                                              initial=cur)
+            if chosen:
+                p = 依赖位置.set_deps_root(chosen)
+                print(f"  [√] 已改到：{p}（已写入 {依赖位置.CONFIG_PATH.name}）")
+            else:
+                p = 依赖位置.ensure_deps_root()
+                print(f"  [i] 未选/已取消——继续用：{p}")
     if 依赖位置.is_on_system_drive(p):
         print(f"  [!] 警告：{p} 在系统盘 {p.drive} 上——模型 + pip 缓存能到十几 G，")
         print("      建议换到别的盘（重跑本工具，或加 --deps-root PATH 指定）。")
