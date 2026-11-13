@@ -54,7 +54,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.08.03"
+TAG = "v1.08.04"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -87,11 +87,13 @@ INSTALL_NOTE = r"""🍬 小糖糖 {tag} — 开箱即用的安装说明
 
 ━━━ 三步开始 ━━━
   1. 双击  安装糖糖.bat    —— 勾你需要功能，依赖与模型自动装好、配置自动接好线
-  2. 双击  启动桌面端.bat  —— 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key
+  2. 双击  desktop\release\小糖糖桌面端\小糖糖桌面端.exe
+                           —— 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key
   3. 桌面端里启动 SnowLuma，在网页面板里配好连接，再启动糖糖
 
-  （第 2 步也可以直接双击 desktop\release\小糖糖桌面端\小糖糖桌面端.exe，
-    但 bat 会带上 Windows 必需的 --no-sandbox；裸双击在部分机器上点了没反应。）
+  （第 2 步若双击之后没反应，改用包根的 启动桌面端.bat —— 它带 --no-sandbox
+    并且把工作目录钉在包根。切记：桌面端的 exe 要在**解压后的包内**原位运行，
+    单独把它拷到桌面会找不到上层的 tools\ 目录，界面会报「后端桥退出」。）
 
 ━━━ 关于功能勾选 ━━━
   默认已勾上「聊天+记忆」「唱歌」「图形控制台」——够用了。
@@ -439,11 +441,24 @@ def _add_desktop(zf: zipfile.ZipFile) -> int:
               "再 python tools/打包桌面端.py）")
         return 0
     n = 0
+    dropped = 0
     for p in sorted(DESKTOP_RELEASE.rglob("*")):
-        if p.is_file():
-            zf.write(p, p.relative_to(BASE).as_posix())
-            n += 1
-    print(f"   ✅ 桌面端绿色版并入主包：{n} 个文件")
+        if not p.is_file():
+            continue
+        # ⚠ 2026-11-14：`.lnk` **不许进包**。快捷方式里存的是**绝对路径**
+        #   （实测随包那份写的是打包机的盘符绝对路径），
+        #   用户解压到任何别的目录，双击它都是死链：没反应、没报错、没日志。
+        #   而 README 恰好教用户"双击 lnk"。发布包里可移动的启动入口只能是
+        #   相对路径解析的东西：exe 本身（Electron 自己向上找项目根，实测可用）
+        #   或 启动桌面端.bat（`%~dp0`）。
+        if p.suffix.lower() == ".lnk":
+            dropped += 1
+            continue
+        zf.write(p, p.relative_to(BASE).as_posix())
+        n += 1
+    print(f"   ✅ 桌面端绿色版并入主包：{n} 个文件"
+          + (f"（剔掉 {dropped} 个 .lnk——里面是打包机的绝对路径，换机器必成死链）"
+             if dropped else ""))
     return n
 
 

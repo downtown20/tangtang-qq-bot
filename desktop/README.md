@@ -26,15 +26,25 @@ QQ消息 → SnowLuma → bot(agent/handler.py) → LLM → 回复
 
 已经打包好的在 `release/小糖糖桌面端/`：
 
-- **`小糖糖桌面端.lnk`** ← 双击这个（桌面也有一个）
-- `小糖糖桌面端.exe` 也可以，但**必须带 `--no-sandbox` 参数**
+- **`小糖糖桌面端.exe`** ← 双击这个（在包内原位运行，别把它单独拷出去）
 
-> ⚠ 为什么 exe 裸启动会静默秒退：Electron 的 Chromium 沙箱在某些环境（本机实测 DSH 进程树下）初始化失败，进程以 `STATUS_BREAKPOINT(0x80000003)` 退出、连 `main.js` 都不执行。`vite-plugin-electron` 的 dev 模式默认就传 `--no-sandbox`，所以开发时看不出来。快捷方式已把这个参数固化。
+> **2026-11-14 修正（实测推翻旧结论）**：以前这里写"exe 裸启动会静默秒退、必须带
+> `--no-sandbox`"，并让用户双击 `.lnk`。两条都不对：
+>
+> - 用 `explorer` 拉起（= 真实双击）实测**裸 exe 存活并拉起了 Python 桥**：
+>   `ROOT=<包根> bridgeExists=true` → `python tools\desktop_bridge.py --port 0`。
+>   那个 `STATUS_BREAKPOINT` 秒退只在**从别的进程树里启动**时出现（DSH/脚本/某些
+>   启动器），用户桌面双击不受影响。
+> - `.lnk` 里存的是**打包机的绝对路径**（实测内容指向打包机的盘符绝对路径），用户解压到
+>   任何别的目录，双击就是死链——没反应、没报错。发布包里已不再提供 `.lnk`。
+>
+> 兜底：双击之后没反应，就用项目根的 `启动桌面端.bat`（带 `--no-sandbox`、把工作
+> 目录钉在包根）。
 
 重新打包（改了代码之后）：
 
 ```bash
-python tools/打包桌面端.py      # 在项目根执行；会先 vite build，再组装绿色版 + 建快捷方式
+python tools/打包桌面端.py      # 在项目根执行；会先 vite build，再组装绿色版
 ```
 
 ### 方式二：开发模式
