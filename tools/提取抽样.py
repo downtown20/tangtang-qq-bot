@@ -48,7 +48,7 @@
     python tools/提取抽样.py --future             # 只抽带将来时词汇的真实消息
     python tools/提取抽样.py --cases              # 阳性对照（必须 PASS）
     python tools/提取抽样.py --users 6 --limit 20
-    python tools/提取抽样.py --qq 2524950083      # 只看某个人
+    python tools/提取抽样.py --qq 12345678        # 只看某个人
 
 退出码：0 = 判据通过；2 = 尺子失效 / 有批次没拿到回复（**不等于**"没有未闭合事件"）。
 

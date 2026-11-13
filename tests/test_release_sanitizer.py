@@ -350,8 +350,13 @@ def test_scan_exempt_list_is_exactly_what_we_expect():
 
     加豁免条目等于给扫描器开后门。这条断言不是防手滑，是防「反正扫不过，
     把它加进豁免算了」——那正是这个扫描器当初失效的方式（检查形同虚设）。
+
+    2026-11-14：`tests/test_paths_legacy_rebase.py` 是**第二个**合法豁免——
+    旧盘符重定位的回归测试必须装载本机绝对路径形状的样本，否则它什么也测不了。
+    实测代价很直接：不豁免时 `准备发布.py` 永久红灯，v1.08.00 之后没人再出过包。
     """
-    assert _prep.SCAN_EXEMPT_FILES == {"tests/test_release_sanitizer.py"}, \
+    assert _prep.SCAN_EXEMPT_FILES == {"tests/test_release_sanitizer.py",
+                                       "tests/test_paths_legacy_rebase.py"}, \
         f"豁免清单变了：{_prep.SCAN_EXEMPT_FILES}——加条目请先在 docstring 里写明为什么非加不可"
 
 

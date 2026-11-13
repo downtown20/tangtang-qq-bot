@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """小糖糖 发布打包（2026-09-18）
 
 **一个包**：代码 + 文档 + 安装器 + 歌曲 + 角色贴图。
@@ -55,7 +55,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.08.00"
+TAG = "v1.08.01"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -75,15 +75,24 @@ ZIP_EXCLUDE_SUFFIX = (".pyc", ".log", ".part", ".sqlite3-shm", ".sqlite3-wal")
 # 分卷上限——GitHub Release 单文件硬上限 2GB，留出安全余量
 PART_LIMIT = int(1.8 * 1024 ** 3)
 
-INSTALL_NOTE = """🍬 小糖糖 {tag} — 开箱即用的安装说明
+# ⚠ raw string 是**必须的**（2026-11-14 实测）：下面第 2 步写的是 Windows 路径
+#   `desktop\release\...`。普通字符串里 `\r` 被解释成回车符 0x0D，写进 zip 的
+#   安装说明就变成 `desktoppelease\...`——一份指向不存在路径的说明书，而
+#   生成它的脚本一行报错都没有（实测 bytes: b'desktop\x0delease\\...'）。
+#   另外「N 首预录歌曲」原来写死 41，2026-11-14 的包实际 0 首（见 _add_bundled_media
+#   的闸门注释），所以数量改成打包时实测填入。
+INSTALL_NOTE = r"""🍬 小糖糖 {tag} — 开箱即用的安装说明
 
-本包已自带：聊天核心 · 记忆系统 · 41 首预录歌曲 · 角色专属表情包 · 桌面控制台。
+本包已自带：聊天核心 · 记忆系统 · {songs} 首预录歌曲 · 角色专属表情包 · 桌面控制台。
 语音合成与识图需要额外模型，安装时按需自动下载。
 
 ━━━ 三步开始 ━━━
   1. 双击  安装糖糖.bat    —— 勾你需要功能，依赖与模型自动装好、配置自动接好线
-  2. 双击  desktop\release\小糖糖桌面端\小糖糖桌面端.exe  —— 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key
+  2. 双击  启动桌面端.bat  —— 在「设置」页填：机器人的 QQ 号、你的 QQ 号、模型 API Key
   3. 桌面端里启动 SnowLuma，在网页面板里配好连接，再启动糖糖
+
+  （第 2 步也可以直接双击 desktop\release\小糖糖桌面端\小糖糖桌面端.exe，
+    但 bat 会带上 Windows 必需的 --no-sandbox；裸双击在部分机器上点了没反应。）
 
 ━━━ 关于功能勾选 ━━━
   默认已勾上「聊天+记忆」「唱歌」「图形控制台」——够用了。
@@ -149,6 +158,13 @@ def _to_mp3(wav: Path, cache_dir: Path, bitrate: str) -> Path | None:
         而文件名已经是最终的 `tangtang-vX.zip`
       · **直接写目标文件**：ffmpeg 被中断会留下截断的 mp3（实测残 2,097,152 字节），
         而它比源 wav 新 → **下次打包缓存命中，残file 就这么进了包**
+
+    第三条（2026-11-14 实测定位，这次是**整批**失败）：
+      · **临时名 `.mp3.part` 让 ffmpeg 猜不出封装格式** —— ffmpeg 按扩展名选 muxer，
+        看到 `.part` 就 `Unable to choose an output format` 并以 -22 退出。
+        于是 40/40 首糖糖声线全部转码失败，包照样生成、文件名照样是最终的
+        `tangtang-vX.zip`，里面一首歌都没有。这就是 v1.08.00「0 首歌」的真正机制
+        （不属于"判据只看目录存在"那种表层问题）。修法是显式 `-f mp3`。
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     out = cache_dir / f"{wav.stem}.mp3"
@@ -158,7 +174,9 @@ def _to_mp3(wav: Path, cache_dir: Path, bitrate: str) -> Path | None:
     try:
         r = subprocess.run(
             ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(wav),
-             "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, str(tmp)],
+             "-vn", "-c:a", "libmp3lame", "-b:a", bitrate,
+             "-f", "mp3",                      # 临时名是 .part，必须显式指定 muxer
+             str(tmp)],
             capture_output=True, text=True, encoding="utf-8", errors="replace")
     except OSError as e:                         # FileNotFoundError 也是 OSError
         print(f"      ffmpeg 起不来（{e}）——装了吗？tools/快速安装ffmpeg.py")
@@ -189,6 +207,7 @@ def _voice_mp3(wav: Path) -> Path | None:
 def _add_bundled_media(zf: zipfile.ZipFile) -> int:
     """歌曲（audio/*.wav + 歌词 + separated 补差）+ 角色贴图，路径与最终布局一致"""
     n = 0
+    n_voice = n_orig = 0          # 计数只为闸门：进包数必须等于源文件数
     songs = BASE / "songs"
     if songs.is_dir():
         audio = songs / "audio"
@@ -203,12 +222,14 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
             _seen_audio.add(p.stem)
             zf.write(mp3, f"songs/audio/{p.stem}.mp3")
             n += 1
+            n_voice += 1
         # 已经是 mp3 的（或开发机上只有 mp3 的歌）原样带
         for p in sorted(audio.glob("*.mp3")):
             if p.stem in _seen_audio:
                 continue
             zf.write(p, f"songs/audio/{p.name}")
             n += 1
+            n_voice += 1
         # 原声版：**41 首全部进包**，且转码成 mp3。
         # 2026-09-19 修正两处——
         #   ① 原逻辑把"已在 audio/ 里的"当重复文件跳过了。可 audio/ 是**糖糖声线**、
@@ -233,11 +254,32 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
             _seen_orig.add(p.stem)
             zf.write(mp3, f"songs/covers/separated/{p.stem}.mp3")
             n += 1
+            n_orig += 1
         for p in sorted(sep.glob("*_FINAL.mp3")):
             if p.stem in _seen_orig:              # 两版都在时优先无损 wav
                 continue
             zf.write(p, f"songs/covers/separated/{p.name}")
             n += 1
+            n_orig += 1
+
+        # ── 数量闸门（2026-11-14 新增）───────────────────────────────────
+        # 为什么必须在这里 raise：转码失败原先只 print 一行 `[!] ... 跳过`
+        # 然后 continue，于是**包能生成、文件名是最终名、里面一首歌都没有**。
+        # 2026-11-14 实测的 v1.08.00 就是这种状态（songs/audio 0 首，安装说明
+        # 却写着「41 首预录歌曲」）。打包器的唯一职责就是"要么完整、要么别出包"，
+        # 所以这里改成硬失败——宁可不出包，也不出一个人点歌永远失败的包。
+        want_voice = len({p.stem for p in audio.glob("*.wav")}
+                         | {p.stem for p in audio.glob("*.mp3")})
+        want_orig = len({p.stem for p in sep.glob("*_FINAL.wav")}
+                        | {p.stem for p in sep.glob("*_FINAL.mp3")})
+        if n_voice < want_voice:
+            raise SystemExit(
+                f"❌ 糖糖声线只进了 {n_voice}/{want_voice} 首——包不完整，停止打包"
+                f"（先单独跑一遍转码看是哪几首失败：python -c \"...\" 或看上面 [!] 行）")
+        if n_orig < want_orig:
+            raise SystemExit(
+                f"❌ 原声只进了 {n_orig}/{want_orig} 首——包不完整，停止打包")
+        print(f"   ✅ 曲库 {n_voice} 首糖糖声线 + {n_orig} 首原声（齐全）")
     for name in BUNDLED_STICKER_DIRS:
         root = BASE / name
         if not root.is_dir():
@@ -248,10 +290,27 @@ def _add_bundled_media(zf: zipfile.ZipFile) -> int:
     return n
 
 
+def _song_total() -> int:
+    """安装说明里那句「N 首预录歌曲」——开发机有 41、包里可能 0，
+    所以数量必须在**打包时实测**，不能写死（2026-11-14 的教训）。
+
+    口径与 agent/songs.py 的发现逻辑一致：audio/ 认 wav+mp3，原声认 *_FINAL.*。
+    这里不 import tools/安装糖糖.py 的 _song_count——那个模块导入期会加载
+    依赖位置.py，在打包机上只会有副作用。
+    """
+    songs = BASE / "songs"
+    stems = {p.stem for p in (songs / "audio").glob("*.wav")}
+    stems |= {p.stem for p in (songs / "audio").glob("*.mp3")}
+    stems |= {p.stem.removesuffix("_FINAL")
+              for p in (songs / "covers" / "separated").glob("*_FINAL.*")
+              if p.suffix.lower() in (".wav", ".mp3")}
+    return len(stems)
+
+
 def build_package() -> Path:
     out = OUT / PKG_NAME
     print(f"\n📦 {out.name}")
-    extra = {"安装说明.txt": INSTALL_NOTE.format(tag=TAG)}
+    extra = {"安装说明.txt": INSTALL_NOTE.format(tag=TAG, songs=_song_total())}
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
         n = _add_tree(zf, SNAPSHOT, extra)
         n += _add_bundled_media(zf)

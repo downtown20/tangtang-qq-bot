@@ -161,7 +161,11 @@ COPY_FILES = [
     # 2026-10-15 T55：三个诊断脚本已从项目根移入 tools/ —— 这里去掉根副本，
     # 改由 TOOLS_KEEP_NAMES 放行（否则随包会缺这三个文件）。
     "main.py",
-    "安装糖糖.bat", "start.py",
+    # 2026-11-14：README 教用户双击桌面端 exe，但 Windows 上裸双击不带
+    # `--no-sandbox`（desktop/README.md 明说不能省）。这个 bat 是**纯 ASCII 的
+    # 启动桥**（中文路径交给 python 处理，见 start.py 的 docstring），
+    # 双击它就等于带了正确参数启动。
+    "安装糖糖.bat", "启动桌面端.bat", "start.py",
     "requirements.txt",
     # 人格角色卡（主人拍板公开）
     "role_card.md", "role_card_michele.md", "role_card_murasame.md",
@@ -194,6 +198,47 @@ TOOLS_KEEP_NAMES = {
     # 漏了这行按钮就只会报「没找到」—— 同 检查连接.py 那条的理由。
     "诊断糖糖.py", "全面诊断.py", "诊断对话质量.py",
 }
+
+
+# ⚠ 2026-11-14 事故：白名单收窄到 20 项后，包内 `tools/` 缺了 88 个文件，其中
+#   `依赖位置.py` 让 `安装糖糖.py` 在**导入期**就抛 FileNotFoundError（装不上去），
+#   `desktop_bridge.py` 让桌面端认不出项目根（起不来）。而当时的注释写着
+#   「闸门同上（test_referenced_tools_are_whitelisted）」——**那个测试全仓不存在**，
+#   于是白名单够不够，从来没有任何东西检查过。
+#
+# 判据改成"以引用为准"：凡是 agent/ onebot/ 运维/ desktop/ tests/ 里出现过
+# `tools/<名>.py` 的，一律随包。这样规则不再依赖人手维护一份清单，
+# 新增调用点会自动带进包；测试里种的假模块（`__planted_*`）因为磁盘上没有，自然排除。
+_REF_TOOLS_RE = re.compile(r"tools[/\\]([A-Za-z_][A-Za-z0-9_]*\.py|[\u4e00-\u9fa5][^\s\"'()\[\]:,，。；;|]*?\.py)")
+_REF_TOOLS_SCAN_DIRS = ("agent", "onebot", "运维", "desktop", "tests")
+_REF_TOOLS_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".md", ".bat", ".json"}
+
+
+def referenced_tool_modules() -> set[str]:
+    """被运行期/测试代码引用的 tools 模块名（只算磁盘上真有的）。"""
+    names: set[str] = set()
+    for dirname in _REF_TOOLS_SCAN_DIRS:
+        root = BASE / dirname
+        if not root.is_dir():
+            continue
+        for p in root.rglob("*"):
+            if p.suffix not in _REF_TOOLS_SUFFIXES or not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for m in _REF_TOOLS_RE.findall(text):
+                if (BASE / "tools" / m).is_file():
+                    names.add(m)
+    return names
+
+
+def tools_to_pack() -> set[str]:
+    """实际随包的 tools 集合 = 人工白名单 ∪ 被引用集合。"""
+    return TOOLS_KEEP_NAMES | referenced_tool_modules()
+
+
 def _sticker_note(title: str, dirname: str, role_line: str) -> str:
     """四个贴图目录共用的摆放说明。
 
@@ -271,7 +316,7 @@ SCAFFOLD_NOTES = {
     "还缺 GPT-SoVITS **公开底模约 3.7 GB** —— 按 docs/用户手册/语音模型自行配置.md 自行下载放置。\n\n"
     "不配语音也能用：糖糖照常聊天，只是不发语音。\n"
     "切到「米雪儿」角色时程序会自动把权重换成 models/michele 下那两个（详见上面那份文档）。\n",
-    "songs/摆放说明.txt": "🎵 预录歌曲（已随安装包自带，装好就能点歌）\n\n"
+    "songs/摆放说明.txt": "🎵 预录歌曲（随发布包自带；若本目录为空说明你的包不完整）\n\n"
     "本目录的音频是糖糖唱好的成品——点歌时直接播放，不是实时生成，也不需要额外模型。\n\n"
     "想自己加歌：把音频命名为 歌名.wav 放进 audio/（糖糖声线）；原声放 covers/separated/歌名_FINAL.wav。\n"
     "（2026-10-15 起不再读歌词：本目录不用放 歌名.txt。）\n",
@@ -420,6 +465,12 @@ def scrub_cfg(cfg: dict) -> dict:
     c["memory_sync"] = _ms
     if "groups" in c:
         c["groups"] = {}
+    # 每日点赞（2026-11-14）：开发机上 enabled: true + targets 是一串 QQ 号，
+    # 脱敏后变成 10001。出厂模板里它是**开着的**——用户装完第一天就会有一个
+    # 定时任务对着不存在的号点赞，日志里一堆失败，他还不知道为什么。
+    # 模板是出厂状态不是开发机状态（同上 memory_sync 那条），一律关。
+    if isinstance(c.get("daily_like"), dict):
+        c["daily_like"]["enabled"] = False
     if "blacklist" in c:
         c["blacklist"] = {"groups": [], "private_users": []}
     if "appearance" in c:
@@ -540,6 +591,11 @@ WINPATH_ALLOWED_FRAGMENTS = {
 # 想加新条目？先问自己：这个文件真的非含敏感样本不可吗？还是只是懒得改文案。
 SCAN_EXEMPT_FILES = {
     "tests/test_release_sanitizer.py",   # 闸门自检：LEAK 样本 + 正则判定用例表
+    # 2026-11-14：旧盘符重定位的回归测试。它**必须**装载「旧根」形状的样本
+    # 才能验证 paths.rebase_legacy_path()，而这些样本天然就是本机绝对路径。
+    # 不豁免的话发布闸门永久红灯——实测 2026-11-14 跑 准备发布.py 就被它挡死，
+    # 这也是 v1.08.00 之后没人重新出包的直接原因之一。
+    "tests/test_paths_legacy_rebase.py",
 }
 
 # 文本扫描的后缀白名单。**曾经只有 7 个**，于是 .j2/.html/.svg/.example/.gitignore
@@ -807,15 +863,20 @@ def main() -> None:
         else:
             print(f"  ⚠ 跳过（不存在）: {f}")
 
-    # 3. tools/ 白名单（默认全剔——内部测试/记忆运维脚本含真实 QQ，绝不进发布）
+    # 3. tools/（默认全剔——内部测试/记忆运维脚本含真实 QQ，绝不进发布）
+    #    但**被引用的一律进包**：见 tools_to_pack() 的注释（2026-11-14 事故）。
     (OUT / "tools").mkdir(parents=True, exist_ok=True)
     copied = 0
-    for name in sorted(TOOLS_KEEP_NAMES):
+    _keep = tools_to_pack()
+    for name in sorted(_keep):
         s = BASE / "tools" / name
         if s.is_file():
             shutil.copy2(s, OUT / "tools" / s.name)
             copied += 1
-    print(f"  ✅ tools/（白名单 {copied} 个：部署/运维/通用工具）")
+    _extra = _keep - TOOLS_KEEP_NAMES
+    print(f"  ✅ tools/（白名单 {len(TOOLS_KEEP_NAMES)} ∪ 被引用 {len(_extra)} = {copied} 个）")
+    if _extra:
+        print(f"     被引用自动带入：{'、'.join(sorted(_extra))}")
 
     # 4. docs/ 精选
     def _docs_ignore(dir_, names):

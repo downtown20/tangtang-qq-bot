@@ -1263,7 +1263,12 @@ def _song_count() -> int:
     songs = BASE / "songs"
     if not songs.is_dir():
         return 0
-    stems = {p.stem for p in (songs / "audio").glob("*.wav")}
+    audio = songs / "audio"
+    stems = {p.stem for p in audio.glob("*.wav")}
+    # 2026-11-14 修：上面那行原先只 glob `*.wav`，与本文档字符串（"原声要连 .mp3
+    # 一起认"）和 agent/songs.py:64 的口径都不一致——发布包里 audio/ 是**转码后的 mp3**，
+    # 于是用户机器上数出来 0 首，而生产端照样能播。数字对不上就是这么来的。
+    stems |= {p.stem for p in audio.glob("*.mp3")}
     stems |= {p.stem.removesuffix("_FINAL")
               for p in (songs / "covers" / "separated").glob("*_FINAL.*")
               if p.suffix.lower() in (".wav", ".mp3")}

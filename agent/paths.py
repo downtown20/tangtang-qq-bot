@@ -30,6 +30,124 @@ LOG_DIR = PROJECT_ROOT / "日志"
 _ENSURED_DIRS: set[Path] = set()
 
 
+# ── 旧根重定位（项目搬家兼容，2026-10-30）─────────────────────────────
+# 为什么要有这一节：项目整体搬到别的盘之后，**历史数据里仍然存着旧盘符的绝对
+# 路径**——数据库 chat_log.message 里的 `file:///D:/.../stickers/x.jpg`、
+# `状态/.conversation_state.json` 里的旧 CQ 码，都是当时写进去的。这些数据
+# 不该为了搬家被改写（历史是事实），但用户点开历史图片时必须还能看到。
+#
+# 做法：把「曾经的项目根」登记成别名，解析本地路径时先做**旧根→新根**前缀
+# 替换，再做项目内校验。安全边界不变：替换后仍必须落在当前 PROJECT_ROOT 内。
+#
+# 别名来源（后者覆盖前者不做合并冲突检测，按顺序尝试）：
+#   1. 环境变量 TANGTANG_LEGACY_ROOTS（分号分隔，给临时/测试用）
+#   2. `状态/路径别名.json` 的 {"旧根": ["<盘符>:/旧项目根", ...]}（迁移脚本自动写）
+#      （写成 `<盘符>:/` 而不是真盘符：真盘符路径会被发布敏感扫描当成泄漏命中，
+#        而这里要说明的只是 JSON 的形状）
+LEGACY_ROOTS_FILE_NAME = "路径别名.json"
+
+#: 别名文件缓存：(mtime, 解析出的旧根元组)
+_ALIAS_CACHE: tuple[float, tuple[Path, ...]] | None = None
+
+
+def _read_legacy_roots_file() -> tuple[Path, ...]:
+    """读 `状态/路径别名.json` 里的旧根清单；文件不存在/损坏一律当空。"""
+    global _ALIAS_CACHE
+    cfg = STATE_DIR / LEGACY_ROOTS_FILE_NAME
+    try:
+        mtime = cfg.stat().st_mtime
+    except OSError:
+        _ALIAS_CACHE = (0.0, ())
+        return ()
+    if _ALIAS_CACHE is not None and _ALIAS_CACHE[0] == mtime:
+        return _ALIAS_CACHE[1]
+    roots: list[Path] = []
+    try:
+        import json
+
+        raw = json.loads(cfg.read_text(encoding="utf-8"))
+        for item in raw.get("旧根") or []:
+            if isinstance(item, str) and item.strip():
+                roots.append(Path(item.strip().replace("\\", "/")))
+    except Exception:
+        roots = []
+    _ALIAS_CACHE = (mtime, tuple(roots))
+    return tuple(roots)
+
+
+def legacy_roots() -> tuple[Path, ...]:
+    """历史项目根清单（环境变量优先，其后是 `状态/路径别名.json`）。"""
+    roots: list[Path] = []
+    env = os.environ.get("TANGTANG_LEGACY_ROOTS", "").strip()
+    if env:
+        for part in env.split(";"):
+            part = part.strip()
+            if part:
+                roots.append(Path(part.replace("\\", "/")))
+    roots.extend(_read_legacy_roots_file())
+    # 去重（normcase）+ 排除与当前根相同的项
+    seen: set[str] = set()
+    out: list[Path] = []
+    for r in roots:
+        key = os.path.normcase(str(r).replace("\\", "/").rstrip("/"))
+        if key and key not in seen:
+            seen.add(key)
+            out.append(r)
+    return tuple(out)
+
+
+def _norm_text(text: str) -> str:
+    """路径比较用的规范形式：正斜杠 + 去尾斜杠 + normcase（Windows 大小写不敏感）。
+
+    注意 `ntpath.normcase` 会把 `/` 换成 `\\`——所以最后要把分隔符转回正斜杠，
+    否则「前缀 + '/'」的边界判断永远不成立（2026-10-30 实测踩过：3 个用例全红，
+    表现是「登记了旧根却一次都不命中」）。
+    """
+    t = text.replace("\\", "/").rstrip("/")
+    return os.path.normcase(t).replace("\\", "/")
+
+
+def rebase_legacy_path(
+    path: "str | os.PathLike[str]",
+    *,
+    root: "Path | None" = None,
+    aliases: "tuple[Path, ...] | list[Path] | None" = None,
+) -> Path:
+    """把指向**旧项目根**的绝对路径改写成当前项目根下的等价路径。
+
+    未命中任何旧根、或本来就落在当前根下时，原样返回（不 resolve，保留调用方语义）。
+    命中时返回 `当前根 / 相对部分`——**不会**检查目标是否存在：存在性由调用方判定，
+    这里只负责「这个历史路径现在指的是哪儿」。
+    """
+    base = Path(root) if root is not None else PROJECT_ROOT
+    src = Path(path)
+    src_text = str(src)
+    if not src_text:
+        return src
+
+    base_norm = _norm_text(str(base))
+    src_norm = _norm_text(src_text)
+    if src_norm == base_norm or src_norm.startswith(base_norm + "/"):
+        return src  # 已在当前根下（含相对路径之外的等价写法）
+
+    cands = aliases if aliases is not None else legacy_roots()
+    src_fwd = src_text.replace("\\", "/")
+    for old in cands:
+        old_text = str(old).replace("\\", "/").rstrip("/")
+        old_norm = _norm_text(old_text)
+        if not old_norm:
+            continue
+        if src_norm == old_norm:
+            return base
+        if not src_norm.startswith(old_norm + "/"):
+            continue
+        # 按字符数切前缀（大小写差异不改变长度；斜杠已统一）
+        tail = src_fwd[len(old_text):] if len(src_fwd) > len(old_text) and \
+            _norm_text(src_fwd[:len(old_text)]) == old_norm else src_fwd[len(old_norm):]
+        return base / Path(tail.lstrip("/"))
+    return src
+
+
 def _ensure_dir(d: Path) -> Path:
     """确保目录存在并返回它（已建过的直接跳过，被外部删掉则重建）。"""
     if d not in _ENSURED_DIRS or not d.is_dir():

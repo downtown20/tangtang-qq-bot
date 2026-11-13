@@ -898,7 +898,7 @@ def _scenario_core(value: str) -> str:
     `scenarios/*.yaml` 的 display 带 emoji 前缀，而 config.yaml 里历史上存的是
     不带前缀的名字（`亲密模式`）。只做字符串比较的话，保存一次就会把老值
     「升级」成带 emoji 的形式——用户什么都没改，配置却漂移了（2026-10-24
-    实测：一次无改动保存把 `2524950083: 亲密模式` 改成了 `❤️ 亲密模式`）。
+    实测：一次无改动保存把 `12345678: 亲密模式` 改成了 `❤️ 亲密模式`）。
     """
     text = str(value or "").strip()
     if not text:

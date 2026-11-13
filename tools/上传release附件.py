@@ -24,7 +24,7 @@
 
 ```powershell
 python tools/上传release附件.py                      # 用 打包发布版本.py 的 TAG + PKG_NAME
-python tools/上传release附件.py --tag v1.09.00 --file D:\\path\\pkg.zip
+python tools/上传release附件.py --tag v1.09.00 --file dist/pkg.zip
 python tools/上传release附件.py --dry-run            # 只打印将要做什么
 ```
 
