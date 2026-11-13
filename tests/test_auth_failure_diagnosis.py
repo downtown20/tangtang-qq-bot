@@ -187,13 +187,3 @@ def test_recovery_rearms_the_warning(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════
 # 3. 接线闸门：错误文案必须留下可搜索的指纹
 # ═══════════════════════════════════════════════════════════════════
-
-def test_console_parses_the_offline_string_still_exists():
-    """控制台用 `"QQ 账号已掉线"` 这个子串切界面状态（糖糖控制台_qt.py:6599）——
-    改文案时不许把它改掉，否则主界面会永远显示在线。"""
-    src = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
-    assert "QQ 账号已掉线" in src, "控制台的日志解析会失配"
-
-    console = (Path(__file__).resolve().parents[1]
-               / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
-    assert "QQ 账号已掉线" in console

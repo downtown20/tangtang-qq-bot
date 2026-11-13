@@ -88,16 +88,6 @@ def test_positive_control_rejected_line_means_gate_is_blind():
 
 
 # ── 端到端：真的跑一遍 ───────────────────────────────────────────────
-def _expected_file_count() -> int:
-    n = 0
-    for d in ("agent", "onebot"):
-        p = BASE / d
-        if p.is_dir():
-            n += len(list(p.glob("*.py")))
-    for name in ("main.py", "运维/糖糖控制台_qt.py"):
-        if (BASE / name).exists():
-            n += 1
-    return n
 
 
 def test_collect_matches_independent_glob():
@@ -155,3 +145,15 @@ def test_docs_point_at_the_script_not_a_bare_glob():
             f"{rel} 里还留着靠 shell 展开 glob 的 pyflakes 命令"
             f"（pwsh 下会静默漏扫 80/82 个文件）：{offenders}"
         )
+
+
+def _expected_file_count() -> int:
+    n = 0
+    for d in ("agent", "onebot"):
+        p = BASE / d
+        if p.is_dir():
+            n += len(list(p.glob("*.py")))
+    for name in ("main.py", "运维/糖糖控制台_qt.py"):
+        if (BASE / name).exists():
+            n += 1
+    return n

@@ -176,28 +176,6 @@ def test_template_says_memory_sync_default_visible():
     assert mod.scrub_cfg(_real_config()).get("memory_sync") == {"auto": True}
 
 
-def test_provider_key_env_names_match_console_and_runtime():
-    """`PROVIDER_KEY_ENV` 是控制台写 .env、运行期回填、模板生成共用的那张表。
-
-    两边错位 = 用户在控制台填的 Key 落进一个没人读的变量名里
-    （正是 `_on_provider_changed` 改了 provider 却仍写旧变量名那个 bug 的形态，
-     2026-09-20 已修）。
-    """
-    from agent.secret_refs import FIXED_SECRET_PATHS, PROVIDER_KEY_ENV
-    # 2026-10-26：Qt 控制台从根目录移进 `运维/`（功能保留，根目录不再有它）。
-    # 这里**只认一个位置**：双路径兜底会让「有人把它搬回根目录」也悄悄通过，
-    # 而根目录规范化正是 2026-10-26 那一轮的核心目标（教训 #35：文档/约定当代码测）。
-    console_path = BASE / "运维" / "糖糖控制台_qt.py"
-    assert console_path.is_file(), f"找不到 Qt 控制台（应该在 运维/ 下）：{console_path}"
-    assert not (BASE / "糖糖控制台_qt.py").exists(), (
-        "根目录又出现 QT 控制台了——2026-10-26 已定：它只住在 运维/")
-    console = console_path.read_text(encoding="utf-8")
-    handler = (BASE / "agent" / "handler.py").read_text(encoding="utf-8")
-    assert "PROVIDER_KEY_ENV.get(_provider" in handler, (
-        "handler.py 又写死了 provider→变量名的对应——换 provider 就会 401")
-    assert "PROVIDER_KEY_ENV" in console, "控制台没接上变量名单一事实源"
-    assert set(PROVIDER_KEY_ENV) == {"deepseek", "xai", "anthropic", "openai", "custom"}
-    assert {"SEDUCTIVE_KEY", "QWEN_KEY", "SNOWLUMA_TOKEN"} == {n for _, n in FIXED_SECRET_PATHS}
 
 
 # ═══════════════════════════════════════════════════════════

@@ -34,7 +34,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import unquote
 
-from .paths import PROJECT_ROOT, ensure_ffmpeg_on_path, state_path
+from .paths import (
+    PROJECT_ROOT,
+    ensure_ffmpeg_on_path,
+    rebase_legacy_path,
+    state_path,
+)
 
 logger = logging.getLogger("糖糖.媒体缓存")
 
@@ -80,6 +85,11 @@ def _local_path(value: str) -> Path | None:
 
     只允许项目目录内的文件——媒体端点是对外的 HTTP 口，不能让它变成
     「任意文件读取」（`?file=file:///C:/Windows/...`）。
+
+    **项目搬家兼容**（2026-10-30）：历史消息里存的是搬家前的旧盘符路径，
+    先经 `rebase_legacy_path` 做旧根→新根前缀替换（旧根清单见
+    `agent/paths.py` 的 `legacy_roots()`），替换后仍必须落在当前项目内，
+    安全边界不变。
     """
     text = _strip_query(value)
     if not text:
@@ -89,7 +99,7 @@ def _local_path(value: str) -> Path | None:
     elif text.startswith("file://"):
         text = text[len("file://"):]
     try:
-        p = Path(text).expanduser().resolve()
+        p = rebase_legacy_path(Path(text).expanduser()).resolve()
     except (OSError, ValueError):
         return None
     try:

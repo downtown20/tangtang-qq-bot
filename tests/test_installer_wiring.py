@@ -164,25 +164,6 @@ def test_wire_config_writes_backup_for_existing_config(tmp_path, monkeypatch):
 _INSTALL_TIME_GENERATED = {".env", "config.yaml"}
 
 
-def _local_packages() -> set[str]:
-    """从**真实 import 语句**推导「必须随包走的本地顶层包」。
-
-    刻意不写死包名：写死的清单一定会以同样的方式腐烂——改名时改了目录、
-    忘了清单。这里让清单跟着代码走，代码改到哪它跟到哪。
-    """
-    import re
-    files = [BASE / "main.py", BASE / "start.py", BASE / "运维" / "糖糖控制台_qt.py"]
-    files += sorted((BASE / "agent").glob("*.py"))
-    found = set()
-    for f in files:
-        if not f.is_file():
-            continue
-        text = f.read_text(encoding="utf-8", errors="ignore")
-        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_]\w*)", text, re.M):
-            name = m.group(1)
-            if (BASE / name).is_dir() and list((BASE / name).glob("*.py")):
-                found.add(name)
-    return found
 
 
 def test_pack_roots_cover_every_local_package():
@@ -298,3 +279,24 @@ def test_zero_dependency_feature_names_exist(tmp_path, monkeypatch):
     names = {name for name, _desc, _groups in mod.FEATURES}
     unknown = sorted(ZERO_DEPENDENCY_FEATURES - names)
     assert not unknown, f"豁免名单里有安装器不认识的功能名：{unknown}"
+
+
+def _local_packages() -> set[str]:
+    """从**真实 import 语句**推导「必须随包走的本地顶层包」。
+
+    刻意不写死包名：写死的清单一定会以同样的方式腐烂——改名时改了目录、
+    忘了清单。这里让清单跟着代码走，代码改到哪它跟到哪。
+    """
+    import re
+    files = [BASE / "main.py", BASE / "start.py", BASE / "运维" / "糖糖控制台_qt.py"]
+    files += sorted((BASE / "agent").glob("*.py"))
+    found = set()
+    for f in files:
+        if not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_]\w*)", text, re.M):
+            name = m.group(1)
+            if (BASE / name).is_dir() and list((BASE / name).glob("*.py")):
+                found.add(name)
+    return found

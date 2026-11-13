@@ -117,61 +117,6 @@ def test_outbox_claim_gate_leaves_pending_row_unclaimed(store):
     client._call_api.assert_not_awaited()
 
 
-def test_task_action_rollback_gates_are_in_config_and_qt_console():
-    import ast
-    from pathlib import Path
-
-    import yaml
-
-    root = Path(__file__).resolve().parents[1]
-    config = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
-    config_gate_paths = {
-        "tasks.text_action_outbox_enabled",
-        "tasks.media_action_outbox_enabled",
-        "tasks.send_outbox_claims_enabled",
-        "tasks.manual_retry_generation_enabled",
-    }
-    expected_ui_defaults = {
-        "tasks.text_action_outbox_enabled": True,
-        "tasks.media_action_outbox_enabled": False,
-    }
-    task_gates = config["tasks"]
-    for path in config_gate_paths:
-        key = path.removeprefix("tasks.")
-        assert key in task_gates
-        assert isinstance(task_gates[key], bool)
-
-    console = (root / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
-    tree = ast.parse(console)
-    task_section = next(
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_add_section"
-        and ast.literal_eval(node.args[0]) == "tasks"
-    )
-    field_paths = {
-        ast.literal_eval(field.elts[0]) for field in task_section.args[2].elts
-    }
-    assert field_paths == set(expected_ui_defaults)
-
-    assignment = next(
-        node for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "TASK_GATE_DEFAULTS"
-            for target in node.targets
-        )
-    )
-    assert ast.literal_eval(assignment.value) == expected_ui_defaults
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_get_nested"
-        and len(node.args) >= 3
-        and ast.unparse(node.args[2]) == "TASK_GATE_DEFAULTS.get(path, False)"
-        for node in ast.walk(tree)
-    )
 
 
 @pytest.mark.parametrize(

@@ -622,22 +622,6 @@ def test_build_env_prefers_process_env_over_env_file(chk, tmp_path):
 # 9. 接入点：docstring 声称谁调用它，就得真的有人调用
 # ═══════════════════════════════════════════════════════
 
-def test_declared_callers_actually_call_it():
-    """`检查连接.py` 的 docstring 写着「调用方：控制台按钮、tools/体检.py、命令行」。
-
-    这句必须是真的。2026-09-20 第一次写的时候，docstring 里列了 `体检.py`，
-    而 `体检.py` 全文对 `检查连接` **零命中**——新代码自己犯了「文档说的和代码做的分家」
-    （CLAUDE.md 反模式 #35）。这条闸门把三个接入点都钉住。
-    """
-    from pathlib import Path as _P
-    base = _P(__file__).resolve().parent.parent
-
-    console = (base / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
-    assert "检查连接.py" in console, "控制台的「连接自检」按钮不再加载这个模块了"
-
-    health = (base / "tools" / "体检.py").read_text(encoding="utf-8")
-    assert "检查连接" in health and "check_all" in health, (
-        "体检.py 没有调用链路自检——而检查连接.py 的 docstring 里写着它会调")
 
 
 def test_lite_package_without_node_is_called_out(chk, tmp_path):

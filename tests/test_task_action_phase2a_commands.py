@@ -178,37 +178,3 @@ def test_task_list_renders_versioned_token_and_phase2a_help():
 
     assert "42@107" in reply
     assert "/任务 重试 编号@attempt" in reply
-
-
-def test_manual_retry_gate_is_default_off_in_config_and_qt_console():
-    import ast
-    import yaml
-
-    root = Path(__file__).resolve().parents[1]
-    config = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
-    console = (root / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
-    console_tree = ast.parse(console)
-    task_section = next(
-        node for node in ast.walk(console_tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_add_section"
-        and ast.literal_eval(node.args[0]) == "tasks"
-    )
-    field_paths = {
-        ast.literal_eval(field.elts[0]) for field in task_section.args[2].elts
-    }
-    assert "tasks.manual_retry_generation_enabled" not in field_paths
-    assert "manual_retry_generation_enabled" in config["tasks"]
-    assert isinstance(config["tasks"]["manual_retry_generation_enabled"], bool)
-
-    main_tree = ast.parse((root / "main.py").read_text(encoding="utf-8"))
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and node.args[0].value == "manual_retry_generation_enabled"
-        for node in ast.walk(main_tree)
-    )

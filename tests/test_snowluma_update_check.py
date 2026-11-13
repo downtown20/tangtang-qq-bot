@@ -168,32 +168,3 @@ def test_script_has_utf8_stdout_guard():
     """
     src = UPDATER.read_text(encoding="utf-8")
     assert 'reconfigure(encoding="utf-8"' in src, "缺 UTF-8 输出守卫"
-
-
-def test_console_runs_the_check_off_the_gui_thread():
-    """控制台调用它时**不能阻塞 GUI 线程**。
-
-    `subprocess.run(timeout=30)` 直接跑在 QTimer 回调里时，一个"连得上但不应答"
-    的地址实测要 20.2 秒才返回 → 启动 8 秒后界面冻 20 秒、
-    Windows 给窗口标题挂上「(无响应)」，而那 20 秒换来的还是静默。
-    """
-    console = (BASE / "运维" / "糖糖控制台_qt.py").read_text(encoding="utf-8")
-    assert "_SnowLumaUpdateWorker" in console, "更新检查没走线程"
-    import ast
-    tree = ast.parse(console)
-    fn = next((n for n in ast.walk(tree)
-               if isinstance(n, ast.FunctionDef) and n.name == "_check_snowluma_update"), None)
-    assert fn is not None, "控制台里没有 _check_snowluma_update"
-
-    # ⚠ 用 AST 找**调用点**，不要拿源码文本 grep：那个函数的 docstring 里
-    #   正解释着"原先这里是 subprocess.run(...) 直接跑在回调里"——
-    #   按文本匹配会命中注释、把解释误判成违规（这坑本项目踩过好几次）。
-    calls = [n for n in ast.walk(fn)
-             if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Attribute)
-             and isinstance(n.func.value, ast.Name)
-             and n.func.value.id == "subprocess"]
-    assert not calls, "GUI 线程里又出现 subprocess 调用了"
-    assert any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-               and n.func.attr == "start" for n in ast.walk(fn)), (
-        "没有看到 .start()——更新检查没被真正启动")

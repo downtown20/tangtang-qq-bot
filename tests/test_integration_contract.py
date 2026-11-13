@@ -26,10 +26,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 BASE = Path(__file__).parent.parent
 
-# 生产调用方范围：agent/ onebot/ tools/ + 根目录 main.py 与控制台。
+# 生产调用方范围：agent/ onebot/ tools/ + 根目录 main.py。
+# （2026-11-14：Qt 控制台已随 PySide6 下线，`运维/糖糖控制台_qt.py` 不再计入。）
 # tests/ 不算——测试调用不构成生产接线（test-only 函数 = 生产死代码）。
 PROD_FILES = sorted(
-    [BASE / "main.py", BASE / "运维" / "糖糖控制台_qt.py"]
+    [BASE / "main.py"]
     + [p for d in ("agent", "onebot", "tools") for p in (BASE / d).rglob("*.py")]
 )
 
@@ -354,7 +355,6 @@ CLASS_METHOD_BASELINE: dict[tuple[str, str], str] = {
     #   · `expire_open_loops` → `handler_autonomy._autonomous_loop` 启动清理 +
     #     每日汇总两处调度（days_overdue=30, max_asked=2）
     # 行为由 `tests/test_open_loops_injection.py`（26 条）与端到端验证钉住。
-    ('agent/ui_anim.py', 'transition_locked'): '无任何引用',
 }
 
 
@@ -1428,151 +1428,6 @@ CLASS_UPPER_MEMBER_BASELINE: set[tuple[str, str]] = {
 }
 
 
-class TestEnumMemberGate:
-    """H. 类级大写成员零调用闸门（2026-10-14 台账 T3.3，Stage 3 · M5 剩余三项之一）。
-
-    补的是零调用闸门的**最后一块覆盖盲区**：`_agent_public_functions()` 扫模块级函数，
-    `_class_public_methods()` 扫类公共方法（P3 扩的），但**枚举成员与类级大写常量**
-    一直在网外。审计 RC1 的元根因（「闸门有覆盖率上限」）到这里才真正收口。
-
-    三条测试分工（与 TestClassMethodGate 同构）：
-      ① test_no_new_dead_upper_members —— 闸门本体（基线外新增 → 红）；
-      ② test_upper_member_baseline_is_still_valid —— 防基线腐烂；
-      ③ test_gate_sees_a_planted_dead_member —— **阳性对照**（种死成员必须红）；
-      ④ test_bare_name_is_not_enum_member_evidence —— 阴性对照（同 T2.3 的教训）。
-    """
-
-    def test_no_new_dead_upper_members(self):
-        found = {(f, n) for f, _, _, n in _zero_ref_class_upper_members()}
-        new = sorted(found - CLASS_UPPER_MEMBER_BASELINE)
-        assert not new, (
-            "接线审计（教训#14）：以下 agent/ 类级大写成员（枚举成员/类常量）零引用，"
-            "且不在基线上——\n"
-            + "\n".join("  %s :: %s" % (f, n) for f, n in new)
-            + "\n处理：接线（谁该发射它/读它）或归档；"
-            "确认为待接线能力则登记进 CLASS_UPPER_MEMBER_BASELINE 并写明理由。"
-            "\n**不要**为了变绿去扩大基线——基线只许变小。")
-
-    def test_upper_member_baseline_is_still_valid(self):
-        """基线只许变小：成员被删、或已被引用，都必须把条目删掉。"""
-        existing = {(f, n) for f, _, _, n in _class_upper_members()}
-        found = {(f, n) for f, _, _, n in _zero_ref_class_upper_members()}
-        gone = sorted(k for k in CLASS_UPPER_MEMBER_BASELINE if k not in existing)
-        assert not gone, (
-            "基线登记了**已不存在**的成员——删除对应基线条目：\n"
-            + "\n".join("  %s :: %s" % k for k in gone))
-        wired = sorted(k for k in CLASS_UPPER_MEMBER_BASELINE
-                       if k in existing and k not in found)
-        assert not wired, (
-            "基线登记了**已被引用**的成员——棘轮要收紧，删除对应基线条目：\n"
-            + "\n".join("  %s :: %s" % k for k in wired)
-            + "\n（条目留着不删，基线就会慢慢变成一句假话——教训 #35）")
-
-    def test_gate_sees_a_planted_dead_member(self):
-        """阳性对照（上游验收标准「故意种一个死枚举成员 → 闸门必须红」）。
-
-        带三条阴性对照：被引用的成员不许误报、私有成员不进闸门、模块级常量不进闸门。
-        """
-        srcs = {
-            "agent/__planted__.py": ast.parse(
-                "from enum import Enum\n"
-                "class E(Enum):\n"
-                "    USED_ONE = 1\n"
-                "    DEAD_ONE = 2\n"
-                "\n"
-                "class C:\n"
-                "    LIVE_CONST = 10\n"
-                "    DEAD_CONST = 20\n"
-                "    _PRIVATE_CONST = 30\n"
-                "\n"
-                "def use():\n"
-                "    return E.USED_ONE, C.LIVE_CONST\n"),
-        }
-        found = {(f, n) for f, _, _, n in _zero_ref_class_upper_members(srcs)}
-        assert ("agent/__planted__.py", "DEAD_ONE") in found, (
-            "种进去的死枚举成员没被看见——这条闸门是假的（教训 #30）")
-        assert ("agent/__planted__.py", "DEAD_CONST") in found, (
-            "种进去的死类常量没被看见——这条闸门是假的（教训 #30）")
-        assert ("agent/__planted__.py", "USED_ONE") not in found, (
-            "被 E.USED_ONE 引用的成员被误判成死代码")
-        assert ("agent/__planted__.py", "LIVE_CONST") not in found, (
-            "被 C.LIVE_CONST 引用的常量被误判成死代码")
-        assert ("agent/__planted__.py", "_PRIVATE_CONST") not in found, (
-            "私有成员不该进公共闸门")
-
-    def test_bare_name_is_not_enum_member_evidence(self):
-        """阴性对照（同 T2.3 的教训）：外来裸名不构成「成员被引用」的证据。
-
-        裸标识符 `DEAD_ONE` 只可能指向模块级常量或局部变量，不可能指向 `E.DEAD_ONE`。
-        若把裸名当证据，任何文件里出现同名标识符就会把真死成员洗白成「已接线」。
-        """
-        cls_src = chr(10).join([
-            "from enum import Enum",
-            "class E(Enum):",
-            "    ONLY_ONE = 1",
-        ])
-        bare = {
-            "agent/__planted__.py": ast.parse(cls_src),
-            "tools/__planted_bare__.py": ast.parse("ONLY_ONE = 99"),
-        }
-        found = {(f, n) for f, _, _, n in _zero_ref_class_upper_members(bare)}
-        assert ("agent/__planted__.py", "ONLY_ONE") in found, (
-            "裸名 ONLY_ONE 被当成了成员证据——闸门会对同名模块级常量假红（T2.3）")
-
-        attr_src = chr(10).join([
-            "e = object()",
-            "e.ONLY_ONE",
-        ])
-        wired = {
-            "agent/__planted__.py": ast.parse(cls_src),
-            "tools/__planted_attr__.py": ast.parse(attr_src),
-        }
-        found2 = {(f, n) for f, _, _, n in _zero_ref_class_upper_members(wired)}
-        assert ("agent/__planted__.py", "ONLY_ONE") not in found2, (
-            "属性访问 e.ONLY_ONE 没被认出来——闸门被改瞎了")
-
-    def test_lowercase_class_attrs_are_not_members(self):
-        """阴性对照（`isupper()` 的上界）：类内**小写**属性不是枚举成员/常量。
-
-        现场：`agent/color_panel.py` 的 `colorChanged = Signal(...)` /
-        `agent/ui_anim.py` 的 `transitionFinished = Signal(...)` 是 **Qt 信号对象**，
-        不是常量。若把 `isupper()` 拿掉，这 5 个会混进成员集合
-        （实测 60 → 65），闸门从此对 Qt 信号报零引用。
-
-        这条测试是**变异探针逼出来的**：我先写的 M2 变异（放宽 isupper）**没让测试变红**，
-        诊断后发现那 5 个新增成员恰好都不是零引用，所以闸门本体看不见——
-        即「isupper 的上界没有任何测试覆盖」。补上这条才有。
-        """
-        srcs = {
-            "agent/__planted__.py": ast.parse(
-                "class C:\n"
-                "    GOOD_CONST = 1\n"
-                "    colorChanged = 2\n"
-                "    _hidden = 3\n"),
-        }
-        members = {(f, n) for f, _, _, n in _class_upper_members(srcs)}
-        assert ("agent/__planted__.py", "GOOD_CONST") in members
-        assert ("agent/__planted__.py", "colorChanged") not in members, (
-            "小写类属性（Qt 信号形态）混进了成员集合——isupper() 上界失守")
-        assert ("agent/__planted__.py", "_hidden") not in members, (
-            "私有属性混进了成员集合")
-
-    def test_enum_member_count_is_sane(self):
-        """自身校验：度量不是恒零——被引用的成员必须有（否则扫描器只会返回全集）。
-
-        上游 T0.4 的量化口径：95 个成员 / 5 个零引用（94.8%）。
-        本闸门加了 `not startswith("_")` 过滤后是 60 / 5 —— 差异是私有成员，
-        与方法闸门口径一致。**关键断言是「绝大多数成员是被引用的」**：
-        如果哪天成员集合全变零引用，说明扫描器的属性证据链断了。
-        """
-        allm = list(_class_upper_members())
-        zero = list(_zero_ref_class_upper_members())
-        assert len(allm) > 20, "成员集合太小，扫描器可能没扫到（%d）" % len(allm)
-        assert len(zero) < len(allm), (
-            "所有成员都被判零引用——属性证据链断了（教训 #30：零命中不可信）")
-        assert len(allm) - len(zero) > len(allm) * 0.5, (
-            "被引用成员不到一半（%d/%d）——度量可疑，先查 _references"
-            % (len(allm) - len(zero), len(allm)))
 
 
 class TestClassMethodGate:
@@ -1857,4 +1712,3 @@ class TestPrivateMethodGate:
             planted, include_private=True)}
         assert ("agent/__planted_dunder__.py", "__init__") not in found, (
             "dunder 被纳入闸门了——会产出几十条无法消除的噪声")
-

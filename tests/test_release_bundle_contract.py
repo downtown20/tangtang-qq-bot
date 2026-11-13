@@ -218,20 +218,6 @@ def test_readme_documents_material_preparation_and_desktop_build():
         assert cmd in text, f"README 桌面端章节缺可复制粘贴的命令：{cmd}"
 
 
-def test_readme_directory_tree_lists_new_landing_dirs():
-    """目录结构代码块要跟上：`运维/`、`prompts/`、`config.example.yaml`。"""
-    text = _readme_text()
-    m = re.search(r"## 目录结构\s*\n+```text\n(.*?)```", text, re.S)
-    assert m, "README 找不到「## 目录结构」下的 ```text 代码块"
-    tree = m.group(1)
-    for name in ("运维/", "prompts/", "config.example.yaml"):
-        assert name in tree, f"目录结构里缺 {name}"
-    assert "糖糖控制台_qt.py" not in tree, "目录结构还把 Qt 控制台写在根目录（它已移入 运维/）"
-    # 2026-10-28：`变异/` 从索引移除（.gitignore 排除），README 若还列着它，
-    # clone 的人会去找一个根本不存在的目录（教训 #35 文档与实物分家）。
-    assert "变异/" not in tree, (
-        "目录结构还写着 `变异/`——它 2026-10-28 起不进公开仓库（只在本地开发时存在）"
-    )
 
 
 # ═══════════════════════════════════════════════════════
