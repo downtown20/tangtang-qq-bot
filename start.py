@@ -55,7 +55,7 @@ def main() -> int:
     if key == "desktop":
         return launch_desktop()
     if key not in TARGETS:
-        print(f"用法: python start.py console|install|desktop（可选参数透传给目标）")
+        print("用法: python start.py console|install|desktop（可选参数透传给目标）")
         return 2
     target = TARGETS[key]
     if not target.is_file():

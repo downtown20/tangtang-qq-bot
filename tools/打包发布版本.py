@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """小糖糖 发布打包（2026-09-18）
 
 **一个包**：代码 + 文档 + 安装器 + 歌曲 + 角色贴图。
@@ -27,7 +27,6 @@
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
