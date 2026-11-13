@@ -55,7 +55,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.08.10"
+TAG = "v1.08.11"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -98,7 +98,7 @@ INSTALL_NOTE = r"""🍬 小糖糖 {tag} — 开箱即用的安装说明
 
 ━━━ 关于功能勾选 ━━━
   默认已勾上「聊天+记忆」「唱歌」——够用了（日常请用桌面端）。
-  要旧式 Qt 控制台/图标预览 → 才需要勾「图形控制台」（PySide6 约 100MB，桌面端不用它）
+  （图形控制台/PySide6 已于 2026-11-14 下线——日常请用桌面端，无需额外 GUI 框架）
   想要糖糖开口说话 → 勾「发语音+听懂语音消息」（语音模型约 6G）
   想让她看得懂图   → 勾「本地识图」（可按提示用云端，也可装 Ollama 走本地）
 
