@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -54,7 +55,7 @@ ATTACH = OUT / "附件"
 #
 #   由 test_release_tag_is_three_part 钉住格式，
 #   由 test_changelog_newest_version_matches_tag 钉住「改这里就得同步更新日志」。
-TAG = "v1.08.06"
+TAG = "v1.08.07"
 # ⚠ 包名必须纯 ASCII（2026-09-19 实测）：GitHub Releases 会把附件名里的中文吞掉，
 #   `小糖糖-v1.0.zip` 上传后变成 `-v1.0.zip`。纯 ASCII 也顺带避开浏览器/下载工具
 #   在非中文 locale 下的编码问题，并与语音分卷 `tangtang-voice-*` 命名一致。
@@ -463,6 +464,52 @@ def _add_desktop(zf: zipfile.ZipFile) -> int:
     return n
 
 
+def _desktop_dir() -> Path | None:
+    """用户真实的桌面目录。
+
+    [!] 不能写死 `~/Desktop`：中文 Windows 常被重定向（本机实测
+    `...User Shell Folders\\Desktop` 被重定向到非默认位置），而 `Path.home()/"Desktop"`
+    在那个位置并不存在——写死就会「复制成功」到一个没人看的目录里。
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+        ) as key:
+            raw, _ = winreg.QueryValueEx(key, "Desktop")
+            p = Path(os.path.expandvars(str(raw)))
+            if p.is_dir():
+                return p
+    except Exception:
+        pass
+    for cand in (Path.home() / "Desktop", Path.home() / "桌面"):
+        if cand.is_dir():
+            return cand
+    return None
+
+
+def _copy_to_desktop(pkg: Path) -> Path | None:
+    """把打好的包放一份到桌面（2026-11-14 主人要求：每更新一次就放桌面，方便自测）。
+
+    失败（桌面不可写/找不到）只提示，不影响打包本身——桌面不是交付物。
+    """
+    desk = _desktop_dir()
+    if desk is None:
+        print("\n[!] 没找到桌面目录，跳过「放桌面」这一步（包已在本目录）")
+        return None
+    dst = desk / pkg.name
+    try:
+        shutil.copy2(pkg, dst)
+    except OSError as exc:
+        print(f"\n[!] 复制到桌面失败：{exc}")
+        return None
+    size_mb = dst.stat().st_size / 2**20
+    print(f"\n📌 已放一份到桌面：{dst}  ({size_mb:.0f} MB)")
+    return dst
+
+
 def main() -> int:
     if not SNAPSHOT.is_dir():
         print(f"❌ 未找到快照 {SNAPSHOT}")
@@ -500,6 +547,7 @@ def main() -> int:
     print(f"   安装包   {pkg.name}  {pkg.stat().st_size / 2**20:.0f} MB")
     print("   ⚠ 语音公开底模（约 3.7 GB）不随包——用户按"
           " docs/用户手册/语音模型自行配置.md 自行放置")
+    _copy_to_desktop(pkg)
     return 0
 
 

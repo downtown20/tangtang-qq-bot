@@ -445,7 +445,7 @@ def _confirm_deps_root(deps_root: str | None, assume_yes: bool) -> Path:
             print("\n━━━ 安装位置 ━━━")
             print(f"  当前：{依赖位置.describe_deps_root()}")
             try:
-                raw = input("  回车=沿用；要换就直接输入新目录（如 D:\\tangtang-依赖）> ").strip()
+                raw = input("  回车=沿用；要换就直接输入新目录（别的盘也行，粘贴完整路径）> ").strip()
             except (EOFError, KeyboardInterrupt):
                 raw = ""
             raw = raw.strip('"').strip("'").strip()
