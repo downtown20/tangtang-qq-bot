@@ -45,7 +45,8 @@ for _s in (sys.stdout, sys.stderr):
 
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))  # 保证任意 cwd 下能 import agent 包
-from agent.paths import (STATE_DIR, find_python310, find_msvc_cl,  # noqa: E402  路径单一事实源
+from agent.paths import (STATE_DIR, ensure_ffmpeg_on_path,  # noqa: E402  路径单一事实源
+                          find_python310, find_msvc_cl,
                           has_jieba_fast_c_extension, state_path)
 from agent.knowledge import discover_document_files
 
@@ -69,7 +70,6 @@ OPTIONAL_DEPS = {
     "edge_tts": "Edge-TTS 语音输出辅助",
     "soundfile": "语音音频读写辅助",
     "psutil": "runtime_observer 运行观察器",
-    "PySide6": "糖糖图形控制台（不影响机器人核心运行）",
     "jieba_fast": "GPT-SoVITS 分词加速（C 扩展，需 MSVC 编译；缺失自动回退纯 Python jieba，见 start_api_patched.py）",
     "matplotlib": "GPT-SoVITS 启动依赖（lr_schedulers.py 顶层导入；缺失则语音服务无法启动）",
     "pyflakes": "开发检查工具（pyflakes undefined 门禁）",
@@ -366,7 +366,11 @@ def check_gpu():
         nv = shutil.which("nvidia-smi")
         print(f"  [!] 无法探测算力（{type(e).__name__}: {e}）"
               + ("" if nv else "；nvidia-smi 也不在 PATH"))
-    ff = shutil.which("ffmpeg")
+    # 用 ensure_ffmpeg_on_path 而不是裸 shutil.which：机器级/用户级 PATH 只对**之后
+    # 新启动**的进程生效，而体检往往跑在一个早期就启动的终端里——那时 PATH 还是旧的，
+    # 会把「项目自带 ffmpeg 就位」误报成「不在 PATH」，甚至报出搬家前的旧盘符
+    # （2026-10-30 迁移后实测：项目在 F:，体检却打印 D: 的 ffmpeg）。
+    ff = ensure_ffmpeg_on_path()
     print(f"  {'[√]' if ff else '[!]'} ffmpeg: {ff or '不在 PATH（tools/快速安装ffmpeg.py）'}")
 
 

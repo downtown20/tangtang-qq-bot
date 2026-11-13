@@ -62,10 +62,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "依赖位置.json"
 
 #: 全局配置：跨版本、跨包目录共享（升级到新解压目录时仍然认得旧依赖根）
-GLOBAL_CONFIG_PATH = (
+#  [!] 路径必须**每次都算**，不能只在 import 时定死：测试要能把这一份指到临时目录
+#   （否则一台装过一次的机器会让「默认位置」的断言随机变红——教训 #45）。
+#   `TANGTANG_GLOBAL_CONFIG` 是给测试用的覆盖开关，正常使用不必设置。
+_DEFAULT_GLOBAL_CONFIG_PATH = (
     Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
     / "tangtang" / "依赖位置.json"
 )
+#: 兼容旧引用（只读默认值；真正的读写一律走 _global_config_path()）
+GLOBAL_CONFIG_PATH = _DEFAULT_GLOBAL_CONFIG_PATH
+
+
+def _global_config_path() -> Path:
+    env = os.environ.get("TANGTANG_GLOBAL_CONFIG", "").strip()
+    return Path(env).expanduser() if env else _DEFAULT_GLOBAL_CONFIG_PATH
 
 #: 默认依赖根——**项目内**，不是 C 盘
 DEFAULT_DEPS_ROOT = PROJECT_ROOT / "依赖"
@@ -106,8 +116,9 @@ def sync_global() -> None:
     """
     try:
         p = get_deps_root()
-        GLOBAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        GLOBAL_CONFIG_PATH.write_text(
+        gpath = _global_config_path()
+        gpath.parent.mkdir(parents=True, exist_ok=True)
+        gpath.write_text(
             json.dumps({"依赖根": str(p)}, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
@@ -135,8 +146,9 @@ def set_deps_root(path: str | os.PathLike[str]) -> Path:
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     CONFIG_PATH.write_text(text, encoding="utf-8")
     try:
-        GLOBAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        GLOBAL_CONFIG_PATH.write_text(text, encoding="utf-8")
+        gpath = _global_config_path()
+        gpath.parent.mkdir(parents=True, exist_ok=True)
+        gpath.write_text(text, encoding="utf-8")
     except OSError:
         pass
     return p
@@ -153,7 +165,7 @@ def get_deps_root() -> Path:
     cfg = _read_config()
     if cfg:
         return Path(cfg).expanduser()
-    glob = _read_json_root(GLOBAL_CONFIG_PATH)
+    glob = _read_json_root(_global_config_path())
     if glob:
         return Path(glob).expanduser()
     return DEFAULT_DEPS_ROOT
@@ -166,8 +178,8 @@ def describe_deps_root() -> str:
         return f"{get_deps_root()}（来自环境变量 {_ENV_KEY}）"
     if _read_config():
         return f"{get_deps_root()}（来自 {CONFIG_PATH.name}）"
-    if _read_json_root(GLOBAL_CONFIG_PATH):
-        return f"{get_deps_root()}（来自全局配置 {GLOBAL_CONFIG_PATH}）"
+    if _read_json_root(_global_config_path()):
+        return f"{get_deps_root()}（来自全局配置 {_global_config_path()}）"
     return f"{get_deps_root()}（默认：项目内 依赖/）"
 
 

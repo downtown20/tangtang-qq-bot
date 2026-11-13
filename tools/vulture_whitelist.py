@@ -14,7 +14,6 @@
 # 形态：裸属性访问语句（这些名字在模块顶层未绑定，赋值形态会 AttributeError）。
 
 import agent.calculator
-import agent.color_panel
 import agent.convert
 import agent.drives
 import agent.handler
@@ -29,7 +28,6 @@ import agent.sensory
 import agent.sticker
 import agent.store
 import agent.translate
-import agent.ui_anim
 import agent.web_search
 
 # ── 类 1 技能注册（8 个）
@@ -43,12 +41,8 @@ agent.translate._translate_skill   # 装饰器注册/技能函数
 agent.web_search._web_search_skill   # 装饰器注册/技能函数
 
 # ── 类 2 Qt 回调（3 个）
-agent.color_panel.mouseMoveEvent   # 框架回调
-agent.color_panel.mousePressEvent   # 框架回调
-agent.color_panel.paintEvent   # 框架回调
 
 # ── 类 3 实例属性（21 个）
-agent.color_panel._board_img   # self.X 赋值
 agent.handler._daily_like_task   # self.X 赋值
 agent.mood_tracker._db   # self.X 赋值
 agent.mood._energy_high   # self.X 赋值
@@ -71,8 +65,6 @@ agent.drives.last_release   # self.X 赋值
 agent.handler.vision_config   # self.X 赋值
 
 # ── 类 6 其他导入（3 个）
-agent.ui_anim.Property   # import 类
-agent.color_panel.QDialog   # import 类
 agent.handler._skills_mod   # import 类
 
 # ── 类 6 导入别名（2 个）
@@ -83,8 +75,6 @@ agent.health_check._sqlite3   # 模块别名/except 分支
 agent.handler.MessageHandler   # 跨模块导入
 
 # ── 类 7 类定义（5 个）
-agent.ui_anim.HoverEngine   # 类定义（子类化/框架用）
 agent.handler.MessageHandler   # 跨模块导入
 agent.personality.Person   # 类定义（子类化/框架用）
 agent.store.ReadOnlyStore   # 类定义（子类化/框架用）
-agent.ui_anim.SlideStack   # 类定义（子类化/框架用）

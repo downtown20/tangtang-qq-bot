@@ -18,7 +18,10 @@ BASE = Path(__file__).resolve().parent.parent
 INSTALLER = BASE / "tools" / "安装糖糖.py"
 
 # 与安装器 FEATURES 下标对齐
-FEAT_MEMORY, FEAT_VOICE, FEAT_VISION, FEAT_SING, FEAT_CONSOLE = 0, 1, 2, 3, 5
+FEAT_MEMORY, FEAT_VOICE, FEAT_VISION, FEAT_SING = 0, 1, 2, 3
+# 2026-11-14：「图形控制台」(5) 随 PySide6 下线，这里原先拿它当「随便一个非语音功能」，
+# 改用 FEAT_SING —— 语义相同且不会再随功能表变动而失效。
+FEAT_CONSOLE = FEAT_SING
 
 
 def _load(tmp_path: Path):

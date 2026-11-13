@@ -50,9 +50,9 @@ FEATURE_NAMES: list[str] = [
     "本地识图",             # 2
     "唱歌",                 # 3
     "读文档",               # 4
-    "图形控制台",           # 5
-    "测试工具",             # 6
-    "运维工具",             # 7
+    # 2026-11-14：原 5「图形控制台」随 PySide6 下线（用户拍板），此处不留位。
+    "测试工具",             # 5
+    "运维工具",             # 6
 ]
 
 # 具名常量——调用方写 `installed.FEAT_MEMORY` 而不是裸 `0`。
@@ -62,9 +62,11 @@ FEAT_VOICE = 1
 FEAT_VISION = 2
 FEAT_SING = 3
 FEAT_DOC = 4
-FEAT_CONSOLE = 5
-FEAT_TESTS = 6
-FEAT_OPS = 7
+# [!] 2026-11-14：`FEAT_CONSOLE = 5`（图形控制台）随 PySide6 一起下线，删掉。
+#   原「测试工具」6 → 5、原「运维工具」7 → 6，与工具/安装糖糖.py 的 FEATURES 对齐。
+#   0-4 不受影响；后移的两个都是"非模型"功能，不会让 log_missing 误报模型缺失。
+FEAT_TESTS = 5
+FEAT_OPS = 6
 
 # 列表编号（1 起）——给用户看的，与控制台/安装器里的「第 N 项」一致
 def feature_number(index: int) -> int:

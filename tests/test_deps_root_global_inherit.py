@@ -53,7 +53,9 @@ def locus(tmp_path, monkeypatch):
     other.mkdir()
 
     monkeypatch.setattr(mod, "CONFIG_PATH", local_cfg)
-    monkeypatch.setattr(mod, "GLOBAL_CONFIG_PATH", global_cfg)
+    # [!] 用环境变量而不是 patch 常量：依赖位置.py 现在每次现算全局路径
+    #   （_global_config_path()），patch 常量对另一份 importlib 实例无效。
+    monkeypatch.setenv("TANGTANG_GLOBAL_CONFIG", str(global_cfg))
     monkeypatch.setattr(mod, "DEFAULT_DEPS_ROOT", deps)
     monkeypatch.delenv("TANGTANG_DEPS_ROOT", raising=False)
     return mod, local_cfg, global_cfg, deps, other

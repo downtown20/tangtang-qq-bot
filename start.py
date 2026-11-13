@@ -3,7 +3,7 @@
 
 .bat 是纯 ASCII 内容，无法书写中文文件名（cmd 按 GBK 解析 bat，
 任何 UTF-8 变体都会乱码）。经本桥调用中文名入口：
-    python start.py console   → 启动运维控制台（运维/糖糖控制台_qt.py；2026-10-26 移入）
+    （2026-11-14：`console` 入口随 PySide6 控制台一起下线——日常请用桌面端）
     python start.py install   → 运行一键安装器（tools/安装糖糖.py）
     python start.py desktop   → 启动桌面端（desktop/release/小糖糖桌面端/小糖糖桌面端.exe）
 
@@ -31,7 +31,6 @@ for _s in (sys.stdout, sys.stderr):
 
 BASE = Path(__file__).resolve().parent
 TARGETS = {
-    "console": BASE / "运维" / "糖糖控制台_qt.py",
     "install": BASE / "tools" / "安装糖糖.py",
 }
 # 桌面端绿色版（打包发布版本.py 的 _add_desktop 把它塞进主包的同一个位置）

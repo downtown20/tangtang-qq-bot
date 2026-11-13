@@ -506,7 +506,7 @@ def _confirm_deps_root(deps_root: str | None, assume_yes: bool) -> Path:
     else:
         cur = 依赖位置.get_deps_root()
         local_cfg = 依赖位置.has_local_config()
-        global_cur = 依赖位置._read_json_root(依赖位置.GLOBAL_CONFIG_PATH)
+        global_cur = 依赖位置._read_json_root(依赖位置._global_config_path())
         # 「已配置」= 本项目有配置，或**这台机器**有全局配置（升级到新包目录时就是后者）
         configured = local_cfg or bool(global_cur)
         if configured and cur.is_dir():
@@ -652,10 +652,8 @@ GROUPS = {
         "desc": "L5 读 docx/pdf",
         "pkgs": ["python-docx>=0.8", "pdfplumber>=0.10", "PyPDF2>=3.0"],
     },
-    "控制台": {
-        "desc": "PySide6 旧式 Qt 控制台 + 图标/外观预览（桌面端不需要它，约 260MB）",
-        "pkgs": ["pyside6>=6.5"],
-    },
+    # [!] 2026-11-14：「控制台」组整条删除（pyside6 >=6.5，实测 260MB）。
+    #   日常入口是 Electron 桌面端，Qt 只用在做图标/外观预览这类开发期工具上。
     "测试": {
         "desc": "pytest 开发测试 + pyflakes undefined 门禁",
         "pkgs": ["pytest>=8.0", "pytest-asyncio>=0.24", "pyflakes>=3.0"],
@@ -678,15 +676,13 @@ FEATURES = [
     #   模式没有」，所以描述要写清它到底给什么。翻唱制作侧已整体下线，这里只剩播放。
     ("唱歌", "点歌即播随包自带的预录录音成品；播放不需要任何依赖、也不需要下载任何模型", ["唱歌"]),
     ("读文档", "docx/pdf 解析", ["文档"]),
-    # [!] 2026-11-14：默认勾选里已去掉本项。主入口是 Electron 桌面端
-    #   （desktop/release/小糖糖桌面端/），PySide6 那 ~100MB 只服务旧式 Qt 控制台
-    #   （`python start.py console`）与图标/外观预览。条目**不删**——删了会让
-    #   FEATURES 的下标整体错位（已装机器 `状态/安装清单` 记的是下标），
-    #   也会让想用 Qt 控制台的人无从勾选。改成「可选、不推荐、说清代价」。
-    ("图形控制台",
-     "旧式 Qt 控制台（python start.py console）+ 图标/外观预览，PySide6 约 260MB（含 WebEngine）。"
-     "日常请用桌面端，桌面端不需要它",
-     ["控制台"]),
+    # [!] 2026-11-14 主人拍板：「pyside6 已经完全没必要了，之前的桌面端可以抛弃了」。
+    #   图形控制台（PySide6 Qt 界面，实测 260MB）**整条移除**——日常入口是 Electron
+    #   桌面端（desktop/release/小糖糖桌面端/），Qt 那套只剩图标/外观预览这类开发期
+    #   工具，不值得让每个用户装 260MB 的 GUI 框架。
+    #   下标影响：0-4（聊天/语音/识图/唱歌/文档）不变，原 6「测试工具」→5、
+    #   原 7「运维工具」→6。运行期 agent/installed.py 的具名常量已同步；后移的
+    #   两个都是"非模型"功能，不存在误报"模型缺失"的风险。
     ("测试工具", "pytest 开发测试", ["测试"]),
     ("运维工具", "runtime_observer 观察器、体检/语音质检等脚本（选装）", ["运维"]),
 ]
@@ -719,7 +715,6 @@ DIR_CHECKS = {
     3: [("曲库 songs/（唱歌预录成品）", "songs", False, True)],
     4: [],
     5: [],
-    6: [],
 }
 
 
@@ -1740,8 +1735,6 @@ def report_ready(choices: list[int]) -> None:
     print(f"  [√] 聊天 + 记忆{'（含语义检索）' if 0 in choices else ''}")
     if 3 in choices:
         print(f"  [√] 唱歌（曲库 {_song_count()} 首，点歌即播）")
-    if 5 in choices:
-        print("  [√] 图形控制台")
     print(f"  {'[√]' if has_voice else '[ ]'} 语音：听懂语音消息 + 糖糖发语音条"
           + ("" if has_voice else "（未勾选）"))
     print(f"  {'[√]' if has_vision else '[ ]'} 识图" + ("" if has_vision else "（未勾选）"))

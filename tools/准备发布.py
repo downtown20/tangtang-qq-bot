@@ -182,7 +182,7 @@ TOOLS_KEEP_NAMES = {
     #   在仓库里根本不存在，用户跑它只会拿到「❌ 未找到 NapCat 配置文件」。
     #   2026-09-19 主人问「不是没用 napcat 了吗」时查出来的，已移入 tools/_归档/。
     #   活的对等物是下面的 配置SnowLuma.py。
-    "配置SnowLuma.py", "检查SnowLuma更新.py", "打包exe.py",
+    "配置SnowLuma.py", "检查SnowLuma更新.py", 
     # 连接自检：控制台的「连接自检」按钮按路径调它（_run_connection_check）。
     # 它把「连不上」翻译成「第几步还没做」。漏了它按钮就只会报一句"没找到"。
     # 2026-09-20 加。闸门同上（test_referenced_tools_are_whitelisted）。

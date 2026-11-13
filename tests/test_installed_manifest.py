@@ -66,7 +66,7 @@ def test_feature_constants_point_at_the_right_slots():
     assert installed.FEATURE_NAMES[installed.FEAT_VISION] == "本地识图"
     assert installed.FEATURE_NAMES[installed.FEAT_SING] == "唱歌"
     assert installed.FEATURE_NAMES[installed.FEAT_DOC] == "读文档"
-    assert installed.FEATURE_NAMES[installed.FEAT_CONSOLE] == "图形控制台"
+    assert installed.FEATURE_NAMES[installed.FEAT_TESTS] == "测试工具"  # 2026-11-14：控制台条目已删，改钉后移后的那一格
 
 
 # ═══════════════════════════════════════════════════════════
@@ -76,12 +76,13 @@ def test_feature_constants_point_at_the_right_slots():
 def test_installer_writes_the_manifest(tmp_path, monkeypatch):
     from agent import installed
     mod = _load_installer(tmp_path, monkeypatch)
-    mod.write_manifest([0, 3, 5, 7], dry_run=False)
+    # 2026-11-14：控制台条目已删，下标后移——5=测试工具、6=运维工具
+    mod.write_manifest([0, 3, 5, 6], dry_run=False)
     path = tmp_path / installed.MANIFEST_NAME
     assert path.is_file(), "安装器没写安装清单——运行期只能靠猜"
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["choices"] == [0, 3, 5, 7]
-    assert data["features"] == ["聊天+高质量记忆", "唱歌", "图形控制台", "运维工具"]
+    assert data["choices"] == [0, 3, 5, 6]
+    assert data["features"] == ["聊天+高质量记忆", "唱歌", "测试工具", "运维工具"]
 
 
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):
@@ -245,7 +246,7 @@ def test_note_never_tells_the_user_to_run_a_shell_command(tmp_path):
 
 
 @pytest.mark.parametrize("choices,expect", [
-    ([0, 3, 5, 7], "1. 聊天+高质量记忆、4. 唱歌、6. 图形控制台、8. 运维工具"),
+    ([0, 3, 6], "1. 聊天+高质量记忆、4. 唱歌、7. 运维工具"),
     ([0, 1], "1. 聊天+高质量记忆、2. 发语音+听懂语音消息"),
 ])
 def test_installed_summary_is_human_readable(tmp_path, choices, expect):
