@@ -137,9 +137,9 @@ python -m pytest tests/ -q
 
 ### 然后按顺序走
 
-1. **下载解压** —— 到 [Releases](../../releases) 下载 **`tangtang-v1.08.00.zip`**，解压到任意一个目录（这就是「项目根目录」，下面说的相对路径都以它为准）。
+1. **下载解压** —— 到 [Releases](../../releases) 下载 **`tangtang-v1.08.12.zip`**，解压到任意一个目录（这就是「项目根目录」，下面说的相对路径都以它为准）。
 
-2. **双击 `安装糖糖.bat`，勾你要的功能** —— 默认已勾好「聊天 + 高质量记忆 / 唱歌 / 图形控制台」，够用了。想要糖糖开口说话就勾上语音（约 6.5G 模型自动下载）；想让她看懂图就勾识图（约 2.5G，也可走云端、零下载）。**等它跑完**——它会装依赖、按勾选下载模型（语音约 6.5 GB）、并用 `config.example.yaml` 生成 `config.yaml`，断了网重跑不会重下已完成的。**它不下载歌曲和表情包**——那些按下文「素材准备」自备。
+2. **双击 `安装糖糖.bat`，勾你要的功能** —— 默认已勾好「聊天 + 高质量记忆 / 唱歌」，够用了。想要糖糖开口说话就勾上语音（约 6.5G 模型自动下载）；想让她看懂图就勾识图（约 2.5G，也可走云端、零下载）。**等它跑完**——它会装依赖、按勾选下载模型（语音约 6.5 GB）、并用 `config.example.yaml` 生成 `config.yaml`，断了网重跑不会重下已完成的。**它不下载歌曲和表情包**——那些按下文「素材准备」自备。
 
 3. **装 SnowLuma** —— 它是连接 QQ 所需的协议端，属于第三方项目，其许可协议不允许随本项目分发，**只能你自己下载一次**：从 [官方发布页](https://github.com/SnowLuma/SnowLuma/releases) 下载 **Windows x64** 版（**认准不带 `-lite` 的那个**——精简包不带 Node.js，下错了点启动只会看到「'node' 不是内部或外部命令」），解压到项目根目录的 `SnowLuma/` 下，解压完应是 `SnowLuma/SnowLuma-vX.Y.Z-win-x64/` 这样的文件夹。安装程序会提醒你；也可以用任意其他 OneBot 11 反向 WebSocket 实现替代。（**别放进 `onebot/`**，那是糖糖自己的代码，见下方「目录结构」。）
 
@@ -172,7 +172,7 @@ python -m pytest tests/ -q
 ## 目录结构
 
 ```text
-agent/                核心对话、记忆、人格、自治与工具模块（85 个业务模块）
+agent/                核心对话、记忆、人格、自治与工具模块（81 个业务模块）
 onebot/               糖糖自己的 OneBot 11 适配层代码（反向 WS 服务端 + HTTP 客户端）
 SnowLuma/             QQ 协议端落点——第三方程序，要你自己下载解压到这里（见上方「上手」第 3 步）
 knowledge/            知识库——糖糖可检索的背景知识，递归扫描 .md / .txt
@@ -189,7 +189,7 @@ songs/                预录歌曲（仓库只随带 4 首示例；完整曲库�
 gpt-sovits/           语音引擎与声线模型落点（勾选语音后由安装程序自动获取）
 docs/                 架构图谱、决策记录、用户手册、技术报告
 tools/                安装、诊断、维护与通用辅助脚本
-运维/                 运维脚本（Qt 图形控制台等；日常请用 desktop/ 桌面端）
+运维/                 运维脚本（诊断、体检、资源维护；界面请用 desktop/ 桌面端）
 role_card.md          人格定义第一来源（另有 michele / murasame 两张）
 config.example.yaml   配置模板（首次运行或安装时复制为 config.yaml；密钥写成 ${VAR} 引用）
 main.py               服务启动入口
@@ -224,7 +224,8 @@ main.py               服务启动入口
 
 ## 桌面端（可选）
 
-`desktop/` 是 React + Electron 的图形控制台（替代旧 Qt 控制台，旧版移入 `运维/`，功能保留）。
+`desktop/` 是 React + Electron 的图形控制台，也是**唯一的**图形界面（旧 Qt 控制台已于
+2026-11-14 整体下线，PySide6 不再是依赖）。
 **构建产物不进仓库**（`desktop/dist/`、`desktop/dist-electron/`、`desktop/release/` 都在 ignore 里），
 所以从 clone 到窗口出现，要自己构建一遍。
 
@@ -252,7 +253,7 @@ Chromium 沙箱在部分环境初始化失败会静默秒退（详见 `desktop/R
 
 ## 文档
 
-- [docs/模块地图.md](docs/模块地图.md) —— 代码地图：84 个业务模块按职责分七层，附推荐阅读路径
+- [docs/模块地图.md](docs/模块地图.md) —— 代码地图：81 个业务模块按职责分七层，附推荐阅读路径
 - [docs/架构图谱/糖糖架构图谱.html](docs/架构图谱/糖糖架构图谱.html) —— 78 个模块、160 条依赖关系的交互式图谱，按七层着色（下载后用浏览器打开，首次加载需联网取渲染库）
 - [docs/decisions/](docs/decisions/) —— 6 篇 ADR：动作信封、送达回执、永久事实归账、定时任务重试所有权……
 - [docs/开发规划/](docs/开发规划/) —— 19 篇技术设计与规划报告（不含 `归档/` 与 2 篇内部协作任务包）
@@ -274,7 +275,6 @@ Chromium 沙箱在部分环境初始化失败会静默秒退（详见 `desktop/R
 | [FlagEmbedding](https://github.com/FlagOpen/FlagEmbedding)（BGE） | 记忆与知识库的向量检索、重排序 |
 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | 语音识别 |
 | [jieba](https://github.com/fxsjy/jieba) | 中文分词 |
-| [PySide6](https://github.com/qtproject/pyside-pyside-setup) | 运维控制台（`运维/`，日常用不到；`agent/` 的外观模块也依赖它） |
 
 **架构上调研并借鉴过的**
 

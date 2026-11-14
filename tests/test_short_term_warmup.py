@@ -20,12 +20,25 @@
 已落盘（`状态/` 之类）的运行时状态该持久化（教训 #15）；**能重算的东西不该存**。
 """
 import ast
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 BOT = "10002"
+
+
+def _ts(minutes_ago: int) -> str:
+    """相对「现在」生成一个 chat_log 时间戳。
+
+    ⚠ 这里曾写死 `2026-10-25 06:00:00` 这样的日历时间，而回灌是按
+    `active_hours` 从**当下**往前推的窗口——写死的时间每过一天就更旧一点，
+    超过窗口后整个文件一起变红（2026-11-14 实测：时间戳距今 480 小时，
+    窗口 240 小时，8 条断言全炸，看着像「短时记忆结构没被填充」，
+    实际是测试自己过期了）。凡是被「距今多久」判定的数据，一律现算。
+    """
+    return (datetime.now() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @pytest.fixture
@@ -35,16 +48,16 @@ def memory(store):
 
 
 def _seed_group(store):
-    store.insert_chat("10001", "大家好呀", "888", False, timestamp="2026-10-25 06:00:00")
-    store.insert_chat("10001", "早上好", "888", True, timestamp="2026-10-25 06:00:05")
-    store.insert_chat("10002", "那我呢", "888", False, timestamp="2026-10-25 06:00:09")
+    store.insert_chat("10001", "大家好呀", "888", False, timestamp=_ts(11))
+    store.insert_chat("10001", "早上好", "888", True, timestamp=_ts(10))
+    store.insert_chat("10002", "那我呢", "888", False, timestamp=_ts(9))
     store.get_or_create_person("10001", "小明")
     store.get_or_create_person("10002", "小红")
 
 
 def _seed_private(store):
-    store.insert_chat("20001", "私聊一句", "", False, timestamp="2026-10-25 06:01:00")
-    store.insert_chat("20001", "私聊回一句", "", True, timestamp="2026-10-25 06:01:05")
+    store.insert_chat("20001", "私聊一句", "", False, timestamp=_ts(8))
+    store.insert_chat("20001", "私聊回一句", "", True, timestamp=_ts(7))
     store.get_or_create_person("20001", "小刚")
 
 
@@ -118,7 +131,7 @@ class TestWarmupBoundaries:
         """框架合成行（「【同时有 N 个人找你…】」）是提示词不是聊天，
         回灌进来她会把系统提示当成自己或对方说过的话"""
         store.insert_chat("10001", "【同时有 3 个人找你，请回复主人】", "888", False,
-                          timestamp="2026-10-25 06:02:00")
+                          timestamp=_ts(6))
         with store._connect() as conn:
             conn.execute("UPDATE chat_log SET is_synthetic=1 WHERE qq_id='10001'")
             conn.commit()
@@ -129,7 +142,7 @@ class TestWarmupBoundaries:
 
     def test_excludes_old_messages(self, store, memory):
         """超出 active_hours 的旧会话不回灌——全量回灌会拖慢启动，且旧窗口没价值"""
-        store.insert_chat("10001", "很久以前", "999", False, timestamp="2026-01-01 06:00:00")
+        store.insert_chat("10001", "很久以前", "999", False, timestamp=_ts(60 * 24 * 40))
         memory.warm_short_term_from_chat_log(bot_qq=BOT, active_hours=24)
         assert "999" not in memory.short_term
 
@@ -146,7 +159,7 @@ class TestWarmupBoundaries:
     def test_missing_person_falls_back_to_qq(self, store, memory):
         """people 表里没这个人时用 QQ 号兜底，不抛异常"""
         store.insert_chat("29999", "没有档案的人", "888", False,
-                          timestamp="2026-10-25 06:03:00")
+                          timestamp=_ts(5))
         memory.warm_short_term_from_chat_log(bot_qq=BOT, active_hours=240)
         entries = [e for e in memory.short_term.get("888") or []
                    if e["qq_id"] == "29999"]

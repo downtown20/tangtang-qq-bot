@@ -209,25 +209,73 @@ def test_dry_run_shows_which_wheel_would_be_installed(tmp_path, monkeypatch, cap
 
 def test_cuda_torchaudio_is_soft_so_a_deleted_dev_wheel_cannot_break_install(
         tmp_path, monkeypatch):
-    """cu 档的 torchaudio 是 dev 轮子（cp310-win 没有 2.13 稳定轮），只能算软增补。"""
+    """cu 档的 torchaudio 只能算软增补：装不上不许把整个安装判成失败。
+
+    ⚠ 2026-11-14 改口径：原先这里钉死 `torchaudio==2.11.0.dev20260727+cu130`。
+    **那个 dev 轮子已被上游删除**（真机安装器实测 `Could not find a version that
+    satisfies …`），钉死版本号等于把「这条闸门会随上游删档静默变红」写进测试。
+    现在钉的是**性质**而不是那一串数字：属于软增补、指向 cu130、且**不许再钉 dev 轮**
+    （dev 轮没有留存保证，今天能下不代表明天能下）。
+    """
     mod = _load(tmp_path)
     soft = mod.torch_soft_spec("cuda")
     assert soft is not None
-    assert soft[0] == ["torchaudio==2.11.0.dev20260727+cu130"]
-    assert mod.torch_soft_spec("cpu") is None, "cpu 档的 torchaudio 是稳定轮，走硬安装"
-    assert "torchaudio==2.9.1+xpu" in mod.TORCH_VARIANTS["xpu"]["pkgs"], \
-        "xpu 档有匹配的稳定 torchaudio，不该降级成软增补"
+    assert soft[0], "cu 档的软增补列表不该是空的"
+    assert all("torchaudio" in p for p in soft[0]), soft[0]
+    assert any("+cu130" in p for p in soft[0]), \
+        f"cu 档的 torchaudio 要指向 cu130 变体，实际 {soft[0]}"
+
+    # 三档统一口径（2026-11-14）：torchaudio 一律 soft，三档都有——装不装由
+    # install_groups 按「是不是语音组」决定。原来只有 CUDA 档这么写，xpu / cpu
+    # 两档把它塞在 `pkgs` 主清单里，于是「只勾第 1 项」的用户也被装上语音侧的库。
+    for variant, want in (("cuda", "+cu130"), ("xpu", "+xpu"), ("cpu", "")):
+        spec = mod.torch_soft_spec(variant)
+        assert spec is not None, f"{variant} 档没有声明 soft_pkgs"
+        assert all("torchaudio" in p for p in spec[0]), (variant, spec[0])
+        if want:
+            assert any(want in p for p in spec[0]), (variant, spec[0])
+        # 软增补**不许**混进主清单：混进去就等于硬依赖（装不上即中断）
+        assert not any("torchaudio" in p for p in mod.TORCH_VARIANTS[variant]["pkgs"]), \
+            f"{variant} 档的 torchaudio 又回到 pkgs 里了——那会连带装给「记忆」组"
+
+    # 上游会删 dev 轮：任何一档都不许再钉 .dev
+    for variant in ("cuda", "xpu", "cpu"):
+        spec = mod.torch_soft_spec(variant)
+        assert not any(".dev" in p for p in (spec[0] if spec else [])), (
+            f"{variant} 档的 torchaudio 又钉成 dev 轮了：{spec[0]} —— dev 轮会被上游删，"
+            "安装器随之报「找不到匹配版本」。宁可用稳定轮或让它软失败")
 
     class _R:
         def __init__(self, rc):
             self.returncode = rc
 
+    # 场景：软增补里任何一个 torchaudio **装不上**（上游删档 / 网络不通 / 无匹配轮）
+    # ⚠ 判据必须只认「要装的包名」这一格。用宽子串 `"torchaudio" in c` 会撞上
+    #   pytest 的 tmp_path —— 它里面带着测试函数名（`…test_cuda_torchaudio_is_soft_s0`），
+    #   于是 `--cache-dir <tmp>` 这条也命中，**每条** pip 命令都被判成失败，
+    #   断言变成「测了但测的是另一样东西」。
     def _fake_run(cmd, **kw):
-        return _R(1 if any("torchaudio" in c and "dev" in c for c in cmd) else 0)
+        return _R(1 if any(isinstance(c, str) and c.startswith("torchaudio==") for c in cmd)
+                  else 0)
 
+    _fake_machine(monkeypatch, mod,
+                  nvidia=(True, "NVIDIA GeForce RTX 5070", 120), torch_dev=None)
     monkeypatch.setattr(mod.subprocess, "run", _fake_run)
-    assert mod.install_groups(["记忆"], dry_run=False, variant="cuda") is True, \
-        "dev 轮子 404 不该把整个安装判成失败（torch 本体已可用）"
+    # ⚠ 必须用「语音」组：2026-11-14 起 torchaudio 只随 `audio=True` 的组装
+    #   （`install_groups` 里 `torch_soft_spec(vname) if (wants_torch and wants_audio)`）。
+    #   用「记忆」组测软增补，soft_torch 恒为 None —— 那条路径压根不会被执行，
+    #   断言 True 是白拿的（教训 #42：接在死路径上的尺子）。
+    assert mod.install_groups(["语音"], dry_run=False, variant="cuda") is True, \
+        "软增补的 torchaudio 装不上不该把整个安装判成失败（torch 本体已可用）"
+
+    # 对照：同一台机器、同一组，「记忆」组根本不该去装 torchaudio
+    printed = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a))))
+    assert mod.install_groups(["记忆"], dry_run=True, variant="cuda") is True
+    joined = "\n".join(printed)
+    assert "torchaudio" not in joined, (
+        "「记忆」组只要 torch 跑 BGE，不该把语音侧的 torchaudio 一并装上"
+        "（这是 2026-11-14 用户报「只勾 1 顺带装了 2」的根因）")
 
 
 # ═══════════════════════════════════════════════════════════

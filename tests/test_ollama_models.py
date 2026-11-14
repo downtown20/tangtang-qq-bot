@@ -39,6 +39,18 @@ import pytest
 from tools import desktop_bridge as bridge
 
 
+@pytest.fixture(autouse=True)
+def _pretend_port_open(monkeypatch):
+    """把本机 TCP 预检打成「端口通」，让用例走到它真正要测的 HTTP 逻辑。
+
+    2026-11-14：`api_ollama_models` 在发 HTTP 之前先做 0.4s 的 TCP 预检（本机端点
+    没启动时直接返回一句人话，避免拖住云端档位）。测试机上 11434 通常**本来就没开**，
+    于是所有用例都被短路在预检分支——测的是一条分支，却以为是另一条。
+    需要测预检分支的用例在自身内部再覆盖一次即可（后设的赢）。
+    """
+    monkeypatch.setattr(bridge, "_port_open", lambda *a, **k: True)
+
+
 class _Resp:
     def __init__(self, data, status=200):
         self._data = data
@@ -113,7 +125,12 @@ def test_vision_falls_back_to_name_hint(monkeypatch):
 
 
 def test_unreachable_ollama_reports_error_not_raise(monkeypatch):
-    """Ollama 没启动：返回 ok=False + 原因，界面可以显示「拉不到」。"""
+    """Ollama 没启动：返回 ok=False + 原因，界面可以显示「拉不到」。
+
+    ⚠ 必须先把 TCP 预检打成「端口通」，否则走的是预检那条分支（见下一条测试），
+    这条就测不到它想测的东西——「HTTP 层 ConnectError 不往上抛」。
+    """
+    monkeypatch.setattr(bridge, "_port_open", lambda *a, **k: True)
 
     def boom(*args, **kwargs):
         raise httpx.ConnectError("connection refused")
@@ -123,6 +140,28 @@ def test_unreachable_ollama_reports_error_not_raise(monkeypatch):
     assert out["ok"] is False
     assert out["models"] == []
     assert "连不上 Ollama" in out["error"]
+
+
+def test_closed_port_is_reported_before_any_http(monkeypatch):
+    """本机端口不通时先走预检分支，一句人话，且**一次 HTTP 都不发**。
+
+    这条是与上一条配对的分支覆盖：预检短路是 2026-10-28 加的（真机上 Ollama 没启动
+    会让「选模型」下拉转圈 6 秒，还连带拖住云端档位）。两处错误文案不同，但都必须
+    含「连不上」——界面只按这一句判「拉不到」。
+    """
+    monkeypatch.setattr(bridge, "_port_open", lambda *a, **k: False)
+    seen = {"get": 0}
+
+    def counting_get(*args, **kwargs):
+        seen["get"] += 1
+        raise AssertionError("预检已经判定不通，不该再发 HTTP")
+
+    monkeypatch.setattr(httpx, "get", counting_get)
+    out = bridge.api_ollama_models({"host": "http://127.0.0.1:11434"})
+    assert out["ok"] is False
+    assert out["models"] == []
+    assert "连不上" in out["error"]
+    assert seen["get"] == 0, "预检分支必须短路掉 HTTP 请求"
 
 
 def test_missing_models_list_is_reported(monkeypatch):

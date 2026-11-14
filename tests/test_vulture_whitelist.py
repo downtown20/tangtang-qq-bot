@@ -28,6 +28,17 @@ ROOT = Path(__file__).parent.parent
 WHITELIST = ROOT / 'tools' / 'vulture_whitelist.py'   # 2026-10-15 T55：随诊断脚本移入 tools/
 
 
+def _agent_uses_qt():
+    '''`agent/` 里还有没有 Qt 子类（PySide6 已于 2026-11-14 整体下线）。
+
+    只有还存在 GUI 框架时，「框架回调名静态分析到不了 → 必须白名单」这条
+    才成立。判据看的是**源码里的框架导入**，不是「Qt 曾在这」的记忆。
+    '''
+    pat = re.compile(r'^\s*(?:from|import)\s+(?:PySide6|PyQt5|PyQt6|tkinter)\b', re.M)
+    return any(pat.search(p.read_text(encoding='utf-8', errors='ignore'))
+               for p in (ROOT / 'agent').glob('*.py'))
+
+
 def _vulture(*extra, confidence='60'):
     args = [sys.executable, '-m', 'vulture', 'agent/']
     args += [str(p) for p in extra]
@@ -88,11 +99,17 @@ class TestWhitelistScope:
                 bad.append('%s.%s (not bound in that module)' % (mod, name))
         assert not bad, 'whitelist entries not backed by their source: %s' % bad
 
-    def test_covers_all_four_categories(self):
+    def test_covers_all_categories(self):
         text = WHITELIST.read_text(encoding='utf-8')
         decls = re.findall(r'^agent\.[\w.]+\.(\w+)\s*(?:#.*)?$', text, re.M)
         assert any(n.endswith('_skill') for n in decls), 'no skill-registration entry'
-        assert any(n in self.QT for n in decls), 'no Qt-callback entry'
+        # Qt 回调类于 2026-11-14 退休：PySide6 图形控制台整体下线，`agent/` 里
+        # 已无任何 Qt 子类，也就不存在「框架会调、静态分析到不了」的回调方法。
+        # 刻意写成**条件断言**而不是删掉——哪天 agent/ 重新引入 Qt（或别的 GUI
+        # 框架），这条要求得自己回来。整条断言删掉的话，闸门会被「下线」顺手带成
+        # 永久哑巴，那是教训 #30 的变体。
+        if _agent_uses_qt():
+            assert any(n in self.QT for n in decls), 'no Qt-callback entry'
         assert len(decls) >= 20, 'whitelist suspiciously small (%d)' % len(decls)
 
     def test_is_far_smaller_than_the_hit_set(self):

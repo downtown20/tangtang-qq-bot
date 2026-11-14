@@ -140,29 +140,14 @@ def _isolate_global_deps_config(tmp_path, monkeypatch):
     yield
 
 
-# ── 2026-11-14：依赖目录里的 jieba_fast 是坏的，测试环境直接挡掉 ──────────
-# `依赖\site-packages\jieba_fast` 缺编译扩展 `_jieba_fast_functions_py3`，
-# import 链在 finalseg 就炸。项目本身有「jieba_fast → 纯 jieba」的回退，
-# 但那是捕获 ImportError；这台机器上抛的是 ModuleNotFoundError 的子类（也在
-# ImportError 家族里，可被捕获），问题出在**测试直接 import jieba_fast** 的地方。
-# 用 meta_path 挡掉它，让测试与运行期走同一条纯 jieba 路径——
-# 这是在测试环境里复现"没装 jieba-fast 的机器"的真实形态，不是掩盖问题。
-class _BlockBrokenJiebaFast:
-    """让 `import jieba_fast` 立即失败（模拟未安装），强制走纯 jieba。"""
-
-    _prefix = "jieba_fast"
-
-    def find_spec(self, fullname, path=None, target=None):  # PEP 451
-        if fullname == self._prefix or fullname.startswith(self._prefix + "."):
-            raise ImportError(
-                "本机依赖目录里的 jieba_fast 缺 C 扩展（_jieba_fast_functions_py3），"
-                "测试环境按「未安装」处理，改走纯 jieba")
-        return None
-
-
-import sys as _sys
-
-if not any(isinstance(m, _BlockBrokenJiebaFast) for m in _sys.meta_path):
-    _sys.meta_path.insert(0, _BlockBrokenJiebaFast())
-for _m in [k for k in list(_sys.modules) if k == "jieba_fast" or k.startswith("jieba_fast.")]:
-    _sys.modules.pop(_m, None)
+# ── 2026-11-14（第二版）：这里原有一个屏蔽 jieba_fast 的 meta_path 钩子，已删除 ──
+#
+# 首版钩子在 `find_spec` 里 raise ImportError，想把坏包当「未安装」。实测两个问题：
+#   1) `importlib.util.find_spec()` 是**探测**语义，不是导入语义。抛异常不等于
+#      「视为不存在」，而是把探测本身炸掉——`gpt-sovits/start_api_patched.py:23`
+#      正是用它判断装没装，于是 tests/test_gpt_launcher*.py 在**收集期**就 ERROR。
+#   2) 前提本身不成立：Python 3.10 的 site-packages 里只有纯 `jieba 0.42.1`，
+#      `find_spec('jieba_fast')` 本来就返回 None。项目「jieba_fast → 纯 jieba」
+#      的回退路径**已经在被真实地走到**，不需要再伪造。
+#
+# 真正的形态就是「没装 jieba-fast」，让 find_spec 自然返回 None 即可。
